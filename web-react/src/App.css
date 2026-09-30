@@ -223,15 +223,33 @@ body {
 /* Tape specific */
 .tape-table td {
     padding: 12px 16px;
-    border-bottom: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+    font-size: 15px;
+    font-weight: 500;
 }
-.row-up td { color: var(--semantic-up); }
-.row-down td { color: var(--semantic-down); }
+.row-up td { 
+    color: #34d399; 
+    text-shadow: 0 0 10px rgba(16, 185, 129, 0.6);
+}
+.row-down td { 
+    color: #fb7185; 
+    text-shadow: 0 0 10px rgba(244, 63, 94, 0.6);
+}
 
 /* Flash Animations */
-.flash-up { background-color: rgba(16, 185, 129, 0.15) !important; border-radius: 8px;}
-.flash-down { background-color: rgba(244, 63, 94, 0.15) !important; border-radius: 8px;}
-.tr-transition { transition: background-color 0.4s ease-out; }
+@keyframes flashBuy {
+    0% { background-color: rgba(16, 185, 129, 0.25); }
+    100% { background-color: rgba(16, 185, 129, 0.05); }
+}
+
+@keyframes flashSell {
+    0% { background-color: rgba(244, 63, 94, 0.25); }
+    100% { background-color: rgba(244, 63, 94, 0.05); }
+}
+
+.flash-up { animation: flashBuy 1.2s ease-out forwards !important; border-radius: 6px; }
+.flash-down { animation: flashSell 1.2s ease-out forwards !important; border-radius: 6px; }
+.tr-transition { transition: all 0.3s ease; }
 
 .middle-column {
     display: flex;
