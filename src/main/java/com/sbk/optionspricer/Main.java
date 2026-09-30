@@ -1,5 +1,10 @@
 package com.sbk.optionspricer;
 
+import com.sbk.optionspricer.models.tree.AmericanTreePricer;
+import com.sbk.optionspricer.models.pde.CrankNicolsonPricer;
+import com.sbk.optionspricer.risk.greeks.HigherOrderGreeks;
+import com.sbk.optionspricer.risk.greeks.AnalyticalHigherGreeks;
+
 /**
  * Demonstrates the full pricing engine:
  *   1. Black-Scholes price + Greeks for a sample option
@@ -39,6 +44,14 @@ public class Main {
         System.out.printf("Theta (per day):    %.4f%n", callGreeks.theta() / 365);
         System.out.printf("Rho (per 1%% rate):  %.4f%n", callGreeks.rho() / 100);
 
+        System.out.println("\n=== Higher-Order Greeks (Call) ===");
+        HigherOrderGreeks higherGreeks = AnalyticalHigherGreeks.calculate(OptionType.CALL, params);
+        System.out.printf("Vanna (dDelta/dVol): %.4f%n", higherGreeks.vanna());
+        System.out.printf("Volga (dVega/dVol):  %.4f%n", higherGreeks.volga());
+        System.out.printf("Charm (dDelta/dT):   %.4f%n", higherGreeks.charm());
+        System.out.printf("Speed (dGamma/dS):   %.6f%n", higherGreeks.speed());
+        System.out.printf("Color (dGamma/dT):   %.4f%n", higherGreeks.color());
+
         System.out.println("\n=== Monte Carlo Cross-Check (Call) ===");
         MonteCarloPricer.PricingResult mcResult = MonteCarloPricer.price(OptionType.CALL, params, 500_000, 42L);
         System.out.printf("Monte Carlo price: %.4f (+/- %.4f, 95%% CI)%n", mcResult.price(), mcResult.confidenceInterval95());
@@ -53,6 +66,18 @@ public class Main {
                 callPrice, params.volatility() * 100);
         double solvedVol = ImpliedVolatilitySolver.solve(OptionType.CALL, params, callPrice);
         System.out.printf("Solver recovered: %.4f%% volatility%n", solvedVol * 100);
+
+        System.out.println("\n=== Trinomial Tree Pricing (American vs European) ===");
+        double amCallPrice = AmericanTreePricer.price(OptionType.CALL, params, 500);
+        double amPutPrice = AmericanTreePricer.price(OptionType.PUT, params, 500);
+        System.out.printf("American Call price (500 steps): %.4f (Early exercise rarely optimal for non-dividend calls)%n", amCallPrice);
+        System.out.printf("American Put price (500 steps):  %.4f (Should be >= European Put %.4f due to early exercise premium)%n", amPutPrice, putPrice);
+
+        System.out.println("\n=== Crank-Nicolson PDE Pricing (American) ===");
+        double pdeAmCall = CrankNicolsonPricer.price(OptionType.CALL, params, 500, 500, true);
+        double pdeAmPut = CrankNicolsonPricer.price(OptionType.PUT, params, 500, 500, true);
+        System.out.printf("PDE American Call (500x500 grid): %.4f%n", pdeAmCall);
+        System.out.printf("PDE American Put (500x500 grid):  %.4f%n", pdeAmPut);
 
         System.out.println("\n=== Timing Benchmark (measured, not asserted) ===");
         int iterations = 100_000;
