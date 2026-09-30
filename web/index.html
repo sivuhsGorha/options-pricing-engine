@@ -3,85 +3,91 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HFT Options Pricing Terminal</title>
-    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <title>Institutional Options Engine</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Roboto+Mono:wght@500&display=swap" rel="stylesheet">
     <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <div class="hud-overlay"></div>
-    <div class="app-container">
-        <!-- Header -->
-        <header class="cyber-header">
-            <div class="logo">
-                <div class="pulse-ring"></div>
-                <h1>QUANT<span class="neon-blue">TERMINAL</span> <span class="version">v9.4</span></h1>
+    <!-- Top Header -->
+    <header class="sys-header">
+        <div class="sys-title">SBK Options Pricing Engine</div>
+        <div class="sys-status">
+            <span class="status-dot"></span>
+            <span class="status-text">CONNECTED</span>
+            <span class="status-ping" id="latency">0ms</span>
+        </div>
+    </header>
+
+    <!-- Main Grid Layout -->
+    <div class="layout-grid">
+        
+        <!-- Left Panel: Risk Matrix -->
+        <div class="panel risk-panel">
+            <div class="panel-header">PORTFOLIO RISK MATRIX</div>
+            <div class="panel-content">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>METRIC</th>
+                            <th class="align-right">VALUE</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr id="row-delta">
+                            <td>NET DELTA</td>
+                            <td class="align-right mono" id="val-delta">--</td>
+                        </tr>
+                        <tr id="row-gamma">
+                            <td>NET GAMMA</td>
+                            <td class="align-right mono" id="val-gamma">--</td>
+                        </tr>
+                        <tr id="row-vega">
+                            <td>NET VEGA</td>
+                            <td class="align-right mono" id="val-vega">--</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <div class="margin-block" id="margin-block">
+                    <div class="margin-label">SPAN INITIAL MARGIN</div>
+                    <div class="margin-value mono" id="val-margin">--</div>
+                </div>
+
+                <div class="panel-header mt-auto">SYSTEM LOG</div>
+                <div class="log-container" id="sys-logs">
+                    <div class="log-entry"><span class="log-time">[12:00:00]</span> Engine started.</div>
+                </div>
             </div>
-            <div class="status-indicator">
-                <div class="data-stream">SYS_OP_NORMAL</div>
-                <div class="latency-box">LATENCY: <span id="latency" class="neon-green">0.07</span> µs</div>
+        </div>
+
+        <!-- Center Panel: Volatility Surface -->
+        <div class="panel chart-panel">
+            <div class="panel-header">SABR IMPLIED VOLATILITY SURFACE</div>
+            <div class="panel-content no-padding">
+                <div id="volatilityChart"></div>
             </div>
-        </header>
+        </div>
 
-        <!-- Main Content Grid -->
-        <main class="dashboard-grid">
-            
-            <!-- Left Panel: Live Risk -->
-            <section class="panel risk-panel">
-                <div class="panel-header">
-                    <h2><span class="bracket">[</span> RISK MATRIX <span class="bracket">]</span></h2>
-                    <div class="blinking-dot"></div>
-                </div>
-                
-                <div class="metrics-grid">
-                    <div class="metric-card delta">
-                        <span class="label">NET DELTA</span>
-                        <span class="value" id="netDelta">--</span>
-                        <div class="scanline"></div>
-                    </div>
-                    <div class="metric-card gamma">
-                        <span class="label">NET GAMMA</span>
-                        <span class="value" id="netGamma">--</span>
-                    </div>
-                    <div class="metric-card vega">
-                        <span class="label">NET VEGA</span>
-                        <span class="value" id="netVega">--</span>
-                    </div>
-                </div>
-
-                <div class="margin-card alert-state">
-                    <span class="label">SPAN INITIAL MARGIN</span>
-                    <span class="value" id="spanMargin">--</span>
-                    <div class="progress-bar"><div class="fill"></div></div>
-                </div>
-                
-                <div class="terminal-log">
-                    <div class="log-header">SYS.LOG</div>
-                    <ul id="liveLogs">
-                        <li>[SYSTEM] Engine initialized...</li>
-                        <li>[NETWORK] Solarflare onload bound</li>
-                    </ul>
-                </div>
-            </section>
-
-            <!-- Center Panel: 3D Volatility Surface -->
-            <section class="panel chart-panel">
-                <div class="panel-header">
-                    <h2><span class="bracket">[</span> SABR 3D VOLATILITY SURFACE <span class="bracket">]</span></h2>
-                </div>
-                <div id="volatilityChart" class="chart-container"></div>
-            </section>
-            
-            <!-- Right Panel: Live Feed Simulator -->
-            <section class="panel feed-panel">
-                <div class="panel-header">
-                    <h2><span class="bracket">[</span> LIVE TAPE <span class="bracket">]</span></h2>
-                </div>
-                <div class="tape-container" id="tapeFeed">
-                    <!-- Javascript will populate this -->
-                </div>
-            </section>
-        </main>
+        <!-- Right Panel: Live Tape -->
+        <div class="panel tape-panel">
+            <div class="panel-header">LIVE MARKET TAPE</div>
+            <div class="panel-content no-padding">
+                <table class="data-table tape-table">
+                    <thead>
+                        <tr>
+                            <th>INSTRUMENT</th>
+                            <th class="align-right">SIZE</th>
+                            <th class="align-right">PRICE</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tape-body">
+                        <!-- JS generated rows -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        
     </div>
 
     <script src="app.js"></script>
