@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HFT Options Pricing Terminal</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="hud-overlay"></div>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="cyber-header">
+            <div class="logo">
+                <div class="pulse-ring"></div>
+                <h1>QUANT<span class="neon-blue">TERMINAL</span> <span class="version">v9.4</span></h1>
+            </div>
+            <div class="status-indicator">
+                <div class="data-stream">SYS_OP_NORMAL</div>
+                <div class="latency-box">LATENCY: <span id="latency" class="neon-green">0.07</span> µs</div>
+            </div>
+        </header>
+
+        <!-- Main Content Grid -->
+        <main class="dashboard-grid">
+            
+            <!-- Left Panel: Live Risk -->
+            <section class="panel risk-panel">
+                <div class="panel-header">
+                    <h2><span class="bracket">[</span> RISK MATRIX <span class="bracket">]</span></h2>
+                    <div class="blinking-dot"></div>
+                </div>
+                
+                <div class="metrics-grid">
+                    <div class="metric-card delta">
+                        <span class="label">NET DELTA</span>
+                        <span class="value" id="netDelta">--</span>
+                        <div class="scanline"></div>
+                    </div>
+                    <div class="metric-card gamma">
+                        <span class="label">NET GAMMA</span>
+                        <span class="value" id="netGamma">--</span>
+                    </div>
+                    <div class="metric-card vega">
+                        <span class="label">NET VEGA</span>
+                        <span class="value" id="netVega">--</span>
+                    </div>
+                </div>
+
+                <div class="margin-card alert-state">
+                    <span class="label">SPAN INITIAL MARGIN</span>
+                    <span class="value" id="spanMargin">--</span>
+                    <div class="progress-bar"><div class="fill"></div></div>
+                </div>
+                
+                <div class="terminal-log">
+                    <div class="log-header">SYS.LOG</div>
+                    <ul id="liveLogs">
+                        <li>[SYSTEM] Engine initialized...</li>
+                        <li>[NETWORK] Solarflare onload bound</li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- Center Panel: 3D Volatility Surface -->
+            <section class="panel chart-panel">
+                <div class="panel-header">
+                    <h2><span class="bracket">[</span> SABR 3D VOLATILITY SURFACE <span class="bracket">]</span></h2>
+                </div>
+                <div id="volatilityChart" class="chart-container"></div>
+            </section>
+            
+            <!-- Right Panel: Live Feed Simulator -->
+            <section class="panel feed-panel">
+                <div class="panel-header">
+                    <h2><span class="bracket">[</span> LIVE TAPE <span class="bracket">]</span></h2>
+                </div>
+                <div class="tape-container" id="tapeFeed">
+                    <!-- Javascript will populate this -->
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
