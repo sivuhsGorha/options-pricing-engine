@@ -25,27 +25,32 @@ public class ImpliedVolatilitySolver {
     private static final double VOL_UPPER_BOUND = 5.0; // 500% annualized vol as a practical ceiling
 
     public static double solve(OptionType type, OptionParameters knownParams, double marketPrice) {
-        double vol = newtonRaphson(type, knownParams, marketPrice);
+        double[] scratch = new double[5];
+        return solve(type, knownParams.spot(), knownParams.strike(), knownParams.timeToExpiry(), knownParams.riskFreeRate(), knownParams.dividendYield(), marketPrice, scratch);
+    }
+
+    public static double solve(OptionType type, double spot, double strike, double timeToExpiry, double riskFreeRate, double dividendYield, double marketPrice, double[] scratchGreeks) {
+        double vol = newtonRaphson(type, spot, strike, timeToExpiry, riskFreeRate, dividendYield, marketPrice, scratchGreeks);
         if (!Double.isNaN(vol)) {
             return vol;
         }
         // Newton-Raphson failed to converge cleanly — fall back to bisection.
-        return bisection(type, knownParams, marketPrice);
+        return bisection(type, spot, strike, timeToExpiry, riskFreeRate, dividendYield, marketPrice);
     }
 
-    private static double newtonRaphson(OptionType type, OptionParameters knownParams, double marketPrice) {
+    private static double newtonRaphson(OptionType type, double spot, double strike, double timeToExpiry, double riskFreeRate, double dividendYield, double marketPrice, double[] scratchGreeks) {
         double vol = 0.3; // reasonable starting guess: 30% annualized vol
 
         for (int i = 0; i < MAX_NEWTON_ITERATIONS; i++) {
-            OptionParameters trial = withVolatility(knownParams, vol);
-            double price = BlackScholesPricer.price(type, trial);
+            double price = BlackScholesPricer.price(type, spot, strike, timeToExpiry, riskFreeRate, vol, dividendYield);
             double diff = price - marketPrice;
 
             if (Math.abs(diff) < PRICE_TOLERANCE) {
                 return vol;
             }
 
-            double vega = BlackScholesPricer.greeks(type, trial).vega();
+            BlackScholesPricer.greeks(type, spot, strike, timeToExpiry, riskFreeRate, vol, dividendYield, scratchGreeks);
+            double vega = scratchGreeks[2];
             if (Math.abs(vega) < MIN_VEGA) {
                 return Double.NaN; // signal: too unstable, caller should fall back
             }
@@ -58,15 +63,15 @@ public class ImpliedVolatilitySolver {
         return Double.NaN; // did not converge within the iteration budget
     }
 
-    private static double bisection(OptionType type, OptionParameters knownParams, double marketPrice) {
+    private static double bisection(OptionType type, double spot, double strike, double timeToExpiry, double riskFreeRate, double dividendYield, double marketPrice) {
         double lo = VOL_LOWER_BOUND;
         double hi = VOL_UPPER_BOUND;
 
-        double priceLo = BlackScholesPricer.price(type, withVolatility(knownParams, lo)) - marketPrice;
+        double priceLo = BlackScholesPricer.price(type, spot, strike, timeToExpiry, riskFreeRate, lo, dividendYield) - marketPrice;
 
         for (int i = 0; i < MAX_BISECTION_ITERATIONS; i++) {
             double mid = (lo + hi) / 2.0;
-            double priceMid = BlackScholesPricer.price(type, withVolatility(knownParams, mid)) - marketPrice;
+            double priceMid = BlackScholesPricer.price(type, spot, strike, timeToExpiry, riskFreeRate, mid, dividendYield) - marketPrice;
 
             if (Math.abs(priceMid) < PRICE_TOLERANCE) {
                 return mid;
@@ -79,12 +84,5 @@ public class ImpliedVolatilitySolver {
             }
         }
         return (lo + hi) / 2.0; // best estimate after exhausting iteration budget
-    }
-
-    private static OptionParameters withVolatility(OptionParameters original, double newVolatility) {
-        return new OptionParameters(
-                original.spot(), original.strike(), original.timeToExpiry(),
-                original.riskFreeRate(), newVolatility, original.dividendYield()
-        );
     }
 }
