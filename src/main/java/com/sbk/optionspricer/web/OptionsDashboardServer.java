@@ -1,8 +1,5 @@
 package com.sbk.optionspricer.web;
 
-import com.sbk.optionspricer.risk.GreekAggregator;
-import com.sbk.optionspricer.risk.PortfolioPosition;
-import com.sbk.optionspricer.risk.SpanMarginSimulator;
 import com.sbk.optionspricer.volatility.SabrModel;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
@@ -18,34 +15,35 @@ import java.util.concurrent.Executors;
 /**
  * Zero-dependency embedded Web Server.
  * Exposes the Options Pricing Engine via a REST API and serves the Dashboard UI.
+ * Level 3 Update: Reads exclusively from Zero-GC Mmap State files.
  */
 public class OptionsDashboardServer {
 
-    private static final GreekAggregator riskEngine = new GreekAggregator(50000.0, 10000.0);
+    private static MmapStateReader mmapReader;
 
     public static void main(String[] args) throws Exception {
-        // Initialize some live risk
-        PortfolioPosition calls = new PortfolioPosition("SPY_CALL_500", -1000, 100);
-        calls.updateGreeks(0.50, 0.05, 10.0);
-        riskEngine.addPosition(calls);
-
-        PortfolioPosition puts = new PortfolioPosition("SPY_PUT_450", 500, 100);
-        puts.updateGreeks(-0.25, 0.03, 12.0);
-        riskEngine.addPosition(puts);
+        System.out.println("Connecting to Core Pricing Engine (Mmap IPC)...");
+        mmapReader = new MmapStateReader();
+        System.out.println("Connected.");
 
         String portEnv = System.getenv("PORT");
         int port = (portEnv != null) ? Integer.parseInt(portEnv) : 8080;
         HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
 
+        // Start Zero-Allocation Binary WebSocket server on port 8081
+        int wsPort = port + 1;
+        WebSocketDashboardServer wsServer = new WebSocketDashboardServer(wsPort, mmapReader);
+        Thread wsThread = new Thread(wsServer, "ws-server-thread");
+        wsThread.setDaemon(true);
+        wsThread.start();
+
         // Serve the UI
         server.createContext("/", new StaticFileHandler());
 
-        // REST API: Live Portfolio Risk
+        // REST API: Live Portfolio Risk (Read directly from off-heap mmap)
         server.createContext("/api/risk", (exchange -> {
             exchange.getResponseHeaders().add("Content-Type", "application/json");
             exchange.getResponseHeaders().add("Access-Control-Allow-Origin", "*");
-            
-            double margin = SpanMarginSimulator.calculateInitialMargin(riskEngine, 500.0);
             
             String json = String.format(java.util.Locale.US, "{\n" +
                     "  \"netDelta\": %.2f,\n" +
@@ -53,10 +51,10 @@ public class OptionsDashboardServer {
                     "  \"netVega\": %.2f,\n" +
                     "  \"spanMargin\": %.2f\n" +
                     "}", 
-                    riskEngine.calculateNetDelta(),
-                    riskEngine.calculateNetGamma(),
-                    riskEngine.calculateNetVega(),
-                    margin);
+                    mmapReader.getNetDelta(),
+                    mmapReader.getNetGamma(),
+                    mmapReader.getNetVega(),
+                    mmapReader.getSpanMargin());
                     
             byte[] response = json.getBytes();
             exchange.sendResponseHeaders(200, response.length);

@@ -95,5 +95,14 @@ public class Main {
         System.out.println("machine runs it — it's real, but it's not a benchmark against a");
         System.out.println("production system, and JIT warm-up means a longer run would show");
         System.out.println("a faster steady-state number than this one.");
+
+        System.out.println("\n=== Level 3 Proprietary Upgrades ===");
+        double fastExpVal = FastMath.fastExp(-0.456);
+        System.out.printf("FastMath Chebyshev exp(-0.456): %.8f%n", fastExpVal);
+
+        double[] strikes = new double[]{90.0, 95.0, 100.0, 105.0, 110.0};
+        double[] pricesSimd = new double[5];
+        VectorBlackScholesPricer.priceBatchVectorized(100.0, strikes, 0.5, 0.05, 0.25, true, pricesSimd);
+        System.out.printf("SIMD Vectorized 5-strike pricing: Call@100 = %.4f%n", pricesSimd[2]);
     }
 }
