@@ -8,7 +8,6 @@ function flashElement(id, isPositive) {
     const el = document.getElementById(id);
     if (!el) return;
     
-    // Add transition class if not present
     if (!el.classList.contains('tr-transition')) {
         el.classList.add('tr-transition');
     }
@@ -16,16 +15,14 @@ function flashElement(id, isPositive) {
     const flashClass = isPositive ? 'flash-up' : 'flash-down';
     
     el.classList.remove('flash-up', 'flash-down');
-    // Force reflow
-    void el.offsetWidth;
+    void el.offsetWidth; // trigger reflow
     el.classList.add(flashClass);
     
     setTimeout(() => {
         el.classList.remove(flashClass);
-    }, 300);
+    }, 400);
 }
 
-// 1. Fetch and update Risk Metrics
 let lastMetrics = { netDelta: null, netGamma: null, netVega: null, spanMargin: null };
 
 async function updateRiskMetrics() {
@@ -52,17 +49,16 @@ async function updateRiskMetrics() {
         if (lastMetrics.spanMargin !== data.spanMargin) {
             document.getElementById("val-margin").textContent = "$" + formatNumber(data.spanMargin);
             if (lastMetrics.spanMargin !== null) {
-                flashElement('margin-block', false); // Margin increases are bad (red)
+                flashElement('margin-block', false);
             }
             lastMetrics.spanMargin = data.spanMargin;
         }
 
     } catch (error) {
-        logToTerminal("ERR_API_FETCH_FAIL");
+        logToTerminal("Network desync: Retrying risk engine connection...");
     }
 }
 
-// 2. Fetch and render True 3D Volatility Surface
 async function render3DVolatilitySurface() {
     try {
         const response = await fetch(`${API_BASE}/surface3d`);
@@ -75,64 +71,61 @@ async function render3DVolatilitySurface() {
             y: data.y,
             z: zVols,
             type: 'surface',
-            colorscale: 'Blues', // Professional institutional color scale
-            reversescale: true,
+            colorscale: 'Portland', // A vivid, soulful heatmap
+            reversescale: false,
             showscale: false,
             contours: {
-                z: { show: true, usecolormap: true, highlightcolor: "#C9D1D9", project: { z: true } }
+                z: { show: true, usecolormap: true, highlightcolor: "#ffffff", project: { z: true } }
             }
         };
 
         const layout = {
-            paper_bgcolor: '#161B22',
-            plot_bgcolor: '#161B22',
-            font: { family: 'Inter', color: '#8B949E' },
+            paper_bgcolor: 'rgba(0,0,0,0)',
+            plot_bgcolor: 'rgba(0,0,0,0)',
+            font: { family: 'Inter', color: '#94a3b8' },
             scene: {
-                xaxis: { title: 'STRIKE', gridcolor: '#30363D', backgroundcolor: '#161B22', zerolinecolor: '#30363D' },
-                yaxis: { title: 'EXPIRY (YRS)', gridcolor: '#30363D', backgroundcolor: '#161B22', zerolinecolor: '#30363D' },
-                zaxis: { title: 'IV (%)', gridcolor: '#30363D', backgroundcolor: '#161B22', zerolinecolor: '#30363D' },
-                camera: { eye: { x: -1.5, y: -1.5, z: 1.0 } }
+                xaxis: { title: 'STRIKE', gridcolor: 'rgba(148, 163, 184, 0.1)', backgroundcolor: 'rgba(0,0,0,0)', zerolinecolor: 'rgba(148, 163, 184, 0.2)' },
+                yaxis: { title: 'EXPIRY', gridcolor: 'rgba(148, 163, 184, 0.1)', backgroundcolor: 'rgba(0,0,0,0)', zerolinecolor: 'rgba(148, 163, 184, 0.2)' },
+                zaxis: { title: 'IV (%)', gridcolor: 'rgba(148, 163, 184, 0.1)', backgroundcolor: 'rgba(0,0,0,0)', zerolinecolor: 'rgba(148, 163, 184, 0.2)' },
+                camera: { eye: { x: 1.5, y: -1.5, z: 0.8 } }
             },
-            margin: { t: 20, r: 0, l: 0, b: 20 }
+            margin: { t: 0, r: 0, l: 0, b: 0 }
         };
 
         Plotly.newPlot('volatilityChart', [trace], layout, {responsive: true, displayModeBar: false});
-        logToTerminal("SABR 3D Volatility Surface rendered (WebGL).");
+        logToTerminal("SABR Model synchronized. Surface rendered.");
 
     } catch (error) {
-        logToTerminal("ERR_SURFACE_RENDER_FAIL");
+        logToTerminal("Failed to map Volatility Surface.");
     }
 }
 
-// 3. Simulate Live Feed (Options Tape)
 const strikes = [490, 495, 500, 505, 510];
 function generateLiveTrade() {
     const isBuy = Math.random() > 0.5;
     const strike = strikes[Math.floor(Math.random() * strikes.length)];
     const price = (Math.random() * 5 + 1).toFixed(2);
-    const qty = Math.floor(Math.random() * 100) + 1;
+    const qty = Math.floor(Math.random() * 500) + 10;
     
     const tr = document.createElement("tr");
     tr.className = `tr-transition ${isBuy ? 'row-up flash-up' : 'row-down flash-down'}`;
     tr.innerHTML = `
         <td>SPY ${strike} C</td>
         <td class="align-right mono">${qty}</td>
-        <td class="align-right mono">${price}</td>
+        <td class="align-right mono">$${price}</td>
     `;
     
     const container = document.getElementById("tape-body");
     container.prepend(tr);
-    if(container.children.length > 25) {
+    if(container.children.length > 15) {
         container.removeChild(container.lastChild);
     }
     
-    // Remove flash class after render
     setTimeout(() => {
         tr.classList.remove('flash-up', 'flash-down');
-    }, 50);
+    }, 100);
 }
 
-// 4. Terminal Logger
 function logToTerminal(msg) {
     const time = new Date().toISOString().split('T')[1].substring(0, 8);
     const div = document.createElement("div");
@@ -140,17 +133,16 @@ function logToTerminal(msg) {
     div.innerHTML = `<span class="log-time">[${time}]</span> ${msg}`;
     const container = document.getElementById("sys-logs");
     container.prepend(div);
-    if(container.children.length > 10) container.removeChild(container.lastChild);
+    if(container.children.length > 8) container.removeChild(container.lastChild);
 }
 
-// Init
 document.addEventListener("DOMContentLoaded", () => {
     updateRiskMetrics();
     render3DVolatilitySurface();
     
     setInterval(updateRiskMetrics, 1000);
-    setInterval(generateLiveTrade, 200); 
+    setInterval(generateLiveTrade, 300); 
     setInterval(() => {
-        document.getElementById("latency").textContent = Math.floor(Math.random() * 5 + 10) + "ms";
+        document.getElementById("latency").textContent = Math.floor(Math.random() * 3 + 6) + "µs";
     }, 1000);
 });
