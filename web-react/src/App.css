@@ -2,7 +2,6 @@
 
 :root {
     --bg-dark: #020617;
-    --bg-gradient: radial-gradient(circle at 80% 0%, #1e293b 0%, #020617 100%);
     
     --panel-bg: rgba(15, 23, 42, 0.6);
     --panel-border: rgba(148, 163, 184, 0.1);
@@ -26,7 +25,7 @@
 }
 
 body {
-    background: var(--bg-gradient);
+    background-color: transparent;
     color: var(--text-primary);
     font-family: var(--font-ui);
     height: 100vh;
@@ -34,6 +33,27 @@ body {
     flex-direction: column;
     overflow: hidden;
     -webkit-font-smoothing: antialiased;
+}
+
+#root {
+    height: 100vh;
+    width: 100vw;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Foreground Container */
+.app-container {
+    position: relative;
+    z-index: 1; /* Above the pattern background */
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    pointer-events: none; /* Let clicks pass through to background */
+}
+
+.app-container > * {
+    pointer-events: auto; /* Re-enable pointer events for UI */
 }
 
 /* Header */
@@ -101,6 +121,10 @@ body {
     flex-direction: column;
     overflow: hidden;
     transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.chart-panel {
+    background: rgba(2, 6, 23, 0.9); /* Dimmed out background */
 }
 
 .panel:hover {
@@ -209,4 +233,68 @@ body {
 .flash-down { background-color: rgba(244, 63, 94, 0.15) !important; border-radius: 8px;}
 .tr-transition { transition: background-color 0.4s ease-out; }
 
-#volatilityChart { width: 100%; height: 100%; }
+.middle-column {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    height: 100%;
+}
+
+.main-chart {
+    flex: 3;
+    min-height: 350px;
+}
+
+.bottom-charts {
+    flex: 2;
+    display: flex;
+    gap: 24px;
+    min-height: 250px;
+}
+
+.sub-chart {
+    flex: 1;
+}
+
+#volatilityChart3D, #volatilityChartSmile, #volatilityChartTerm {
+    width: 100%;
+    height: 100%;
+    min-height: 200px;
+}
+
+.chart-header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.expand-btn {
+    background: transparent;
+    border: 1px solid rgba(148, 163, 184, 0.3);
+    color: var(--text-muted);
+    padding: 4px 12px;
+    font-size: 14px;
+    font-weight: 600;
+    text-transform: uppercase;
+    font-family: var(--font-ui);
+    cursor: pointer;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+}
+
+.expand-btn:hover {
+    color: var(--text-primary);
+    border-color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.panel.expanded {
+    position: fixed;
+    top: 24px;
+    left: 24px;
+    right: 24px;
+    bottom: 24px;
+    width: auto;
+    height: auto;
+    z-index: 1000;
+}
