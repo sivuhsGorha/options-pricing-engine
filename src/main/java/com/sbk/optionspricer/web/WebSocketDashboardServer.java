@@ -141,10 +141,16 @@ public class WebSocketDashboardServer implements Runnable {
                 frameBuffer.put((byte) 32);   // Payload length = 32 bytes (4 * 8-byte doubles)
 
                 // Write 4 off-heap doubles directly
-                frameBuffer.putDouble(mmapReader.getNetDelta());
-                frameBuffer.putDouble(mmapReader.getNetGamma());
-                frameBuffer.putDouble(mmapReader.getNetVega());
-                frameBuffer.putDouble(mmapReader.getSpanMargin());
+                try {
+                    MmapStateReader.RiskState state = mmapReader.readState();
+                    frameBuffer.putDouble(state.netDelta);
+                    frameBuffer.putDouble(state.netGamma);
+                    frameBuffer.putDouble(state.netVega);
+                    frameBuffer.putDouble(state.spanMargin);
+                } catch (IllegalStateException e) {
+                    // State unavailable, skip broadcast for this tick
+                    continue;
+                }
 
                 byte[] rawFrame = frameBuffer.array();
 

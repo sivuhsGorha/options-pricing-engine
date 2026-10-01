@@ -101,8 +101,23 @@ public class OptionsDashboardServer {
             exchange.getResponseHeaders().add("Content-Type", "application/json");
             exchange.getResponseHeaders().add("Access-Control-Allow-Origin", ALLOWED_ORIGIN);
             
-            double delta = mmapReader.getNetDelta();
-            double margin = mmapReader.getSpanMargin();
+            double delta, gamma, vega, margin;
+            try {
+                MmapStateReader.RiskState state = mmapReader.readState();
+                delta = state.netDelta;
+                gamma = state.netGamma;
+                vega = state.netVega;
+                margin = state.spanMargin;
+            } catch (IllegalStateException e) {
+                String errorJson = "{\n  \"status\": \"UNAVAILABLE\"\n}";
+                byte[] errorBytes = errorJson.getBytes();
+                exchange.sendResponseHeaders(503, errorBytes.length);
+                OutputStream os = exchange.getResponseBody();
+                os.write(errorBytes);
+                os.close();
+                return;
+            }
+
             int hedgeQty = (int) Math.round(-delta);
             double optMargin = Math.max(12500.0, margin * 0.086);
             double reductionPct = ((margin - optMargin) / margin) * 100.0;
@@ -119,8 +134,8 @@ public class OptionsDashboardServer {
                     "  \"sorAllocations\": \"EUREX: 50%% | OPTIQ: 30%% | SOLA: 20%%\"\n" +
                     "}", 
                     delta,
-                    mmapReader.getNetGamma(),
-                    mmapReader.getNetVega(),
+                    gamma,
+                    vega,
                     margin,
                     hedgeQty,
                     optMargin,

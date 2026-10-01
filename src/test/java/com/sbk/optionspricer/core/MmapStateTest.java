@@ -35,10 +35,11 @@ public class MmapStateTest {
         publisher.publishRiskState(1.5, 2.5, 3.5, 4.5);
         
         // Read it back
-        assertEquals(1.5, reader.getNetDelta());
-        assertEquals(2.5, reader.getNetGamma());
-        assertEquals(3.5, reader.getNetVega());
-        assertEquals(4.5, reader.getSpanMargin());
+        MmapStateReader.RiskState state = reader.readState();
+        assertEquals(1.5, state.netDelta);
+        assertEquals(2.5, state.netGamma);
+        assertEquals(3.5, state.netVega);
+        assertEquals(4.5, state.spanMargin);
 
         // Check if secure
         File f = new File(TEST_FILE);
@@ -55,7 +56,8 @@ public class MmapStateTest {
             MmapStateReader reader = new MmapStateReader();
             
             publisher.publishRiskState(1.0, 1.0, 1.0, 1.0);
-            assertEquals(1.0, reader.getNetDelta());
+            MmapStateReader.RiskState state = reader.readState();
+            assertEquals(1.0, state.netDelta);
             
             publisher.close();
             reader.close();

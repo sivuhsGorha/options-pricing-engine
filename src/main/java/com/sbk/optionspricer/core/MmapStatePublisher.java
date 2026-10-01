@@ -15,7 +15,10 @@ import java.lang.invoke.VarHandle;
  * is fully isolated from HTTP and JSON serialization garbage.
  */
 public class MmapStatePublisher {
-    private static final long FILE_SIZE = 32; // 4 doubles (delta, gamma, vega, margin)
+    private static final long FILE_SIZE = 56;
+    private static final long MAGIC_VERSION = 0xAAAA0001L;
+
+    private static final VarHandle VH_LONG = ValueLayout.JAVA_LONG.varHandle();
     private static final VarHandle VH_DOUBLE = ValueLayout.JAVA_DOUBLE.varHandle();
 
     private final MemorySegment mappedSegment;
@@ -46,19 +49,32 @@ public class MmapStatePublisher {
                     this.mappedSegment = channel.map(FileChannel.MapMode.READ_WRITE, 0, FILE_SIZE, arena);
                 }
             }
+            
+            // Initialize Publisher state
+            VH_LONG.setVolatile(mappedSegment, 0L, 0L); // Sequence
+            VH_LONG.setVolatile(mappedSegment, 8L, MAGIC_VERSION);
+            
         } catch (IOException e) {
             throw new RuntimeException("Failed to initialize mmap state file", e);
         }
     }
 
     /**
-     * Writes risk metrics directly to off-heap memory (Zero Allocation).
+     * Writes risk metrics directly to off-heap memory using a Seqlock for zero torn reads.
      */
     public void publishRiskState(double netDelta, double netGamma, double netVega, double spanMargin) {
-        VH_DOUBLE.setVolatile(mappedSegment, 0L, netDelta);
-        VH_DOUBLE.setVolatile(mappedSegment, 8L, netGamma);
-        VH_DOUBLE.setVolatile(mappedSegment, 16L, netVega);
-        VH_DOUBLE.setVolatile(mappedSegment, 24L, spanMargin);
+        long seq = (long) VH_LONG.getOpaque(mappedSegment, 0L);
+        seq++; // make it odd to signal write in progress
+        VH_LONG.setRelease(mappedSegment, 0L, seq);
+
+        VH_LONG.setRelease(mappedSegment, 16L, System.nanoTime()); // Heartbeat
+        VH_DOUBLE.setRelease(mappedSegment, 24L, netDelta);
+        VH_DOUBLE.setRelease(mappedSegment, 32L, netGamma);
+        VH_DOUBLE.setRelease(mappedSegment, 40L, netVega);
+        VH_DOUBLE.setRelease(mappedSegment, 48L, spanMargin);
+
+        seq++; // make it even to signal write complete
+        VH_LONG.setRelease(mappedSegment, 0L, seq);
     }
 
     public void close() {

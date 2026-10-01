@@ -10,16 +10,29 @@ import java.nio.channels.FileChannel;
 import java.lang.invoke.VarHandle;
 import com.sbk.optionspricer.core.MmapSecurityUtils;
 
-/**
- * Reads the core risk state from the memory-mapped file for Zero-GC Inter-Process Communication (IPC).
- * This runs in the Web/REST API JVM (or thread) and isolates JSON garbage from the core engine.
- */
 public class MmapStateReader {
-    private static final long FILE_SIZE = 32;
+    private static final long FILE_SIZE = 56;
+    private static final long MAGIC_VERSION = 0xAAAA0001L;
+
+    private static final VarHandle VH_LONG = ValueLayout.JAVA_LONG.varHandle();
     private static final VarHandle VH_DOUBLE = ValueLayout.JAVA_DOUBLE.varHandle();
 
     private final MemorySegment mappedSegment;
     private final Arena arena;
+
+    public static class RiskState {
+        public final double netDelta;
+        public final double netGamma;
+        public final double netVega;
+        public final double spanMargin;
+
+        public RiskState(double netDelta, double netGamma, double netVega, double spanMargin) {
+            this.netDelta = netDelta;
+            this.netGamma = netGamma;
+            this.netVega = netVega;
+            this.spanMargin = spanMargin;
+        }
+    }
 
     private String getFilePath() {
         return System.getProperty("MMAP_STATE_FILE") != null ? 
@@ -32,24 +45,8 @@ public class MmapStateReader {
         this.arena = Arena.ofShared();
         try {
             File file = new File(getFilePath());
-            File parent = file.getParentFile();
-            if (parent != null && !parent.exists()) {
-                parent.mkdirs();
-            }
-
-            // Create initial state file if absent
             if (!file.exists() || file.length() < FILE_SIZE) {
-                if (!file.exists()) {
-                    file.createNewFile();
-                }
-                MmapSecurityUtils.secureMmapFile(file.toPath());
-                try (RandomAccessFile raf = new RandomAccessFile(file, "rw")) {
-                    raf.setLength(FILE_SIZE);
-                    raf.writeDouble(-62500.0);  // netDelta
-                    raf.writeDouble(-3500.0);   // netGamma
-                    raf.writeDouble(-400000.0); // netVega
-                    raf.writeDouble(14611250.0);// spanMargin
-                }
+                throw new IllegalStateException("UNAVAILABLE");
             }
 
             try (RandomAccessFile raf = new RandomAccessFile(file, "r")) {
@@ -58,24 +55,43 @@ public class MmapStateReader {
                 }
             }
         } catch (IOException e) {
-            throw new RuntimeException("Failed to map state file for reading", e);
+            throw new IllegalStateException("UNAVAILABLE", e);
         }
     }
 
-    public double getNetDelta() {
-        return (double) VH_DOUBLE.getVolatile(mappedSegment, 0L);
-    }
+    public RiskState readState() {
+        if (mappedSegment == null) throw new IllegalStateException("UNAVAILABLE");
 
-    public double getNetGamma() {
-        return (double) VH_DOUBLE.getVolatile(mappedSegment, 8L);
-    }
+        int maxRetries = 1000;
+        for (int i = 0; i < maxRetries; i++) {
+            long seq1 = (long) VH_LONG.getAcquire(mappedSegment, 0L);
+            if ((seq1 & 1) == 1) { // odd => write in progress
+                Thread.onSpinWait();
+                continue;
+            }
 
-    public double getNetVega() {
-        return (double) VH_DOUBLE.getVolatile(mappedSegment, 16L);
-    }
+            long magic = (long) VH_LONG.getAcquire(mappedSegment, 8L);
+            if (magic != MAGIC_VERSION) {
+                throw new IllegalStateException("UNAVAILABLE");
+            }
 
-    public double getSpanMargin() {
-        return (double) VH_DOUBLE.getVolatile(mappedSegment, 24L);
+            long heartbeat = (long) VH_LONG.getAcquire(mappedSegment, 16L);
+            double delta = (double) VH_DOUBLE.getAcquire(mappedSegment, 24L);
+            double gamma = (double) VH_DOUBLE.getAcquire(mappedSegment, 32L);
+            double vega = (double) VH_DOUBLE.getAcquire(mappedSegment, 40L);
+            double margin = (double) VH_DOUBLE.getAcquire(mappedSegment, 48L);
+
+            long seq2 = (long) VH_LONG.getAcquire(mappedSegment, 0L);
+            if (seq1 == seq2) {
+                // Check stale heartbeat (older than 2 seconds)
+                if (System.nanoTime() - heartbeat > 2_000_000_000L) {
+                    throw new IllegalStateException("UNAVAILABLE");
+                }
+                return new RiskState(delta, gamma, vega, margin);
+            }
+            Thread.onSpinWait();
+        }
+        throw new IllegalStateException("UNAVAILABLE");
     }
 
     public void close() {
