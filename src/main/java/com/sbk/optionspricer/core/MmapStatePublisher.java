@@ -7,6 +7,7 @@ import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
 import java.nio.channels.FileChannel;
+import java.lang.invoke.VarHandle;
 
 /**
  * Publishes the core risk state to a memory-mapped file for Zero-GC Inter-Process Communication (IPC).
@@ -14,17 +15,30 @@ import java.nio.channels.FileChannel;
  * is fully isolated from HTTP and JSON serialization garbage.
  */
 public class MmapStatePublisher {
-    private static final String FILE_PATH = "target/quant_engine_state.dat";
     private static final long FILE_SIZE = 32; // 4 doubles (delta, gamma, vega, margin)
+    private static final VarHandle VH_DOUBLE = ValueLayout.JAVA_DOUBLE.varHandle();
 
     private final MemorySegment mappedSegment;
     private final Arena arena;
 
+    private String getFilePath() {
+        return System.getProperty("MMAP_STATE_FILE") != null ? 
+            System.getProperty("MMAP_STATE_FILE") : 
+            System.getenv("MMAP_STATE_FILE") != null ? 
+            System.getenv("MMAP_STATE_FILE") : "target/quant_engine_state.dat";
+    }
+
     public MmapStatePublisher() {
         this.arena = Arena.ofShared();
         try {
-            File file = new File(FILE_PATH);
-            file.getParentFile().mkdirs();
+            File file = new File(getFilePath());
+            if (file.getParentFile() != null) {
+                file.getParentFile().mkdirs();
+            }
+            if (!file.exists()) {
+                file.createNewFile();
+            }
+            MmapSecurityUtils.secureMmapFile(file.toPath());
             
             try (RandomAccessFile raf = new RandomAccessFile(file, "rw")) {
                 raf.setLength(FILE_SIZE); // Ensure file is right size
@@ -41,10 +55,10 @@ public class MmapStatePublisher {
      * Writes risk metrics directly to off-heap memory (Zero Allocation).
      */
     public void publishRiskState(double netDelta, double netGamma, double netVega, double spanMargin) {
-        mappedSegment.set(ValueLayout.JAVA_DOUBLE, 0, netDelta);
-        mappedSegment.set(ValueLayout.JAVA_DOUBLE, 8, netGamma);
-        mappedSegment.set(ValueLayout.JAVA_DOUBLE, 16, netVega);
-        mappedSegment.set(ValueLayout.JAVA_DOUBLE, 24, spanMargin);
+        VH_DOUBLE.setVolatile(mappedSegment, 0L, netDelta);
+        VH_DOUBLE.setVolatile(mappedSegment, 8L, netGamma);
+        VH_DOUBLE.setVolatile(mappedSegment, 16L, netVega);
+        VH_DOUBLE.setVolatile(mappedSegment, 24L, spanMargin);
     }
 
     public void close() {

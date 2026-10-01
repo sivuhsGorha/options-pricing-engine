@@ -7,22 +7,31 @@ import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
 import java.nio.channels.FileChannel;
+import java.lang.invoke.VarHandle;
+import com.sbk.optionspricer.core.MmapSecurityUtils;
 
 /**
  * Reads the core risk state from the memory-mapped file for Zero-GC Inter-Process Communication (IPC).
  * This runs in the Web/REST API JVM (or thread) and isolates JSON garbage from the core engine.
  */
 public class MmapStateReader {
-    private static final String FILE_PATH = "target/quant_engine_state.dat";
     private static final long FILE_SIZE = 32;
+    private static final VarHandle VH_DOUBLE = ValueLayout.JAVA_DOUBLE.varHandle();
 
     private final MemorySegment mappedSegment;
     private final Arena arena;
 
+    private String getFilePath() {
+        return System.getProperty("MMAP_STATE_FILE") != null ? 
+            System.getProperty("MMAP_STATE_FILE") : 
+            System.getenv("MMAP_STATE_FILE") != null ? 
+            System.getenv("MMAP_STATE_FILE") : "target/quant_engine_state.dat";
+    }
+
     public MmapStateReader() {
         this.arena = Arena.ofShared();
         try {
-            File file = new File(FILE_PATH);
+            File file = new File(getFilePath());
             File parent = file.getParentFile();
             if (parent != null && !parent.exists()) {
                 parent.mkdirs();
@@ -30,6 +39,10 @@ public class MmapStateReader {
 
             // Create initial state file if absent
             if (!file.exists() || file.length() < FILE_SIZE) {
+                if (!file.exists()) {
+                    file.createNewFile();
+                }
+                MmapSecurityUtils.secureMmapFile(file.toPath());
                 try (RandomAccessFile raf = new RandomAccessFile(file, "rw")) {
                     raf.setLength(FILE_SIZE);
                     raf.writeDouble(-62500.0);  // netDelta
@@ -50,19 +63,19 @@ public class MmapStateReader {
     }
 
     public double getNetDelta() {
-        return mappedSegment.get(ValueLayout.JAVA_DOUBLE, 0);
+        return (double) VH_DOUBLE.getVolatile(mappedSegment, 0L);
     }
 
     public double getNetGamma() {
-        return mappedSegment.get(ValueLayout.JAVA_DOUBLE, 8);
+        return (double) VH_DOUBLE.getVolatile(mappedSegment, 8L);
     }
 
     public double getNetVega() {
-        return mappedSegment.get(ValueLayout.JAVA_DOUBLE, 16);
+        return (double) VH_DOUBLE.getVolatile(mappedSegment, 16L);
     }
 
     public double getSpanMargin() {
-        return mappedSegment.get(ValueLayout.JAVA_DOUBLE, 24);
+        return (double) VH_DOUBLE.getVolatile(mappedSegment, 24L);
     }
 
     public void close() {
