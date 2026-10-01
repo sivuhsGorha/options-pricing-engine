@@ -7,7 +7,11 @@ public class ExecutionTest {
         
         // Setup Risk Filter: Max 500 contracts, Max $1,000,000 notional, Max 10 msgs/sec
         PreTradeRiskFilter filter = new PreTradeRiskFilter(500, 1_000_000.0, 10);
-        SmartOrderRouter sor = new SmartOrderRouter(filter);
+        ExchangeTransport mockTransport = payload -> {
+            System.out.println("-> [NETWORK] Transmitted " + payload.length + " bytes to Exchange ETI port.");
+            return true;
+        };
+        SmartOrderRouter sor = new SmartOrderRouter(filter, mockTransport);
         
         System.out.println("Testing Normal Order (Pass):");
         Order normalOrder = new Order(450000, true, 50, 15.50);

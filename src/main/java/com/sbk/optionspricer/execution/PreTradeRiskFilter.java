@@ -27,7 +27,17 @@ public class PreTradeRiskFilter {
      * Checks if the order is safe to send to the exchange.
      * @return true if safe, false if blocked
      */
-    public boolean checkRisk(Order order) {
+    public synchronized boolean checkRisk(Order order) {
+        // 0. Base Domain Constraints
+        if (order.quantity() <= 0) {
+            System.err.printf("[RISK BLOCK] Invalid quantity: %d%n", order.quantity());
+            return false;
+        }
+        if (order.price() <= 0 || Double.isNaN(order.price()) || Double.isInfinite(order.price())) {
+            System.err.printf("[RISK BLOCK] Invalid price: %f%n", order.price());
+            return false;
+        }
+
         // 1. Fat Finger Size Check
         if (order.quantity() > maxOrderQuantity) {
             System.err.printf("[RISK BLOCK] Order size %d exceeds max %d%n", order.quantity(), maxOrderQuantity);

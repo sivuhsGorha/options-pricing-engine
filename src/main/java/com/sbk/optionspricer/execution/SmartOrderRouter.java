@@ -2,6 +2,7 @@ package com.sbk.optionspricer.execution;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Smart Order Router (SOR) and Gateway.
@@ -11,9 +12,12 @@ import java.nio.ByteOrder;
 public class SmartOrderRouter {
 
     private final PreTradeRiskFilter riskFilter;
+    private final ExchangeTransport transport;
+    private final AtomicLong orderSequence = new AtomicLong(1);
 
-    public SmartOrderRouter(PreTradeRiskFilter riskFilter) {
+    public SmartOrderRouter(PreTradeRiskFilter riskFilter, ExchangeTransport transport) {
         this.riskFilter = riskFilter;
+        this.transport = transport;
     }
 
     /**
@@ -44,14 +48,9 @@ public class SmartOrderRouter {
         buffer.putLong((long)(order.price() * 10000));
         
         // 3. Dispatch to NIC (Network Interface Card) via socket
-        // In this simulated environment, we just log it as successful
-        transmitToExchange(networkPayload);
+        // Provide the generated sequence ID alongside (for durability tracing)
+        long seqId = orderSequence.getAndIncrement();
         
-        return true;
-    }
-    
-    private void transmitToExchange(byte[] payload) {
-        // Mock socket write
-        // System.out.println("-> [NETWORK] Transmitted " + payload.length + " bytes to Exchange ETI port.");
+        return transport.transmit(networkPayload);
     }
 }
