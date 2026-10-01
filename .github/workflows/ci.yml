@@ -14,15 +14,24 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Set up JDK 21 (Temurin)
+      - name: Set up JDK 26 (Temurin)
         uses: actions/setup-java@v4
         with:
-          java-version: '21'
+          java-version: '26'
           distribution: 'temurin'
           cache: maven
 
       - name: Execute Maven Verification (mvn verify)
         run: mvn clean verify
+
+      - name: Docker Container Readiness Test
+        run: |
+          docker build -t options-engine .
+          docker run -d -p 8080:8080 -e API_SECRET=test --name options-app options-engine
+          sleep 10
+          docker logs options-app
+          curl -f -H "X-Signature: test" -H "X-Timestamp: 1" http://localhost:8080/ || exit 1
+          docker rm -f options-app
 
       - name: Upload JaCoCo Code Coverage Report
         uses: actions/upload-artifact@v4
