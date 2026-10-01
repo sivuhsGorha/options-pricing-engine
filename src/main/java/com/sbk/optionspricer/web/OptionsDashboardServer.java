@@ -209,15 +209,17 @@ public class OptionsDashboardServer {
 
     public static class StaticFileHandler implements HttpHandler {
         
-        public static boolean isPathSafe(String path) {
-            if (path == null) return false;
+        public static boolean isPathSafe(String requestPath) {
+            if (requestPath == null || requestPath.indexOf('\0') >= 0) {
+                return false;
+            }
             try {
-                // Decode URL-encoded characters
-                String decodedPath = java.net.URLDecoder.decode(path, "UTF-8");
-                File webRoot = new File("web").getCanonicalFile();
-                File requestFile = new File(webRoot, decodedPath).getCanonicalFile();
-                return requestFile.getPath().startsWith(webRoot.getPath());
-            } catch (Exception e) {
+                String decoded = java.net.URLDecoder.decode(requestPath, java.nio.charset.StandardCharsets.UTF_8)
+                                        .replace('\\', '/');
+                java.nio.file.Path root = java.nio.file.Path.of("web").toAbsolutePath().normalize();
+                java.nio.file.Path candidate = root.resolve(decoded.startsWith("/") ? decoded.substring(1) : decoded).normalize();
+                return candidate.startsWith(root);
+            } catch (IllegalArgumentException e) {
                 return false;
             }
         }

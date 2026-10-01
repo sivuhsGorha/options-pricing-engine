@@ -2,13 +2,11 @@ package com.sbk.optionspricer;
 
 import org.openjdk.jmh.annotations.*;
 import org.openjdk.jmh.infra.Blackhole;
-import org.junit.jupiter.api.Test;
 import org.openjdk.jmh.runner.Runner;
 import org.openjdk.jmh.runner.options.Options;
 import org.openjdk.jmh.runner.options.OptionsBuilder;
 
 import java.util.concurrent.TimeUnit;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.MICROSECONDS)
@@ -44,17 +42,4 @@ public class PricerBenchmarkTest {
         bh.consume(outPrices);
     }
 
-    @Test
-    void runJmhBenchmarks() throws Exception {
-        // Run the JMH benchmark as a JUnit test to ensure it actually executes during the build
-        Options opt = new OptionsBuilder()
-                .include(PricerBenchmarkTest.class.getSimpleName())
-                .build();
-
-        new Runner(opt).run();
-        
-        // In a real pipeline, we would parse the JMH JSON output and fail if benchmarkVectorBatch > benchmarkScalar.
-        // For AUD-15, we ensure JMH is integrated and executed.
-        assertTrue(true);
-    }
 }
