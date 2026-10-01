@@ -47,4 +47,22 @@ public class MmapStateTest {
         publisher.close();
         reader.close();
     }
+
+    @Test
+    void testRepeatRunsDoNotLockFile() throws Exception {
+        for (int i = 0; i < 3; i++) {
+            MmapStatePublisher publisher = new MmapStatePublisher();
+            MmapStateReader reader = new MmapStateReader();
+            
+            publisher.publishRiskState(1.0, 1.0, 1.0, 1.0);
+            assertEquals(1.0, reader.getNetDelta());
+            
+            publisher.close();
+            reader.close();
+            
+            // Delete should succeed on Windows if properly unmapped and closed
+            File f = new File(TEST_FILE);
+            assertTrue(f.delete(), "Should be able to delete the file between runs if unmapped");
+        }
+    }
 }

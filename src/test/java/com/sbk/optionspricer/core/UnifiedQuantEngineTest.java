@@ -37,5 +37,6 @@ public class UnifiedQuantEngineTest {
         boolean isRunning = (boolean) isRunningField.get(harness);
         
         assertFalse(isRunning, "Harness should be stopped");
+        throwingPublisher.close();
     }
 }

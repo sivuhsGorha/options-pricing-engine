@@ -25,7 +25,7 @@ public class MmapStatePublisher {
         return System.getProperty("MMAP_STATE_FILE") != null ? 
             System.getProperty("MMAP_STATE_FILE") : 
             System.getenv("MMAP_STATE_FILE") != null ? 
-            System.getenv("MMAP_STATE_FILE") : "target/quant_engine_state.dat";
+            System.getenv("MMAP_STATE_FILE") : "data/quant_engine_state.dat";
     }
 
     public MmapStatePublisher() {
