@@ -201,7 +201,21 @@ public class OptionsDashboardServer {
         System.out.println("=================================================");
     }
 
-    static class StaticFileHandler implements HttpHandler {
+    public static class StaticFileHandler implements HttpHandler {
+        
+        public static boolean isPathSafe(String path) {
+            if (path == null) return false;
+            try {
+                // Decode URL-encoded characters
+                String decodedPath = java.net.URLDecoder.decode(path, "UTF-8");
+                File webRoot = new File("web").getCanonicalFile();
+                File requestFile = new File(webRoot, decodedPath).getCanonicalFile();
+                return requestFile.getPath().startsWith(webRoot.getPath());
+            } catch (Exception e) {
+                return false;
+            }
+        }
+
         @Override
         public void handle(HttpExchange exchange) throws IOException {
             String path = exchange.getRequestURI().getPath();
@@ -209,12 +223,23 @@ public class OptionsDashboardServer {
                 path = "/index.html";
             }
             
-            File file = new File("web" + path);
-            if (file.exists()) {
+            if (!isPathSafe(path)) {
+                String error = "403 Forbidden";
+                exchange.sendResponseHeaders(403, error.length());
+                OutputStream os = exchange.getResponseBody();
+                os.write(error.getBytes());
+                os.close();
+                return;
+            }
+            
+            // Decode path for file system access
+            String decodedPath = java.net.URLDecoder.decode(path, "UTF-8");
+            File file = new File("web", decodedPath);
+            if (file.exists() && !file.isDirectory()) {
                 byte[] bytes = Files.readAllBytes(file.toPath());
-                if (path.endsWith(".html")) exchange.getResponseHeaders().add("Content-Type", "text/html");
-                else if (path.endsWith(".css")) exchange.getResponseHeaders().add("Content-Type", "text/css");
-                else if (path.endsWith(".js")) exchange.getResponseHeaders().add("Content-Type", "application/javascript");
+                if (decodedPath.endsWith(".html")) exchange.getResponseHeaders().add("Content-Type", "text/html");
+                else if (decodedPath.endsWith(".css")) exchange.getResponseHeaders().add("Content-Type", "text/css");
+                else if (decodedPath.endsWith(".js")) exchange.getResponseHeaders().add("Content-Type", "application/javascript");
                 
                 exchange.sendResponseHeaders(200, bytes.length);
                 OutputStream os = exchange.getResponseBody();
