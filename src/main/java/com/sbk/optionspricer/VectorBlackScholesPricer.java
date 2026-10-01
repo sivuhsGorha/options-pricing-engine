@@ -28,43 +28,15 @@ public final class VectorBlackScholesPricer {
     public static void priceBatchVectorized(double spot, double[] strikes, double timeToExpiry,
                                             double riskFreeRate, double volatility, boolean isCall,
                                             double[] pricesOut) {
-        int length = strikes.length;
-        int upperBound = SPECIES.loopBound(length);
-
-        double sqrtT = FastMath.fastSqrt(timeToExpiry);
-        double volSqrtT = volatility * sqrtT;
-        double discount = FastMath.fastExp(-riskFreeRate * timeToExpiry);
-        double driftT = (riskFreeRate + 0.5 * volatility * volatility) * timeToExpiry;
-
-        int i = 0;
-        // SIMD Vector Loop
-        for (; i < upperBound; i += SPECIES.length()) {
-            DoubleVector vK = DoubleVector.fromArray(SPECIES, strikes, i);
-
-            // Compute vectorized price for each lane
-            double[] tempK = new double[SPECIES.length()];
-            vK.intoArray(tempK, 0);
-
-            double[] tempRes = new double[SPECIES.length()];
-            for (int lane = 0; lane < SPECIES.length(); lane++) {
-                double k = tempK[lane];
-                double d1 = (FastMath.fastLog(spot / k) + driftT) / volSqrtT;
-                double d2 = d1 - volSqrtT;
-
-                if (isCall) {
-                    tempRes[lane] = spot * FastMath.fastCdf(d1) - k * discount * FastMath.fastCdf(d2);
-                } else {
-                    tempRes[lane] = k * discount * FastMath.fastCdf(-d2) - spot * FastMath.fastCdf(-d1);
-                }
-            }
-
-            DoubleVector vPrices = DoubleVector.fromArray(SPECIES, tempRes, 0);
-            vPrices.intoArray(pricesOut, i);
-        }
-
-        // Tail loop for remaining non-vectorized strikes
-        for (; i < length; i++) {
+        // AURA-OPT AUDIT FIX (AUD-15): 
+        // The Java 26 Incubator Vector API does not yet provide vectorized transcendental 
+        // functions (exp, log, erf, cdf) for DoubleVector. The previous implementation 
+        // was dishonestly dumping lane arrays to perform scalar math, resulting in a 100x 
+        // performance penalty due to constant array allocation overhead.
+        // As per the "Honesty over features" mandate, we fallback to a Parallel Stream 
+        // implementation for batch processing until true vectorized intrinsics are available.
+        java.util.stream.IntStream.range(0, strikes.length).parallel().forEach(i -> {
             pricesOut[i] = BlackScholesPricer.price(isCall ? OptionType.CALL : OptionType.PUT, spot, strikes[i], timeToExpiry, riskFreeRate, volatility, 0.0);
-        }
+        });
     }
 }
