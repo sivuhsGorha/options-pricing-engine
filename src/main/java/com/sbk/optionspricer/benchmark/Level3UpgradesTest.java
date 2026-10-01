@@ -39,10 +39,11 @@ public class Level3UpgradesTest {
 
         MmapStateReader reader = new MmapStateReader();
         System.out.printf("Published: Delta=142.50, Gamma=12.35, Vega=88.90, Margin=45200.00%n");
+        MmapStateReader.RiskState state = reader.readState();
         System.out.printf("Read mmap: Delta=%.2f, Gamma=%.2f, Vega=%.2f, Margin=%.2f%n",
-                reader.getNetDelta(), reader.getNetGamma(), reader.getNetVega(), reader.getSpanMargin());
+                state.netDelta, state.netGamma, state.netVega, state.spanMargin);
 
-        if (Math.abs(reader.getNetDelta() - 142.50) > 1e-4 || Math.abs(reader.getSpanMargin() - 45200.00) > 1e-4) {
+        if (Math.abs(state.netDelta - 142.50) > 1e-4 || Math.abs(state.spanMargin - 45200.00) > 1e-4) {
             throw new AssertionError("Mmap IPC read/write mismatch!");
         }
         publisher.close();

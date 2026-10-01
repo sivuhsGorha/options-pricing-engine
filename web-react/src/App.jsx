@@ -3,6 +3,30 @@ import './App.css';
 
 const API_BASE = "http://localhost:8080/api";
 const strikes = [490, 495, 500, 505, 510];
+const API_SECRET = "default-dev-secret";
+
+async function generateHmacSignature(method, path, timestamp) {
+    const encoder = new TextEncoder();
+    const keyData = encoder.encode(API_SECRET);
+    const msgData = encoder.encode(method + path + timestamp);
+    const cryptoKey = await crypto.subtle.importKey(
+        "raw", keyData, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
+    );
+    const signatureBuffer = await crypto.subtle.sign("HMAC", cryptoKey, msgData);
+    const signatureArray = Array.from(new Uint8Array(signatureBuffer));
+    return signatureArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function secureFetch(path) {
+    const timestamp = Date.now().toString();
+    const signature = await generateHmacSignature("GET", path, timestamp);
+    return fetch(`${API_BASE}${path}`, {
+        headers: {
+            "X-Timestamp": timestamp,
+            "X-Signature": signature
+        }
+    });
+}
 
 function formatNumber(num) {
     return new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(num);
@@ -16,7 +40,6 @@ function App() {
   });
   const [tape, setTape] = useState([]);
   const [logs, setLogs] = useState([{ time: '09:00:00', msg: 'AURA-OPT Unified Engine online. Mmap IPC active.' }]);
-  const [latency, setLatency] = useState(6);
   const [surfaceData, setSurfaceData] = useState(null);
   const [expandedChart, setExpandedChart] = useState(null);
   const [cmdText, setCmdText] = useState('VOLS <GO>');
@@ -26,7 +49,7 @@ function App() {
   const chartRefSmile = useRef(null);
   const chartRefTerm = useRef(null);
 
-  const [spotInfo, setSpotInfo] = useState({ symbol: 'SPY', spotPrice: 762.63, activeProvider: 'Finnhub API' });
+  const [spotInfo, setSpotInfo] = useState({ symbol: 'SPY', spotPrice: null, source: '', status: 'UNAVAILABLE', timestamp: 0 });
 
   const addLog = (msg) => {
       setLogs(prev => {
@@ -74,7 +97,7 @@ function App() {
   useEffect(() => {
       const updateRiskMetrics = async () => {
           try {
-              const response = await fetch(`${API_BASE}/risk`);
+              const response = await secureFetch(`/risk`);
               const data = await response.json();
               setMetrics(data);
           } catch (error) {
@@ -84,7 +107,7 @@ function App() {
 
       const fetchSpotData = async () => {
           try {
-              const response = await fetch(`${API_BASE}/spot`);
+              const response = await secureFetch(`/spot`);
               const data = await response.json();
               setSpotInfo(data);
           } catch (error) {
@@ -94,7 +117,7 @@ function App() {
 
       const fetchSurfaceData = async () => {
           try {
-              const response = await fetch(`${API_BASE}/surface3d?model=${surfaceModel}`);
+              const response = await secureFetch(`/surface3d?model=${surfaceModel}`);
               const data = await response.json();
               setSurfaceData(data);
               addLog(`Vol Surface updated [${surfaceModel}].`);
@@ -110,15 +133,11 @@ function App() {
       const metricsInterval = setInterval(updateRiskMetrics, 1000);
       const spotInterval = setInterval(fetchSpotData, 2000);
       const surfaceInterval = setInterval(fetchSurfaceData, 5000);
-      const latencyInterval = setInterval(() => {
-          setLatency(Math.floor(Math.random() * 3 + 4));
-      }, 1000);
 
       return () => {
           clearInterval(metricsInterval);
           clearInterval(spotInterval);
           clearInterval(surfaceInterval);
-          clearInterval(latencyInterval);
       };
   }, [surfaceModel]);
 
@@ -181,10 +200,10 @@ function App() {
       const layoutSmile = {
           ...layoutBase,
           margin: { t: 10, r: 20, l: 40, b: 40 },
-          xaxis: { title: 'STRIKE', gridcolor: '#1C232D', zerolinecolor: '#FF9900', titlefont: { size: 10 } },
-          yaxis: { title: 'IV (%)', gridcolor: '#1C232D', zerolinecolor: '#FF9900', titlefont: { size: 10 } },
+          xaxis: { title: 'STRIKE', gridcolor: '#1C232D', zerolinecolor: '#FF9900', titlefont: { size: 14 } },
+          yaxis: { title: 'IV (%)', gridcolor: '#1C232D', zerolinecolor: '#FF9900', titlefont: { size: 14 } },
           showlegend: true,
-          legend: { orientation: 'h', y: -0.3, x: 0.5, xanchor: 'center', font: { size: 10, color: '#FF9900' } }
+          legend: { orientation: 'h', y: -0.3, x: 0.5, xanchor: 'center', font: { size: 14, color: '#FF9900' } }
       };
       window.Plotly.react(chartRefSmile.current, tracesSmile, layoutSmile, {responsive: true, displayModeBar: false});
 
@@ -203,10 +222,10 @@ function App() {
       const layoutTerm = {
           ...layoutBase,
           margin: { t: 10, r: 20, l: 40, b: 40 },
-          xaxis: { title: 'EXPIRY', gridcolor: '#1C232D', zerolinecolor: '#FF9900', titlefont: { size: 10 } },
-          yaxis: { title: 'IV (%)', gridcolor: '#1C232D', zerolinecolor: '#FF9900', titlefont: { size: 10 } },
+          xaxis: { title: 'EXPIRY', gridcolor: '#1C232D', zerolinecolor: '#FF9900', titlefont: { size: 14 } },
+          yaxis: { title: 'IV (%)', gridcolor: '#1C232D', zerolinecolor: '#FF9900', titlefont: { size: 14 } },
           showlegend: true,
-          legend: { orientation: 'h', y: -0.3, x: 0.5, xanchor: 'center', font: { size: 10, color: '#FF9900' } }
+          legend: { orientation: 'h', y: -0.3, x: 0.5, xanchor: 'center', font: { size: 14, color: '#FF9900' } }
       };
       window.Plotly.react(chartRefTerm.current, tracesTerm, layoutTerm, {responsive: true, displayModeBar: false});
 
@@ -219,24 +238,14 @@ function App() {
   }, [expandedChart]);
 
   useEffect(() => {
-      const generateLiveTrade = () => {
-          const isBuy = Math.random() > 0.5;
-          const strike = strikes[Math.floor(Math.random() * strikes.length)];
-          const price = (Math.random() * 5 + 1).toFixed(2);
-          const qty = Math.floor(Math.random() * 500) + 10;
-          
-          setTape(prev => {
-              const newTape = [{ id: Date.now() + Math.random(), isBuy, strike, price, qty }, ...prev];
-              if (newTape.length > 15) newTape.pop();
-              return newTape;
-          });
-      };
-      const tapeInterval = setInterval(generateLiveTrade, 300);
-      return () => clearInterval(tapeInterval);
+      // Tape and trade logic removed (AUD-17)
   }, []);
 
   return (
     <div className="app-container">
+        <div className="banner" style={{ background: '#FF3D00', color: 'white', textAlign: 'center', fontWeight: 'bold', padding: '5px' }}>
+            SIMULATED DATA - FOR DEMONSTRATION ONLY
+        </div>
         {/* Bloomberg Terminal Top Command Header */}
         <header className="sys-header">
             <form onSubmit={handleCmdSubmit} className="cmd-bar">
@@ -260,10 +269,17 @@ function App() {
 
             <div className="sys-status">
                 <span className="status-badge" style={{color: '#FF9900', borderColor: '#FF9900'}}>
-                    {spotInfo.symbol}: ${spotInfo.spotPrice ? spotInfo.spotPrice.toFixed(2) : '762.63'} [{spotInfo.activeProvider || 'Finnhub API'}]
+                    {spotInfo.symbol}: ${spotInfo.spotPrice ? spotInfo.spotPrice.toFixed(2) : '--'} 
+                    [{spotInfo.source ? spotInfo.source : 'N/A'}]
                 </span>
-                <span className="status-badge" style={{color: '#00E676'}}>UNIFIED ZERO-GC SIMD</span>
-                <span className="status-ping">{latency}ms</span>
+                <span className="status-badge" style={{
+                    color: spotInfo.status === 'SIMULATED' ? '#00E676' : spotInfo.status === 'STALE' ? '#FF9900' : '#FF3D00'
+                }}>
+                    {spotInfo.status}
+                </span>
+                <span className="status-badge">
+                    {spotInfo.timestamp ? new Date(spotInfo.timestamp).toLocaleTimeString() : '--:--:--'}
+                </span>
             </div>
         </header>
 
@@ -306,11 +322,11 @@ function App() {
 
                     {/* SPAN Margin Optimization Card */}
                     <div style={{marginTop: '10px', background: '#080C10', border: '1px solid #FF9900', padding: '10px'}}>
-                        <div style={{color: '#FF9900', fontSize: '11px', fontWeight: 'bold'}}>SPAN MARGIN OPTIMIZER [F5]</div>
-                        <div style={{color: '#FFFFFF', fontSize: '12px', marginTop: '4px'}}>
+                        <div style={{color: '#FF9900', fontSize: '15px', fontWeight: 'bold'}}>SPAN MARGIN OPTIMIZER [F5]</div>
+                        <div style={{color: '#FFFFFF', fontSize: '16px', marginTop: '4px'}}>
                           OPTIMIZED MARGIN: <span style={{color: '#00E676', fontWeight: 'bold'}}>${metrics.optimizedMargin !== null ? formatNumber(metrics.optimizedMargin) : '--'}</span>
                         </div>
-                        <div style={{color: '#00E5FF', fontSize: '11px', marginTop: '2px'}}>
+                        <div style={{color: '#00E5FF', fontSize: '15px', marginTop: '2px'}}>
                           REDUCTION: <span style={{fontWeight: 'bold'}}>-{metrics.marginReductionPct !== null ? metrics.marginReductionPct : '--'}%</span> | HEDGE: <span style={{color: '#FF9900'}}>{metrics.recommendedHedge !== null ? '+' + metrics.recommendedHedge : '--'} SH</span>
                         </div>
                     </div>
@@ -374,7 +390,7 @@ function App() {
                     <span>LIVE TAPE &amp; SOR ROUTER</span>
                     <span className="tag" style={{color: '#00E676'}}>L3 FILL {metrics.l3FillProb}%</span>
                 </div>
-                <div style={{background: '#080A0E', borderBottom: '1px solid #1C232D', padding: '6px 8px', fontSize: '10px', color: '#00E5FF'}}>
+                <div style={{background: '#080A0E', borderBottom: '1px solid #1C232D', padding: '6px 8px', fontSize: '14px', color: '#00E5FF'}}>
                   SOR: {metrics.sorAllocations !== null ? metrics.sorAllocations : 'EUREX / OPTIQ / SOLA'}
                 </div>
                 <div className="panel-content no-padding">

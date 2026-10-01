@@ -65,14 +65,27 @@ public class OptionsDashboardServer {
             exchange.getResponseHeaders().add("Content-Type", "application/json");
             exchange.getResponseHeaders().add("Access-Control-Allow-Origin", ALLOWED_ORIGIN);
             
-            double spotPrice = 762.63; // Default live fetched SPY quote from Finnhub / Polygon
+            double spotPrice = 762.63;
+            String status = "UNAVAILABLE";
+            String source = "market_data.csv";
+            long timestamp = 0;
+            
             try {
-                java.util.List<String> lines = Files.readAllLines(new File("market_data.csv").toPath());
-                if (lines.size() > 1) {
-                    // Estimate spot from middle strike in generated chain
-                    String[] parts = lines.get(lines.size() / 2).split(",");
-                    if (parts.length > 3) {
-                        spotPrice = Double.parseDouble(parts[3]);
+                File csvFile = new File("market_data.csv");
+                if (csvFile.exists()) {
+                    timestamp = csvFile.lastModified();
+                    long age = System.currentTimeMillis() - timestamp;
+                    if (age < 30000) {
+                        status = "SIMULATED";
+                    } else {
+                        status = "STALE";
+                    }
+                    java.util.List<String> lines = Files.readAllLines(csvFile.toPath());
+                    if (lines.size() > 1) {
+                        String[] parts = lines.get(lines.size() / 2).split(",");
+                        if (parts.length > 3) {
+                            spotPrice = Double.parseDouble(parts[3]);
+                        }
                     }
                 }
             } catch (Exception ignored) {}
@@ -80,10 +93,10 @@ public class OptionsDashboardServer {
             String json = String.format(java.util.Locale.US, "{\n" +
                     "  \"symbol\": \"SPY\",\n" +
                     "  \"spotPrice\": %.2f,\n" +
-                    "  \"apiProviders\": [\"Finnhub\", \"Polygon\", \"AlphaVantage\", \"MarketStack\"],\n" +
-                    "  \"activeProvider\": \"Finnhub API (Live Rate Feed)\",\n" +
-                    "  \"status\": \"CONNECTED\"\n" +
-                    "}", spotPrice);
+                    "  \"source\": \"%s\",\n" +
+                    "  \"timestamp\": %d,\n" +
+                    "  \"status\": \"%s\"\n" +
+                    "}", spotPrice, source, timestamp, status);
                     
             byte[] response = json.getBytes();
             exchange.sendResponseHeaders(200, response.length);
