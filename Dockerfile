@@ -1,25 +1,36 @@
-# Use an official OpenJDK runtime as a parent image
-FROM eclipse-temurin:21-jdk-alpine
+# Stage 1: Build Stage
+FROM maven:3.9.9-eclipse-temurin-21-alpine AS builder
 
-# Set the working directory in the container
+WORKDIR /build
+
+# Copy Maven descriptor and project files
+COPY pom.xml .
+COPY src ./src
+COPY web ./web
+
+# Compile all sources and run tests
+RUN mvn clean verify -DskipTests=false
+
+# Stage 2: Runtime Stage
+FROM eclipse-temurin:21-jre-alpine
+
+# Security: Create non-root group and user
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+
 WORKDIR /app
 
-# Copy the source code and web files into the container
-COPY src/ /app/src/
-COPY web/ /app/web/
+# Copy artifact and web files from builder
+COPY --from=builder /build/target/options-pricing-engine-1.0.0-SNAPSHOT.jar /app/app.jar
+COPY --from=builder /build/web /app/web
 
-# Compile the Java code
-RUN mkdir -p target/classes && \
-    javac -d target/classes \
-    src/main/java/com/sbk/optionspricer/core/*.java \
-    src/main/java/com/sbk/optionspricer/volatility/*.java \
-    src/main/java/com/sbk/optionspricer/risk/*.java \
-    src/main/java/com/sbk/optionspricer/tuning/*.java \
-    src/main/java/com/sbk/optionspricer/benchmark/*.java \
-    src/main/java/com/sbk/optionspricer/web/*.java
+# Set ownership
+RUN chown -R appuser:appgroup /app
 
-# Cloud Run sets the PORT environment variable (default 8080)
-EXPOSE 8080
+USER appuser
 
-# Run the web server
-CMD ["java", "-cp", "target/classes", "com.sbk.optionspricer.web.OptionsDashboardServer"]
+EXPOSE 8080 8081
+
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:8080/ || exit 1
+
+ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75.0", "--enable-preview", "--add-modules", "jdk.incubator.vector", "-jar", "/app/app.jar"]

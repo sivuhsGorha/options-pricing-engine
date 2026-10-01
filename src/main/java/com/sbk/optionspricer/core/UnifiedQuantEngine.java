@@ -9,7 +9,7 @@ import com.sbk.optionspricer.gateways.SmartOrderRouter;
 import com.sbk.optionspricer.models.pde.VectorPdeSolver;
 import com.sbk.optionspricer.risk.SpanMarginOptimizer;
 import com.sbk.optionspricer.volatility.SabrFreeBoundaryModel;
-import com.sbk.optionspricer.volatility.SsviCalibrator;
+import com.sbk.optionspricer.volatility.SsviApproximation;
 
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
@@ -83,8 +83,8 @@ public final class UnifiedQuantEngine {
             MemorySegmentStructs.setTickData(tickSegment, nowNs, 450000L, currentSpot - 0.05, currentSpot + 0.05, 500, 500, 1L);
 
             // 2. Volatility Surface Calibration Update (SSVI & Free-Boundary SABR)
-            SsviCalibrator.SsviParams ssviParams = new SsviCalibrator.SsviParams(0.5, 0.25, -0.4);
-            double ssviVol = SsviCalibrator.impliedVol(currentSpot, 105.0, 0.5, 0.25, ssviParams);
+            SsviApproximation.SsviParams ssviParams = new SsviApproximation.SsviParams(0.5, 0.25, -0.4);
+            double ssviVol = SsviApproximation.impliedVol(currentSpot, 105.0, 0.5, 0.25, ssviParams);
             double sabrVol = SabrFreeBoundaryModel.impliedVolatility(currentSpot, 95.0, 0.25, 0.25, 1.0, -0.6, 0.4);
 
             // 3. SIMD Pricing Acceleration

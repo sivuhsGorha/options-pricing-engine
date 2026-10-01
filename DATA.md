@@ -89,3 +89,21 @@ Unlike index options which assume continuous dividend yield ($q$), single-stock 
   $$F_T = \left( S_0 - \sum_{i=1}^n D_i e^{-r t_i} \right) e^{r T}$$
   where $D_i$ is the discrete dividend paid at time $t_i \le T$.
 - **Ex-Date Stock Adjustments**: Automatic adjustment of historical tick databases during stock splits, reverse splits, spin-offs, and rights issues.
+
+---
+
+## 5. Multi-API Real-Time Ingestion Pipeline
+
+The quantitative engine includes a multi-tiered python market data ingestion pipeline ([`fetch_real_api_data.py`](file:///c:/options-pricing-engine/fetch_real_api_data.py)) connecting to major financial data APIs:
+
+1. **Finnhub.io**: Primary real-time stock quote API (`/v1/quote`).
+2. **Polygon.io**: Secondary fallback previous close & aggregate REST API (`/v2/aggs`).
+3. **Alpha Vantage**: Global quote API (`GLOBAL_QUOTE`).
+4. **MarketStack**: End-of-day market API (`/v1/eod/latest`).
+
+```bash
+# Execute market data fetch and generate option chain around live spot
+python fetch_real_api_data.py
+```
+
+The script fetches the current equity spot price (e.g., SPY) and dynamically generates an arbitrage-free Black-Scholes call/put chain saved to [`market_data.csv`](file:///c:/options-pricing-engine/market_data.csv) for exchange gateway tick replay.

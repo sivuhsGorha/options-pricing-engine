@@ -8,8 +8,8 @@ import com.sbk.optionspricer.VectorBlackScholesPricer;
 import com.sbk.optionspricer.core.MmapStatePublisher;
 import com.sbk.optionspricer.models.pde.DiscreteDividendPricer;
 import com.sbk.optionspricer.models.pde.DiscreteDividendPricer.DiscreteDividend;
-import com.sbk.optionspricer.volatility.SlvCalibrator;
-import com.sbk.optionspricer.volatility.SlvCalibrator.SlvParams;
+import com.sbk.optionspricer.volatility.SlvApproximation;
+import com.sbk.optionspricer.volatility.SlvApproximation.SlvParams;
 import com.sbk.optionspricer.web.MmapStateReader;
 
 /**
@@ -139,8 +139,8 @@ public class Level3UpgradesTest {
     private static void testSlvCalibration() {
         System.out.println("\n--- 6.5 Stochastic Local Volatility (SLV) Calibration ---");
         SlvParams heston = new SlvParams(2.0, 0.04, 0.3, -0.6, 0.04);
-        double dupireVol = SlvCalibrator.computeDupireLocalVol(100.0, 105.0, 0.5, 0.05, 0.22, 0.01, -0.001, 0.0002);
-        double leverageFactor = SlvCalibrator.computeLeverageFactor(dupireVol, heston, 0.5);
+        double dupireVol = SlvApproximation.computeDupireLocalVol(100.0, 105.0, 0.5, 0.05, 0.22, 0.01, -0.001, 0.0002);
+        double leverageFactor = SlvApproximation.computeLeverageFactor(dupireVol, heston, 0.5);
 
         System.out.printf("Dupire Local Vol: %.4f (22.00%%)%n", dupireVol);
         System.out.printf("SLV Leverage Scale Factor: %.4f%n", leverageFactor);

@@ -164,15 +164,15 @@ public class OptionsDashboardServer {
             
             // Vols (z - 2D array)
             json.append("  \"z\": [\n");
-            com.sbk.optionspricer.volatility.SsviCalibrator.SsviParams ssviParams = 
-                new com.sbk.optionspricer.volatility.SsviCalibrator.SsviParams(0.55, 0.25, -0.50);
+            com.sbk.optionspricer.volatility.SsviApproximation.SsviParams ssviParams = 
+                new com.sbk.optionspricer.volatility.SsviApproximation.SsviParams(0.55, 0.25, -0.50);
 
             for (int i=0; i<expiries.length; i++) {
                 json.append("    [");
                 for (int j=0; j<strikes.length; j++) {
                     double vol;
                     if ("SSVI".equals(model)) {
-                        vol = com.sbk.optionspricer.volatility.SsviCalibrator.impliedVol(100.0, strikes[j], expiries[i], 0.22, ssviParams);
+                        vol = com.sbk.optionspricer.volatility.SsviApproximation.impliedVol(100.0, strikes[j], expiries[i], 0.22, ssviParams);
                     } else if ("FREE_SABR".equals(model)) {
                         vol = com.sbk.optionspricer.volatility.SabrFreeBoundaryModel.impliedVolatility(100.0, strikes[j], expiries[i], 0.30, 0.6, -0.65, 0.60);
                     } else { // Classic Hagan 2002 SABR

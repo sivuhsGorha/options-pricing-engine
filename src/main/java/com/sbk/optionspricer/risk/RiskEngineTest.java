@@ -34,7 +34,7 @@ public class RiskEngineTest {
         
         System.out.println("\n--- SPAN / Eurex Prisma Margin Simulator ---");
         double spotPrice = 500.0;
-        double initialMargin = SpanMarginSimulator.calculateInitialMargin(riskEngine, spotPrice);
+        double initialMargin = SpanMarginApproximation.calculateInitialMargin(riskEngine, spotPrice);
         System.out.printf("Required Clearinghouse Margin: $%,.2f%n", initialMargin);
         
         System.out.println("\n--- Historical Value-at-Risk (VaR) ---");

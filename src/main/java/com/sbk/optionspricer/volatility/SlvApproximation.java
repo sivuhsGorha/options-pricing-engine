@@ -13,7 +13,7 @@ import com.sbk.optionspricer.FastMath;
  * dS_t = r S_t dt + sigma(t, S_t) * sqrt(v_t) * S_t * dW_t^S
  * dv_t = kappa * (theta - v_t) dt + xi * sqrt(v_t) * dW_t^v
  */
-public class SlvCalibrator {
+public class SlvApproximation {
 
     public static class SlvParams {
         public final double kappa; // Mean reversion rate

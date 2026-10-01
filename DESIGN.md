@@ -1,42 +1,58 @@
-# UI/UX Design Language Specification: "Institutional Elegance"
+# Bloomberg Terminal & High-Frequency Trading Interface Specification (DESIGN.md)
 
-## 1. Core Philosophy
-The interface must exude **understated power** and **bravado**. It should feel like a multi-million dollar institutional trading terminal (e.g., Bloomberg, Eikon, or proprietary HFT desks). 
-* **Data Density over Decoration:** Every pixel must serve a purpose. Remove all "gamer" aesthetics, glowing neon, and glassmorphism.
-* **Understated Elegance:** Let the data and the math speak for themselves. Clean lines, razor-thin borders, and strict semantic coloring.
-* **Fluidity:** Interactions must feel frictionless. Transitions should be instantaneous, and massive datasets must render at 60 FPS without dropping frames.
+## 1. Core Philosophy & Terminal Aesthetics
+The interface is engineered to emulate the iconic **Bloomberg Terminal (BBG)** and modern HFT execution cockpits. It prioritizes ultra-high data density, instant visual recognition, zero-friction navigation, and mathematical authority.
 
-## 2. Color Palette
-The color system relies on high-contrast against an ultra-dark, matte background.
+* **Monochrome Pitch-Black Background**: High-contrast matte black (`#05070A` / `#000000`) canvas designed to minimize eye fatigue during extended trading sessions.
+* **Iconic Bloomberg Amber & Cyan Accent System**: High-visibility Bloomberg Safety Gold/Amber (`#FF9900`) for active command prompts and core numerical metrics, complemented by Neon Terminal Cyan (`#00E5FF`) for headers, tickers, and navigation keys.
+* **Brutalist Zero-Padding Density**: Maximum data per square inch. No drop shadows, floating cards, or wasteful rounded borders—only razor-thin 1px structural dividers.
+* **Monospaced Data Precision**: Monospaced tabular alignment ensuring all monetary values, basis points, and option Greeks align vertically.
 
-| Token | Hex Value | Usage |
+---
+
+## 2. Color Palette Matrix
+
+| Token | Hex Value | Usage / Role |
 | :--- | :--- | :--- |
-| `Bg-Primary` | `#0D1117` | Matte deep charcoal/midnight for the primary background. |
-| `Bg-Panel` | `#161B22` | Slightly lighter panels to create depth without borders. |
-| `Border-Subtle`| `#30363D` | Razor-thin, subtle structural dividers. |
-| `Text-Primary` | `#C9D1D9` | High-legibility off-white for main data. |
-| `Text-Muted` | `#8B949E` | Secondary labels, table headers, timestamps. |
-| `Semantic-Up` | `#238636` | Strict, professional institutional green (Buy/Profit). |
-| `Semantic-Down`| `#DA3633` | Strict, professional institutional red (Sell/Loss/Risk). |
-| `Accent-Brand` | `#58A6FF` | Minimalist electric blue for primary focus states and active tabs. |
+| `Bg-Terminal` | `#05070A` | Pitch-black main canvas background. |
+| `Bg-Panel` | `#0C0F14` | High-density panel background. |
+| `Border-Terminal`| `#1C232D` | 1px razor-thin panel outline. |
+| `Border-Amber` | `#FF9900` | Active window focus highlight & prompt border. |
+| `Text-Amber` | `#FF9900` | Primary Bloomberg accent, hotkey buttons, core metrics. |
+| `Text-Cyan` | `#00E5FF` | Ticker symbols, panel header labels, command tokens. |
+| `Text-Primary` | `#E0E6ED` | Off-white tabular metrics and high-legibility text. |
+| `Text-Muted` | `#5C6B73` | Table column headers, historical timestamps. |
+| `Semantic-Up` | `#00E676` | Institutional trade buy tick / profit green. |
+| `Semantic-Down`| `#FF3D00` | Institutional trade sell tick / risk red / SPAN margin alert. |
 
-## 3. Typography
-Typography must be impeccably crisp, highly legible, and optimized for skimming massive matrices of numbers.
+---
 
-* **UI & Labels:** `Inter` or `Helvetica Neue`. Weights: 400 (Regular), 600 (Semibold). Used for panel headers, navigation, and static text.
-* **Data & Metrics:** `Roboto Mono` or `Fira Code`. Weights: 500 (Medium). Essential for tabular alignment (decimal points must align perfectly).
+## 3. Terminal Navigation & Command Prompt System
 
-## 4. Layout Architecture (Fluid Grid)
-* **Modular Paneling:** The interface uses a fluid CSS Grid. Panels are strictly rectangular with rigid 2px border-radii (almost sharp).
-* **Zero Padding Waste:** Internal padding within panels should be extremely tight (`8px` to `12px`) to maximize data density on the screen.
-* **Header:** A highly compact top bar containing system status, ping/latency, and firm logo. No wasted vertical space.
+The UI features an interactive **Bloomberg Command Header**:
+- **Prompt Format**: `AURA-OPT > [COMMAND] <GO>`
+- **Supported Command Sequences**:
+  - `VOLS <GO>` / `F3`: Focuses on the 3D SABR Volatility Surface & Smile curves.
+  - `RISK <GO>` / `F4`: Inspects live Net Delta, Net Gamma, Net Vega & SPAN Margin requirements.
+  - `TICK <GO>` / `F2`: Expands high-frequency live market tick tape.
+  - `HELP <GO>` / `F1`: Displays terminal operating manual & quantitative shortcuts.
 
-## 5. Component Styling
-* **Shadows:** Absolutely no drop-shadows or glows. Depth is created strictly through `Bg-Primary` vs `Bg-Panel` contrast.
-* **Borders:** Razor-thin (`1px solid var(--border-subtle)`).
-* **Buttons:** Flat, brutalist design. Background changes on hover, no scaling animations.
+---
 
-## 6. Animation & Fluidity
-* **Micro-interactions:** `100ms ease-out` on hover states (buttons, table rows) to make the UI feel hyper-responsive.
-* **Data Streaming:** Ticking data (like the live tape or risk metrics) should flash background color instantly (`Semantic-Up` or `Semantic-Down`) and fade out over `300ms`.
-* **Chart Rendering:** All 3D and 2D charts must utilize WebGL (via Plotly) to guarantee 60 FPS rendering even when rotating a 100x100 volatility surface matrix.
+## 4. Typography & Grid Layout Architecture
+
+* **Font Stack**: Primary Monospace (`'JetBrains Mono'`, `'Roboto Mono'`, `'Courier New'`, monospace) for tabular grid and numerical outputs; Terminal UI Sans (`'Inter'`, sans-serif) for system headers.
+* **4-Quadrant Grid Architecture**:
+  - **Top Bar**: Command Line Input Box, Latency Ping Counter, Exchange Connectivity Status (`EUREX`, `EURONEXT`, `LSEG`, `LMAX IPC`).
+  - **Left Quadrant**: Portfolio Risk Matrix & Real-time System Event Log.
+  - **Center Quadrant**: WebGL-powered 3D SABR Volatility Surface with 2D Smile and Term Structure charts (Amber/Cyan colorscale).
+  - **Right Quadrant**: High-frequency Order Book & Live Execution Tape.
+  - **Footer Ticker**: Real-time European market index ticker ribbon (FDAX, FSTX50, CAC40, FTSE100).
+
+---
+
+## 5. Micro-Animations & Data Streaming
+
+* **Tick Flash Updates**: Executed buy/sell ticks instantly flash `Semantic-Up` (`#00E676`) or `Semantic-Down` (`#FF3D00`) background cells with a `300ms` decay curve.
+* **Real-Time WebGL Rendering**: 3D surface plot renders at 60 FPS using Plotly WebGL integration with Bloomberg Amber-to-Cyan color gradients.
+

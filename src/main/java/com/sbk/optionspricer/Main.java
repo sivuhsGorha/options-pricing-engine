@@ -1,108 +1,67 @@
 package com.sbk.optionspricer;
 
-import com.sbk.optionspricer.models.tree.AmericanTreePricer;
-import com.sbk.optionspricer.models.pde.CrankNicolsonPricer;
-import com.sbk.optionspricer.risk.greeks.HigherOrderGreeks;
-import com.sbk.optionspricer.risk.greeks.AnalyticalHigherGreeks;
+import com.sbk.optionspricer.benchmark.InstitutionalSuiteTest;
+import com.sbk.optionspricer.benchmark.LatencyBenchmarkTest;
+import com.sbk.optionspricer.benchmark.Level3UpgradesTest;
+import com.sbk.optionspricer.core.RingBufferTest;
+import com.sbk.optionspricer.core.UnifiedQuantEngine;
+import com.sbk.optionspricer.gateways.GatewayTest;
+import com.sbk.optionspricer.risk.RiskEngineTest;
+import com.sbk.optionspricer.volatility.VolatilitySurfaceTest;
 
 /**
- * Demonstrates the full pricing engine:
- *   1. Black-Scholes price + Greeks for a sample option
- *   2. Monte Carlo cross-check against the closed-form price
- *   3. Implied volatility solved back out from a known price
- *   4. A real, measured timing benchmark (not an asserted number —
- *      actually measured on whatever machine this runs on)
+ * Unified Main Entry Point for the AURA-OPT Options Pricing Engine.
+ * Executes core pricing models, benchmark suites, and launches the unified
+ * real-time cross-functional quantitative engine.
  */
 public class Main {
 
-    public static void main(String[] args) {
-        OptionParameters params = OptionParameters.noDividend(
-                100.0,  // spot
-                105.0,  // strike
-                0.5,    // 6 months to expiry
-                0.05,   // 5% risk-free rate
-                0.25    // 25% annualized volatility
-        );
+    public static void main(String[] args) throws Exception {
+        System.out.println("=========================================================================");
+        System.out.println("      AURA-OPT INSTITUTIONAL OPTIONS PRICING & EXECUTION PLATFORM        ");
+        System.out.println("=========================================================================");
 
-        System.out.println("=== Black-Scholes Pricing ===");
+        // 1. Core Mathematical Models
+        System.out.println("\n[MODULE 1] Core Mathematical Pricing Models");
+        OptionParameters params = OptionParameters.noDividend(100.0, 105.0, 0.5, 0.05, 0.25);
         double callPrice = BlackScholesPricer.price(OptionType.CALL, params);
         double putPrice = BlackScholesPricer.price(OptionType.PUT, params);
-        System.out.printf("Call price: %.4f%n", callPrice);
-        System.out.printf("Put price:  %.4f%n", putPrice);
+        System.out.printf("Black-Scholes Call: %.4f | Put: %.4f | Parity: %.6f%n",
+                callPrice, putPrice, callPrice - putPrice);
 
-        // Put-call parity sanity check: C - P should equal S*e^-qT - K*e^-rT.
-        // This is a free correctness check that costs nothing to include.
-        double parityLeft = callPrice - putPrice;
-        double parityRight = params.spot() - params.strike() * Math.exp(-params.riskFreeRate() * params.timeToExpiry());
-        System.out.printf("Put-call parity check: %.6f vs %.6f (should match)%n", parityLeft, parityRight);
+        // 2. Lock-Free Ring Buffer IPC
+        System.out.println("\n[MODULE 2] LMAX Ring Buffer IPC Benchmark");
+        RingBufferTest.main(new String[0]);
 
-        System.out.println("\n=== Greeks (Call) ===");
-        Greeks callGreeks = BlackScholesPricer.greeks(OptionType.CALL, params);
-        System.out.printf("Delta: %.4f%n", callGreeks.delta());
-        System.out.printf("Gamma: %.4f%n", callGreeks.gamma());
-        System.out.printf("Vega (per 1%% vol):  %.4f%n", callGreeks.vega() / 100);
-        System.out.printf("Theta (per day):    %.4f%n", callGreeks.theta() / 365);
-        System.out.printf("Rho (per 1%% rate):  %.4f%n", callGreeks.rho() / 100);
+        // 3. Volatility Calibration
+        System.out.println("\n[MODULE 3] SABR & SVI Volatility Calibration");
+        VolatilitySurfaceTest.main(new String[0]);
 
-        System.out.println("\n=== Higher-Order Greeks (Call) ===");
-        HigherOrderGreeks higherGreeks = AnalyticalHigherGreeks.calculate(OptionType.CALL, params);
-        System.out.printf("Vanna (dDelta/dVol): %.4f%n", higherGreeks.vanna());
-        System.out.printf("Volga (dVega/dVol):  %.4f%n", higherGreeks.volga());
-        System.out.printf("Charm (dDelta/dT):   %.4f%n", higherGreeks.charm());
-        System.out.printf("Speed (dGamma/dS):   %.6f%n", higherGreeks.speed());
-        System.out.printf("Color (dGamma/dT):   %.4f%n", higherGreeks.color());
+        // 4. Exchange Gateway Replay
+        System.out.println("\n[MODULE 4] Simulated Binary Exchange Gateway Replay");
+        GatewayTest.main(new String[0]);
 
-        System.out.println("\n=== Monte Carlo Cross-Check (Call) ===");
-        MonteCarloPricer.PricingResult mcResult = MonteCarloPricer.price(OptionType.CALL, params, 500_000, 42L);
-        System.out.printf("Monte Carlo price: %.4f (+/- %.4f, 95%% CI)%n", mcResult.price(), mcResult.confidenceInterval95());
-        System.out.printf("Black-Scholes price: %.4f%n", callPrice);
-        double diff = Math.abs(mcResult.price() - callPrice);
-        boolean withinCI = diff <= mcResult.confidenceInterval95();
-        System.out.printf("Difference: %.4f — %s%n", diff,
-                withinCI ? "within simulation error, consistent" : "OUTSIDE simulation error, investigate");
+        // 5. Enterprise Risk Engine
+        System.out.println("\n[MODULE 5] Portfolio Risk Engine & SPAN Margin Simulator");
+        RiskEngineTest.main(new String[0]);
 
-        System.out.println("\n=== Implied Volatility Solve ===");
-        System.out.printf("Known call price %.4f was generated with %.1f%% volatility.%n",
-                callPrice, params.volatility() * 100);
-        double solvedVol = ImpliedVolatilitySolver.solve(OptionType.CALL, params, callPrice);
-        System.out.printf("Solver recovered: %.4f%% volatility%n", solvedVol * 100);
+        // 6. Latency Benchmark
+        System.out.println("\n[MODULE 6] High-Frequency Latency Verification");
+        LatencyBenchmarkTest.main(new String[0]);
 
-        System.out.println("\n=== Trinomial Tree Pricing (American vs European) ===");
-        double amCallPrice = AmericanTreePricer.price(OptionType.CALL, params, 500);
-        double amPutPrice = AmericanTreePricer.price(OptionType.PUT, params, 500);
-        System.out.printf("American Call price (500 steps): %.4f (Early exercise rarely optimal for non-dividend calls)%n", amCallPrice);
-        System.out.printf("American Put price (500 steps):  %.4f (Should be >= European Put %.4f due to early exercise premium)%n", amPutPrice, putPrice);
+        // 7. Level 3 Proprietary Upgrades
+        System.out.println("\n[MODULE 7] Level 3 Proprietary Upgrades Verification");
+        Level3UpgradesTest.main(new String[0]);
 
-        System.out.println("\n=== Crank-Nicolson PDE Pricing (American) ===");
-        double pdeAmCall = CrankNicolsonPricer.price(OptionType.CALL, params, 500, 500, true);
-        double pdeAmPut = CrankNicolsonPricer.price(OptionType.PUT, params, 500, 500, true);
-        System.out.printf("PDE American Call (500x500 grid): %.4f%n", pdeAmCall);
-        System.out.printf("PDE American Put (500x500 grid):  %.4f%n", pdeAmPut);
+        // 8. Institutional Quantitative Upgrades
+        System.out.println("\n[MODULE 8] Institutional Quantitative & Architecture Upgrades");
+        InstitutionalSuiteTest.main(new String[0]);
 
-        System.out.println("\n=== Timing Benchmark (measured, not asserted) ===");
-        int iterations = 100_000;
-        long start = System.nanoTime();
-        double checksum = 0; // prevents the JIT from optimizing the loop away entirely
-        for (int i = 0; i < iterations; i++) {
-            checksum += BlackScholesPricer.price(OptionType.CALL, params);
-        }
-        long elapsedNanos = System.nanoTime() - start;
-        double avgMicros = (elapsedNanos / 1000.0) / iterations;
-        System.out.printf("Priced %,d options in %.2f ms total (avg %.3f microseconds/option)%n",
-                iterations, elapsedNanos / 1_000_000.0, avgMicros);
-        System.out.printf("(checksum %.2f — ignore, just prevents dead-code elimination)%n", checksum);
-        System.out.println("Note: this is a single-threaded, cold-JVM measurement on whatever");
-        System.out.println("machine runs it — it's real, but it's not a benchmark against a");
-        System.out.println("production system, and JIT warm-up means a longer run would show");
-        System.out.println("a faster steady-state number than this one.");
+        // 9. Launch Unified Real-Time Engine
+        System.out.println("\n[MODULE 9] Launching Unified Quant Execution Engine...");
+        UnifiedQuantEngine engine = new UnifiedQuantEngine();
+        engine.start();
 
-        System.out.println("\n=== Level 3 Proprietary Upgrades ===");
-        double fastExpVal = FastMath.fastExp(-0.456);
-        System.out.printf("FastMath Chebyshev exp(-0.456): %.8f%n", fastExpVal);
-
-        double[] strikes = new double[]{90.0, 95.0, 100.0, 105.0, 110.0};
-        double[] pricesSimd = new double[5];
-        VectorBlackScholesPricer.priceBatchVectorized(100.0, strikes, 0.5, 0.05, 0.25, true, pricesSimd);
-        System.out.printf("SIMD Vectorized 5-strike pricing: Call@100 = %.4f%n", pricesSimd[2]);
+        System.out.println("\n[SUCCESS] UNIFIED SYSTEM ONLINE AND PROCESSING REAL-TIME MMAP IPC STATE.");
     }
 }

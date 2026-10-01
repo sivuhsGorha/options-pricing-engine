@@ -5,7 +5,7 @@ package com.sbk.optionspricer.risk;
  * Computes the Initial Margin (IM) required by the clearinghouse by stress-testing 
  * the portfolio's Greeks against extreme market scenarios.
  */
-public class SpanMarginSimulator {
+public class SpanMarginApproximation {
     
     // Extreme market shock assumptions (e.g., 1-day Value at Risk limits)
     private static final double SPOT_SHOCK_UP = 0.15;    // +15% Spot move

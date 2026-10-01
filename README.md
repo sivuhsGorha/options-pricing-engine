@@ -97,23 +97,41 @@ options-pricing-engine/
 - Linux kernel 5.15+ (with `cgroups v2` and isolated CPU cores for production)
 
 ### Build & Run
+### Build & Run
 ```bash
-# Compile and package zero-dependency JAR
-javac -d target/classes src/main/java/com/sbk/optionspricer/*.java
+# 1. Compile Java 21 codebase with Incubator Vector API support
+javac --add-modules jdk.incubator.vector -d target/classes (Get-ChildItem -Recurse src/main/java/*.java)
 
-# Run main benchmark and cross-checksuite
-java -cp target/classes com.sbk.optionspricer.Main
+# 2. Ingest Live Market Data (Finnhub, Polygon, Alpha Vantage, MarketStack)
+python fetch_real_api_data.py
+
+# 3. Launch Core Verification Suite
+java --add-modules jdk.incubator.vector -cp target/classes com.sbk.optionspricer.Main
+
+# 4. Launch Bloomberg Terminal Dashboard Server (Web UI: http://localhost:8080)
+java --add-modules jdk.incubator.vector -cp target/classes com.sbk.optionspricer.web.OptionsDashboardServer
 ```
+
+---
+
+## 🖥 Bloomberg Terminal Web Dashboard
+
+The engine includes a zero-dependency embedded web server hosting a Bloomberg-style dark mode terminal UI at **`http://localhost:8080/`**:
+
+- **Real-Time Market Rate Feed**: Connects to Finnhub, Polygon.io, Alpha Vantage, and MarketStack for live SPY equity options chain ingestion.
+- **Interactive 3D Volatility Surface**: Real-time Plotly 3D visualizer supporting **SSVI (Gatheral)**, **Free-Boundary SABR**, and **SABR (Hagan 2002)** models with hotkey switching (`SSVI`, `FREE`, `SABR`).
+- **Telemetry & Risk Matrix**: Streaming zero-allocation binary WebSocket telemetry on `ws://localhost:8081` for real-time Greeks, L3 order fill probability, Smart Order Router (SOR) allocation breakdown, and SPAN / Eurex Prisma margin optimizer.
 
 ---
 
 ## 📜 Documentation Index
 
+- Read [`DESIGN.md`](file:///c:/options-pricing-engine/DESIGN.md) for Bloomberg Terminal UI specs and color tokens.
 - Read [`STRATEGY.md`](file:///c:/options-pricing-engine/STRATEGY.md) for strategy design and volatility arbitrage execution.
-- Read [`DATA.md`](file:///c:/options-pricing-engine/DATA.md) for market data ingestion, feeds, and vol surface calibration.
+- Read [`DATA.md`](file:///c:/options-pricing-engine/DATA.md) for market data ingestion, feeds, and multi-API provider pipeline.
 - Read [`BACKTEST.md`](file:///c:/options-pricing-engine/BACKTEST.md) for simulation engine details.
 - Read [`RISK.md`](file:///c:/options-pricing-engine/RISK.md) for real-time risk parameters and hardware kill-switches.
-- Read [`EXECUTION.md`](file:///c:/options-pricing-engine/EXECUTION.md) for native binary gateway protocol specs.
+- Read [`EXECUTION.md`](file:///c:/options-pricing-engine/EXECUTION.md) for native binary gateway protocol specs and Smart Order Routing.
 - Read [`INFRA.md`](file:///c:/options-pricing-engine/INFRA.md) for kernel tuning, Solarflare OpenOnload, and off-heap memory models.
 - Read [`RESEARCH.md`](file:///c:/options-pricing-engine/RESEARCH.md) for stochastic calculus and PDE numerical derivations.
 - Read [`AGENTS.md`](file:///c:/options-pricing-engine/AGENTS.md) for automated agent operating procedures.
