@@ -1,7 +1,7 @@
 package com.sbk.optionspricer.risk;
 
-import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * Aggregates live Greeks across the entire portfolio in real-time.
@@ -9,7 +9,7 @@ import java.util.List;
  */
 public class GreekAggregator {
     
-    private final List<PortfolioPosition> positions = new ArrayList<>();
+    private final List<PortfolioPosition> positions = new CopyOnWriteArrayList<>();
     
     // Firm-wide Risk Limits
     private final double maxNetDelta;
