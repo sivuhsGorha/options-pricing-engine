@@ -22,8 +22,11 @@ public class BlackScholesPricer {
     }
 
     public static double price(OptionType type, double spot, double strike, double timeToExpiry, double riskFreeRate, double volatility, double dividendYield) {
-        if (isDegenerate(timeToExpiry, volatility)) {
+        if (timeToExpiry <= NEAR_ZERO) {
             return intrinsicValue(type, spot, strike);
+        }
+        if (volatility <= NEAR_ZERO) {
+            return discountedDeterministicPayoff(type, spot, strike, timeToExpiry, riskFreeRate, dividendYield);
         }
 
         double d1 = d1(spot, strike, timeToExpiry, riskFreeRate, volatility, dividendYield);
@@ -45,7 +48,7 @@ public class BlackScholesPricer {
     }
 
     public static void greeks(OptionType type, double spot, double strike, double timeToExpiry, double riskFreeRate, double volatility, double dividendYield, double[] out) {
-        if (isDegenerate(timeToExpiry, volatility)) {
+        if (timeToExpiry <= NEAR_ZERO) {
             double intrinsicDelta = switch (type) {
                 case CALL -> spot > strike ? 1.0 : 0.0;
                 case PUT -> spot < strike ? -1.0 : 0.0;
@@ -55,6 +58,21 @@ public class BlackScholesPricer {
             out[2] = 0.0;
             out[3] = 0.0;
             out[4] = 0.0;
+            return;
+        }
+        if (volatility <= NEAR_ZERO) {
+            double discountedSpot = spot * Math.exp(-dividendYield * timeToExpiry);
+            double discountedStrike = strike * Math.exp(-riskFreeRate * timeToExpiry);
+            boolean isItm = (type == OptionType.CALL) ? (discountedSpot > discountedStrike) : (discountedStrike > discountedSpot);
+            double discQ = Math.exp(-dividendYield * timeToExpiry);
+            double discR = Math.exp(-riskFreeRate * timeToExpiry);
+
+            out[0] = isItm ? ((type == OptionType.CALL) ? discQ : -discQ) : 0.0;
+            out[1] = 0.0;
+            out[2] = 0.0;
+            out[3] = isItm ? ((type == OptionType.CALL) ? (-dividendYield * discountedSpot + riskFreeRate * discountedStrike)
+                                                        : (dividendYield * discountedSpot - riskFreeRate * discountedStrike)) : 0.0;
+            out[4] = isItm ? ((type == OptionType.CALL) ? strike * timeToExpiry * discR : -strike * timeToExpiry * discR) : 0.0;
             return;
         }
 
@@ -81,6 +99,14 @@ public class BlackScholesPricer {
 
     private static boolean isDegenerate(double timeToExpiry, double volatility) {
         return timeToExpiry <= NEAR_ZERO || volatility <= NEAR_ZERO;
+    }
+
+    private static double discountedDeterministicPayoff(OptionType type, double spot, double strike, double timeToExpiry, double riskFreeRate, double dividendYield) {
+        double discountedSpot = spot * Math.exp(-dividendYield * timeToExpiry);
+        double discountedStrike = strike * Math.exp(-riskFreeRate * timeToExpiry);
+        return (type == OptionType.CALL)
+                ? Math.max(discountedSpot - discountedStrike, 0.0)
+                : Math.max(discountedStrike - discountedSpot, 0.0);
     }
 
     private static double intrinsicValue(OptionType type, double spot, double strike) {
