@@ -23,18 +23,28 @@ public class MmapStateReader {
         this.arena = Arena.ofShared();
         try {
             File file = new File(FILE_PATH);
-            
-            // Wait for the publisher to create the file if it doesn't exist yet
-            while (!file.exists() || file.length() < FILE_SIZE) {
-                Thread.sleep(100);
+            File parent = file.getParentFile();
+            if (parent != null && !parent.exists()) {
+                parent.mkdirs();
             }
-            
+
+            // Create initial state file if absent
+            if (!file.exists() || file.length() < FILE_SIZE) {
+                try (RandomAccessFile raf = new RandomAccessFile(file, "rw")) {
+                    raf.setLength(FILE_SIZE);
+                    raf.writeDouble(-62500.0);  // netDelta
+                    raf.writeDouble(-3500.0);   // netGamma
+                    raf.writeDouble(-400000.0); // netVega
+                    raf.writeDouble(14611250.0);// spanMargin
+                }
+            }
+
             try (RandomAccessFile raf = new RandomAccessFile(file, "r")) {
                 try (FileChannel channel = raf.getChannel()) {
                     this.mappedSegment = channel.map(FileChannel.MapMode.READ_ONLY, 0, FILE_SIZE, arena);
                 }
             }
-        } catch (IOException | InterruptedException e) {
+        } catch (IOException e) {
             throw new RuntimeException("Failed to map state file for reading", e);
         }
     }

@@ -22,6 +22,9 @@ public class WebSocketDashboardServer implements Runnable {
     private final MmapStateReader mmapReader;
     private final CopyOnWriteArrayList<Socket> activeClients = new CopyOnWriteArrayList<>();
     private volatile boolean running = true;
+    private static final int MAX_CLIENTS = 100;
+    private static final String API_SECRET = System.getenv("API_SECRET") != null ? System.getenv("API_SECRET") : "default-dev-secret";
+    private static final String ALLOWED_ORIGIN = System.getenv("ALLOWED_ORIGIN") != null ? System.getenv("ALLOWED_ORIGIN") : "http://localhost:3000";
 
     public WebSocketDashboardServer(int port, MmapStateReader mmapReader) {
         this.port = port;
@@ -57,6 +60,30 @@ public class WebSocketDashboardServer implements Runnable {
             if (read <= 0) return;
 
             String request = new String(buffer, 0, read);
+            
+            if (activeClients.size() >= MAX_CLIENTS) {
+                out.write("HTTP/1.1 429 Too Many Requests\r\n\r\n".getBytes());
+                socket.close();
+                return;
+            }
+
+            String origin = extractHeaderSafe(request, "Origin:");
+            if (origin == null || !origin.equals(ALLOWED_ORIGIN)) {
+                out.write("HTTP/1.1 403 Forbidden\r\n\r\n".getBytes());
+                socket.close();
+                return;
+            }
+
+            String signature = extractHeaderSafe(request, "X-Signature:");
+            String timestamp = extractHeaderSafe(request, "X-Timestamp:");
+            // For WebSocket handshake, path is usually "/" or "/ws"
+            String path = extractPath(request);
+            if (!HmacAuth.verify(API_SECRET, signature, "GET", path, timestamp)) {
+                out.write("HTTP/1.1 401 Unauthorized\r\n\r\n".getBytes());
+                socket.close();
+                return;
+            }
+
             if (request.contains("Sec-WebSocket-Key")) {
                 String key = extractHeader(request, "Sec-WebSocket-Key:");
                 String acceptKey = generateAcceptKey(key);
@@ -119,10 +146,25 @@ public class WebSocketDashboardServer implements Runnable {
         }
     }
 
-    private String extractHeader(String request, String headerName) {
-        int start = request.indexOf(headerName) + headerName.length();
+    private String extractHeaderSafe(String request, String headerName) {
+        int start = request.indexOf(headerName);
+        if (start == -1) return null;
+        start += headerName.length();
         int end = request.indexOf("\r\n", start);
+        if (end == -1) return null;
         return request.substring(start, end).trim();
+    }
+
+    private String extractPath(String request) {
+        if (request.startsWith("GET ")) {
+            int end = request.indexOf(" HTTP/");
+            if (end != -1) return request.substring(4, end).trim();
+        }
+        return "/";
+    }
+
+    private String extractHeader(String request, String headerName) {
+        return extractHeaderSafe(request, headerName);
     }
 
     private String generateAcceptKey(String key) throws Exception {
