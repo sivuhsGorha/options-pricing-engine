@@ -40,8 +40,14 @@ public final class SmartOrderRouter {
      * Routes a total order volume across available venues with latency equalization offsets.
      */
     public static List<SubOrder> routeOrder(int totalQuantity, double[] venueLiquidityWeights) {
-        List<SubOrder> subOrders = new ArrayList<>();
+        if (totalQuantity <= 0) {
+            throw new IllegalArgumentException("Total quantity must be positive");
+        }
+        
         Venue[] venues = Venue.values();
+        if (venueLiquidityWeights == null || venueLiquidityWeights.length != venues.length) {
+            throw new IllegalArgumentException("Must provide exactly one weight per venue");
+        }
 
         double maxLatency = 0.0;
         for (Venue v : venues) {
@@ -49,17 +55,34 @@ public final class SmartOrderRouter {
         }
 
         double totalWeight = 0.0;
-        for (double w : venueLiquidityWeights) totalWeight += w;
+        for (double w : venueLiquidityWeights) {
+            if (!Double.isFinite(w) || w < 0) {
+                throw new IllegalArgumentException("Weights must be finite non-negative numbers");
+            }
+            totalWeight += w;
+        }
+        
+        if (totalWeight <= 0.0) {
+            throw new IllegalArgumentException("Total weight must be positive");
+        }
 
+        List<SubOrder> subOrders = new ArrayList<>();
         int remainingQty = totalQuantity;
         for (int i = 0; i < venues.length; i++) {
             Venue venue = venues[i];
             int qty = (i == venues.length - 1) ? remainingQty : (int) Math.round(totalQuantity * (venueLiquidityWeights[i] / totalWeight));
+            
+            // Prevent overallocating before the last venue
+            if (i < venues.length - 1) {
+                qty = Math.min(qty, remainingQty);
+            }
+            
             remainingQty -= qty;
 
-            // Offset delay so all sub-orders reach matching engines simultaneously
             double delayOffset = maxLatency - venue.latencyMicros;
-            subOrders.add(new SubOrder(venue, qty, delayOffset));
+            if (qty > 0) {
+                subOrders.add(new SubOrder(venue, qty, delayOffset));
+            }
         }
 
         return subOrders;
