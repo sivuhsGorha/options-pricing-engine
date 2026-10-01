@@ -1,8 +1,5 @@
 package com.sbk.optionspricer.core;
 
-import com.sbk.optionspricer.Greeks;
-import com.sbk.optionspricer.OptionParameters;
-import com.sbk.optionspricer.OptionType;
 import com.sbk.optionspricer.VectorBlackScholesPricer;
 import com.sbk.optionspricer.gateways.QueuePositionEstimator;
 import com.sbk.optionspricer.gateways.SmartOrderRouter;
@@ -14,9 +11,6 @@ import com.sbk.optionspricer.volatility.SsviApproximation;
 import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
 import java.util.List;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
 
 /**
  * Unified Production-Grade Quantitative Options Pricing, Risk & Execution Engine.
@@ -27,59 +21,38 @@ import java.util.concurrent.TimeUnit;
 public final class UnifiedQuantEngine {
 
     private final MmapStatePublisher publisher;
-    private final MarketDataRingBuffer ringBuffer;
-    private final Arena arena;
-    private final ScheduledExecutorService engineScheduler;
 
     private double currentSpot = 100.0;
     private double netDelta = -62500.0;
     private double netGamma = -3500.0;
     private double netVega = -400000.0;
     private double currentSpanMargin = 14611250.0;
-    private boolean isRunning = false;
 
-    public UnifiedQuantEngine() {
-        this.publisher = new MmapStatePublisher();
-        this.ringBuffer = new MarketDataRingBuffer(1024);
-        this.arena = Arena.ofShared();
-        this.engineScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "unified-quant-engine");
-            t.setDaemon(true);
-            return t;
-        });
+    public UnifiedQuantEngine(MmapStatePublisher publisher) {
+        this.publisher = publisher;
     }
 
-    /**
-     * Starts the unified cross-functional execution engine.
-     */
-    public synchronized void start() {
-        if (isRunning) return;
-        isRunning = true;
-
+    public void initialize() {
         System.out.println("=========================================================================");
         System.out.println("        STARTING UNIFIED QUANTITATIVE OPTIONS EXECUTION ENGINE           ");
         System.out.println("=========================================================================");
-
-        // Initial state publish
         publisher.publishRiskState(netDelta, netGamma, netVega, currentSpanMargin);
-
-        // Schedule main quantitative processing loop (100 Hz ticker update)
-        engineScheduler.scheduleAtFixedRate(this::tickProcessingLoop, 0, 10, TimeUnit.MILLISECONDS);
-
         System.out.println("[UNIFIED ENGINE] Off-heap FFM Structs, LMAX Ring Buffer, SSVI Surface,");
         System.out.println("[UNIFIED ENGINE] SIMD Solvers, SOR, SPAN Optimizer & Mmap IPC ONLINE.");
         System.out.println("=========================================================================");
     }
 
     /**
-     * Continuous quantitative tick processing cycle.
+     * Continuous quantitative tick processing cycle, driven by an external environment.
      */
-    private void tickProcessingLoop() {
+    public void processTick(double spot, double deltaChange) {
         try (Arena confined = Arena.ofConfined()) {
+            currentSpot = spot;
+            netDelta += deltaChange;
+            
             // 1. Off-Heap FFM Ingestion
             MemorySegment tickSegment = MemorySegmentStructs.allocateTick(confined);
             long nowNs = System.nanoTime();
-            currentSpot += (Math.random() - 0.5) * 0.10;
             MemorySegmentStructs.setTickData(tickSegment, nowNs, 450000L, currentSpot - 0.05, currentSpot + 0.05, 500, 500, 1L);
 
             // 2. Volatility Surface Calibration Update (SSVI & Free-Boundary SABR)
@@ -94,7 +67,6 @@ public final class UnifiedQuantEngine {
             VectorPdeSolver.priceBatchPdeVectorized(true, currentSpot, strikes, 0.5, 0.05, sabrVol, prices);
 
             // 4. Portfolio Greeks Simulation & SPAN Margin Optimization
-            netDelta += (Math.random() - 0.5) * 100.0;
             SpanMarginOptimizer.OptimizationResult optResult = SpanMarginOptimizer.optimizeMargin(
                 netDelta, netGamma, currentSpot, currentSpanMargin
             );
@@ -117,25 +89,11 @@ public final class UnifiedQuantEngine {
         } catch (Throwable t) {
             System.err.println("[FATAL] UnifiedQuantEngine encountered a critical error: " + t.getMessage());
             t.printStackTrace();
-            stop();
         }
     }
 
     public synchronized void stop() {
-        if (!isRunning) return;
-        isRunning = false;
-        engineScheduler.shutdown();
         publisher.close();
-        arena.close();
         System.out.println("[UNIFIED ENGINE] Service stopped cleanly.");
-    }
-
-    public static void main(String[] args) throws Exception {
-        UnifiedQuantEngine engine = new UnifiedQuantEngine();
-        engine.start();
-
-        System.out.println("Unified Quant Engine running in background... Press ENTER to terminate test run.");
-        System.in.read();
-        engine.stop();
     }
 }

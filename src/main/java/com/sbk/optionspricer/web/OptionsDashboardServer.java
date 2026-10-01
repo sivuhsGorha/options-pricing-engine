@@ -33,8 +33,10 @@ public class OptionsDashboardServer {
 
     public static void main(String[] args) throws Exception {
         System.out.println("Starting Core Pricing Engine (UnifiedQuantEngine)...");
-        com.sbk.optionspricer.core.UnifiedQuantEngine engine = new com.sbk.optionspricer.core.UnifiedQuantEngine();
-        engine.start();
+        com.sbk.optionspricer.core.MmapStatePublisher publisher = new com.sbk.optionspricer.core.MmapStatePublisher();
+        com.sbk.optionspricer.core.UnifiedQuantEngine engine = new com.sbk.optionspricer.core.UnifiedQuantEngine(publisher);
+        com.sbk.optionspricer.core.QuantSimulationHarness harness = new com.sbk.optionspricer.core.QuantSimulationHarness(engine);
+        harness.start();
         
         System.out.println("Connecting to Core Pricing Engine (Mmap IPC)...");
         mmapReader = new MmapStateReader();

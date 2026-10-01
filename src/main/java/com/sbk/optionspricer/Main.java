@@ -59,8 +59,10 @@ public class Main {
 
         // 9. Launch Unified Real-Time Engine
         System.out.println("\n[MODULE 9] Launching Unified Quant Execution Engine...");
-        UnifiedQuantEngine engine = new UnifiedQuantEngine();
-        engine.start();
+        com.sbk.optionspricer.core.MmapStatePublisher publisher = new com.sbk.optionspricer.core.MmapStatePublisher();
+        com.sbk.optionspricer.core.UnifiedQuantEngine engine = new com.sbk.optionspricer.core.UnifiedQuantEngine(publisher);
+        com.sbk.optionspricer.core.QuantSimulationHarness harness = new com.sbk.optionspricer.core.QuantSimulationHarness(engine);
+        harness.start();
 
         System.out.println("\n[SUCCESS] UNIFIED SYSTEM ONLINE AND PROCESSING REAL-TIME MMAP IPC STATE.");
     }
