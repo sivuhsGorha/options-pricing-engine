@@ -9,6 +9,8 @@ import java.nio.ByteOrder;
 import java.security.MessageDigest;
 import java.util.Base64;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * Zero-Allocation Binary WebSocket Server for ultra-low-latency market & risk telemetry.
@@ -23,6 +25,7 @@ public class WebSocketDashboardServer implements Runnable {
     private final CopyOnWriteArrayList<Socket> activeClients = new CopyOnWriteArrayList<>();
     private volatile boolean running = true;
     private static final int MAX_CLIENTS = 100;
+    private final ExecutorService clientExecutor = Executors.newFixedThreadPool(MAX_CLIENTS);
     private static final String API_SECRET = System.getenv("API_SECRET") != null ? System.getenv("API_SECRET") : "default-dev-secret";
     private static final String ALLOWED_ORIGIN = System.getenv("ALLOWED_ORIGIN") != null ? System.getenv("ALLOWED_ORIGIN") : "http://localhost:3000";
 
@@ -43,14 +46,21 @@ public class WebSocketDashboardServer implements Runnable {
 
             while (running) {
                 Socket clientSocket = serverSocket.accept();
-                new Thread(() -> handleHandshake(clientSocket), "ws-client-" + clientSocket.getPort()).start();
+                try {
+                    clientSocket.setSoTimeout(5000); // Handshake timeout
+                    clientExecutor.submit(() -> handleClient(clientSocket));
+                } catch (Exception e) {
+                    try { clientSocket.close(); } catch (Exception ignored) {}
+                }
             }
         } catch (Exception e) {
             System.err.println("WebSocket Server stopped: " + e.getMessage());
+        } finally {
+            clientExecutor.shutdownNow();
         }
     }
 
-    private void handleHandshake(Socket socket) {
+    private void handleClient(Socket socket) {
         try {
             InputStream in = socket.getInputStream();
             OutputStream out = socket.getOutputStream();
@@ -98,8 +108,19 @@ public class WebSocketDashboardServer implements Runnable {
 
                 activeClients.add(socket);
                 System.out.println("New WebSocket Client connected: " + socket.getRemoteSocketAddress());
+                
+                // Read loop to detect client disconnect and enforce idle timeout
+                socket.setSoTimeout(30000); // 30s idle timeout
+                byte[] discardBuffer = new byte[1024];
+                while (running && !socket.isClosed()) {
+                    int r = in.read(discardBuffer);
+                    if (r == -1) break; // Client closed connection
+                }
             }
         } catch (Exception e) {
+            // Idle timeout or error
+        } finally {
+            activeClients.remove(socket);
             try { socket.close(); } catch (Exception ignored) {}
         }
     }
