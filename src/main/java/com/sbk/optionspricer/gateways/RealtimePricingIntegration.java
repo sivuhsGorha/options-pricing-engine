@@ -49,14 +49,15 @@ public class RealtimePricingIntegration {
                     double midPrice = tick.getMidPrice();
                     
                     // Solve for IV directly using primitive arguments (dividend yield = 0.0)
-                    double impliedVol = ImpliedVolatilitySolver.solve(
+                    java.util.OptionalDouble impliedVolOpt = ImpliedVolatilitySolver.solve(
                             type, spot, strike, timeToExpiry, riskFreeRate, 0.0, midPrice, scratchGreeks
                     );
                     
-                    if (Double.isNaN(impliedVol)) {
+                    if (impliedVolOpt.isEmpty()) {
                         System.out.printf("Processed %-4s Strike: %.1f | Mid: %5.2f | IV: FAILED TO SOLVE%n",
                             type, strike, midPrice);
                     } else {
+                        double impliedVol = impliedVolOpt.getAsDouble();
                         // Calculate Greeks directly into the pre-allocated scratch buffer
                         BlackScholesPricer.greeks(
                                 type, spot, strike, timeToExpiry, riskFreeRate, impliedVol, 0.0, scratchGreeks
