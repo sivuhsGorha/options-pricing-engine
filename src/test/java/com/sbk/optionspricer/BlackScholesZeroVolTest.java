@@ -45,7 +45,7 @@ public class BlackScholesZeroVolTest {
                             double expectedParityDiff = spot * Math.exp(-q * t) - k * Math.exp(-r * t);
 
                             assertEquals(expectedParityDiff, parityDiff, 1e-9,
-                                    String.format("Put-call parity failed for K=%.1f, r=%.2f, q=%.2f, T=%.4f, vol=%.2f", k, r, q, t, vol));
+                                    String.format(java.util.Locale.ROOT, "Put-call parity failed for K=%.1f, r=%.2f, q=%.2f, T=%.4f, vol=%.2f", k, r, q, t, vol));
                         }
                     }
                 }

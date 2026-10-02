@@ -67,4 +67,53 @@ public class MmapStateTest {
             assertTrue(f.delete(), "Should be able to delete the file between runs if unmapped");
         }
     }
+
+    @Test
+    void testMissingFileThrowsUnavailable() throws Exception {
+        new File(TEST_FILE).delete();
+        MmapStateReader reader = null;
+        try {
+            reader = new MmapStateReader();
+            reader.readState();
+            org.junit.jupiter.api.Assertions.fail("Should throw UNAVAILABLE");
+        } catch (IllegalStateException e) {
+            assertEquals("UNAVAILABLE", e.getMessage());
+        } finally {
+            if (reader != null) reader.close();
+        }
+    }
+
+    @Test
+    void testDeadPublisherThrowsUnavailable() throws Exception {
+        MmapStatePublisher publisher = new MmapStatePublisher();
+        publisher.publishUnavailable(); // zeros the magic number
+        MmapStateReader reader = new MmapStateReader();
+        try {
+            reader.readState();
+            org.junit.jupiter.api.Assertions.fail("Should throw UNAVAILABLE");
+        } catch (IllegalStateException e) {
+            assertEquals("UNAVAILABLE", e.getMessage());
+        }
+        publisher.close();
+        reader.close();
+    }
+
+    @Test
+    void testStaleHeartbeatThrowsUnavailable() throws Exception {
+        MmapStatePublisher publisher = new MmapStatePublisher();
+        publisher.publishRiskState(1,1,1,1);
+        
+        // Wait 2.1 seconds to trigger stale heartbeat
+        Thread.sleep(2100);
+        
+        MmapStateReader reader = new MmapStateReader();
+        try {
+            reader.readState();
+            org.junit.jupiter.api.Assertions.fail("Should throw UNAVAILABLE");
+        } catch (IllegalStateException e) {
+            assertEquals("UNAVAILABLE", e.getMessage());
+        }
+        publisher.close();
+        reader.close();
+    }
 }

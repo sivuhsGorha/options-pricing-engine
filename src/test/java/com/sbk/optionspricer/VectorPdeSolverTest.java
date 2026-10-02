@@ -7,25 +7,28 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 public class VectorPdeSolverTest {
 
     @Test
-    void testVectorPdeSolverMatchesBlackScholes() {
+    void testVectorVsScalarMaxError() {
         double spot = 100.0;
-        double[] strikes = new double[]{90.0};
+        int size = 256;
+        double[] strikes = new double[size];
+        for (int i = 0; i < size; i++) strikes[i] = 50.0 + i * 0.5;
         double timeToExpiry = 1.0;
         double rate = 0.05;
         double vol = 0.20;
-        double[] pricesOut = new double[1];
-
-        // Call VectorPdeSolver with (isCall=true, spot=100, strikes=[90], T=1, rate=0.05, vol=0.20)
-        VectorPdeSolver.priceBatchPdeVectorized(true, spot, strikes, timeToExpiry, rate, vol, pricesOut);
-
-        OptionParameters params = OptionParameters.noDividend(spot, 90.0, timeToExpiry, rate, vol);
-        double bsmCallPrice = BlackScholesPricer.price(OptionType.CALL, params);
-
-        // BSM Call price for these parameters is ~16.6994
-        assertEquals(16.6994, bsmCallPrice, 1e-4, "BSM Call price should be 16.6994");
-
-        // VectorPdeSolver price must match BSM within 1e-2 tolerance
-        assertEquals(bsmCallPrice, pricesOut[0], 1e-2,
-                "VectorPdeSolver price (" + pricesOut[0] + ") must match BSM (" + bsmCallPrice + ") within 1e-2");
+        
+        double[] vectorPrices = new double[size];
+        VectorPdeSolver.priceBatchPdeVectorized(true, spot, strikes, timeToExpiry, rate, vol, vectorPrices);
+        
+        double maxError = 0.0;
+        for (int i = 0; i < size; i++) {
+            OptionParameters params = new OptionParameters(spot, strikes[i], timeToExpiry, rate, vol, 0.0);
+            double scalarPrice = com.sbk.optionspricer.models.pde.DiscreteDividendPricer.price(
+                OptionType.CALL, params, null, 150, 150, true);
+            double error = Math.abs(vectorPrices[i] - scalarPrice);
+            if (error > maxError) maxError = error;
+        }
+        
+        System.out.println("Vector vs Scalar Max Error: " + maxError);
+        assertEquals(0.0, maxError, 1e-9, "Vector implementation must exactly match scalar implementation");
     }
 }

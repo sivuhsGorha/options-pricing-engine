@@ -40,4 +40,28 @@ public class EobiDecoderTest {
 
         decoder.onMessage(payload); // Should be dropped
     }
+
+    @Test
+    void testEobiFuzzing() {
+        MarketDataRingBuffer buffer = new MarketDataRingBuffer(1024);
+        EobiDecoder decoder = new EobiDecoder(buffer);
+        java.util.Random rand = new java.util.Random(42); // seeded
+
+        for (int i = 0; i < 100000; i++) {
+            int len = rand.nextInt(100); // 0 to 99 bytes (some truncated, some oversize)
+            byte[] packet = new byte[len];
+            rand.nextBytes(packet);
+            
+            // Randomly set some valid-looking packet types but garbage data
+            if (len > 0) {
+                packet[0] = (byte) rand.nextInt(5); 
+            }
+            
+            // Should not throw exception or hang
+            decoder.onMessage(packet);
+        }
+        
+        // Ring buffer state unchanged (no items committed)
+        org.junit.jupiter.api.Assertions.assertNull(buffer.poll(), "Ring buffer should be unchanged by dropped packets");
+    }
 }

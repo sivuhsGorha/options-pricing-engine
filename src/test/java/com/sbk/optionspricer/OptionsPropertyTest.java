@@ -22,7 +22,7 @@ public class OptionsPropertyTest {
             }
         }
 
-        System.out.printf("[CDF ACCURACY REPORT] Measured maximum absolute error of NormalDistribution.cdf: %.9e at x=%.3f%n",
+        System.out.printf(java.util.Locale.ROOT, "[CDF ACCURACY REPORT] Measured maximum absolute error of NormalDistribution.cdf: %.9e at x=%.3f%n",
                 maxError, maxErrorX);
         assertTrue(maxError <= 1.5e-7, "Normal CDF max error (" + maxError + ") must be <= 1.5e-7");
     }
@@ -133,6 +133,29 @@ public class OptionsPropertyTest {
         double cMinusV = BlackScholesPricer.price(OptionType.CALL, new OptionParameters(spot, strike, timeToExpiry, rate, vol - hVol, yield));
         double fdVega = (cPlusV - cMinusV) / (2.0 * hVol);
         assertEquals(g.vega(), fdVega, 1e-3, "Vega should match central finite difference within 1e-3");
+
+        // Theta FD: -(C(T+h) - C(T-h)) / (2*h)
+        System.out.println("Theta sign convention: price decay per calendar year (negative for long options)");
+        double hT = 1e-5;
+        double cPlusT = BlackScholesPricer.price(OptionType.CALL, new OptionParameters(spot, strike, timeToExpiry - hT, rate, vol, yield));
+        double cMinusT = BlackScholesPricer.price(OptionType.CALL, new OptionParameters(spot, strike, timeToExpiry + hT, rate, vol, yield));
+        double fdTheta = (cPlusT - cMinusT) / (2.0 * hT);
+        assertEquals(g.theta(), fdTheta, 1e-3, "Theta should match central finite difference within 1e-3");
+
+        // Rho FD: (C(r+h) - C(r-h)) / (2*h)
+        double hR = 1e-4;
+        double cPlusR = BlackScholesPricer.price(OptionType.CALL, new OptionParameters(spot, strike, timeToExpiry, rate + hR, vol, yield));
+        double cMinusR = BlackScholesPricer.price(OptionType.CALL, new OptionParameters(spot, strike, timeToExpiry, rate - hR, vol, yield));
+        double fdRho = (cPlusR - cMinusR) / (2.0 * hR);
+        assertEquals(g.rho(), fdRho, 1e-3, "Rho should match central finite difference within 1e-3");
+    }
+
+    @Test
+    void testSpecificDelta() {
+        // BSM call delta for S=100,K=90,T=1,r=.05,sigma=.2 should be 0.8097
+        OptionParameters p = new OptionParameters(100.0, 90.0, 1.0, 0.05, 0.20, 0.0);
+        Greeks g = BlackScholesPricer.greeks(OptionType.CALL, p);
+        assertEquals(0.8097, g.delta(), 0.0001, "Delta must match expected value");
     }
 
     /** Reference high-precision Abramowitz & Stegun 26.2.17 CDF approximation. */

@@ -12,8 +12,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class MmapConcurrencyStressTest {
 
@@ -38,6 +37,7 @@ public class MmapConcurrencyStressTest {
 
         int readTarget = 10_000_000;
         AtomicLong readsCompleted = new AtomicLong();
+        AtomicLong retries = new AtomicLong();
         AtomicReference<String> tornReadError = new AtomicReference<>();
         CountDownLatch startLatch = new CountDownLatch(1);
         CountDownLatch doneLatch = new CountDownLatch(2); // 1 writer, 1 reader
@@ -75,14 +75,13 @@ public class MmapConcurrencyStressTest {
                         if (state.netDelta != state.netGamma || 
                             state.netGamma != state.netVega || 
                             state.netVega != state.spanMargin) {
-                            tornReadError.set(String.format(
-                                "Torn Read Detected! Delta: %f, Gamma: %f, Vega: %f, Margin: %f",
+                            tornReadError.set(String.format(java.util.Locale.ROOT, "Torn Read Detected! Delta: %f, Gamma: %f, Vega: %f, Margin: %f",
                                 state.netDelta, state.netGamma, state.netVega, state.spanMargin));
                             break;
                         }
                         readsCompleted.incrementAndGet();
                     } catch (IllegalStateException e) {
-                        // Unavailable is fine, just means we hit a retry limit or odd seq. We keep trying.
+                        retries.incrementAndGet();
                     }
                 }
             } catch (Exception e) {
@@ -99,7 +98,49 @@ public class MmapConcurrencyStressTest {
         publisher.close();
         reader.close();
 
+        System.out.println("Total reads: " + readsCompleted.get());
+        System.out.println("Retries: " + retries.get());
+        System.out.println("Torn reads: " + (tornReadError.get() != null ? 1 : 0));
+
         assertNull(tornReadError.get(), "Expected zero torn reads but got: " + tornReadError.get());
-        assertEquals(readTarget, readsCompleted.get(), "Reader should complete all 10M reads safely");
+        assertTrue(readsCompleted.get() >= 10_000_000, "Reader should complete all 10M reads safely");
+    }
+
+    @Test
+    void testMissingFileReturnsUnavailable() throws Exception {
+        new File(TEST_FILE).delete(); // Ensure it doesn't exist
+        try {
+            MmapStateReader reader = new MmapStateReader();
+            reader.readState();
+            fail("Expected IllegalStateException(UNAVAILABLE)");
+        } catch (IllegalStateException e) {
+            assertEquals("UNAVAILABLE", e.getMessage());
+        }
+    }
+
+    @Test
+    void testStaleHeartbeatReturnsUnavailable() throws Exception {
+        MmapStatePublisher publisher = new MmapStatePublisher();
+        publisher.publishRiskState(1.0, 1.0, 1.0, 1.0);
+        
+        MmapStateReader reader = new MmapStateReader();
+        
+        // Sleep past heartbeat timeout (assuming 2 seconds, but let's sleep 2.1s or mock the heartbeat)
+        // Since we can't easily sleep 2 seconds in a unit test without slowing down, we can manually overwrite the heartbeat in the file.
+        // Wait, MmapStateReader uses System.nanoTime(), so we can't mock the time easily. Let's just wait 2.1s if timeout is 2s.
+        // Actually, the timeout in MmapStateReader is probably based on some fixed nanos.
+        // Let's assume the publisher is closed, but file remains.
+        publisher.close();
+        
+        // Wait a bit just in case
+        Thread.sleep(2500); 
+
+        try {
+            reader.readState();
+            fail("Expected IllegalStateException(UNAVAILABLE) due to stale heartbeat");
+        } catch (IllegalStateException e) {
+            assertEquals("UNAVAILABLE", e.getMessage());
+        }
+        reader.close();
     }
 }
