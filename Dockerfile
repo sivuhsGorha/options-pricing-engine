@@ -1,5 +1,5 @@
 # Stage 1: Build Stage
-FROM maven:3.9-eclipse-temurin-26-alpine AS builder
+FROM maven:3.9-eclipse-temurin-25-alpine AS builder
 
 WORKDIR /build
 
@@ -12,7 +12,7 @@ COPY web ./web
 RUN mvn clean verify -DskipTests=false
 
 # Stage 2: Runtime Stage
-FROM eclipse-temurin:26-jre-alpine
+FROM eclipse-temurin:25-jre-alpine
 
 # Security: Create non-root group and user
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
@@ -34,4 +34,4 @@ EXPOSE 8080 8081
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:8080/ || exit 1
 
-ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75.0", "--enable-preview", "--add-modules", "jdk.incubator.vector", "-jar", "/app/app.jar"]
+ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75.0", "--add-modules", "jdk.incubator.vector", "-jar", "/app/app.jar"]

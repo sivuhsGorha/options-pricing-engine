@@ -13,15 +13,20 @@
     <description>AURA-OPT Options Pricing Engine</description>
 
     <properties>
-        <maven.compiler.release>26</maven.compiler.release>
+        <maven.compiler.release>25</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <junit.jupiter.version>5.10.2</junit.jupiter.version>
-        <jacoco.plugin.version>0.8.15</jacoco.plugin.version>
+        <junit.jupiter.version>5.11.1</junit.jupiter.version>
+        <jacoco.plugin.version>0.8.12</jacoco.plugin.version>
         <maven.compiler.plugin.version>3.13.0</maven.compiler.plugin.version>
-        <maven.surefire.plugin.version>3.2.5</maven.surefire.plugin.version>
+        <maven.surefire.plugin.version>3.5.0</maven.surefire.plugin.version>
     </properties>
 
     <dependencies>
+        <dependency>
+            <groupId>com.google.guava</groupId>
+            <artifactId>guava</artifactId>
+            <version>33.2.1-jre</version>
+        </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter-api</artifactId>
@@ -61,10 +66,17 @@
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>${maven.compiler.plugin.version}</version>
                 <configuration>
-                    <source>26</source>
-                    <target>26</target>
+                    <source>25</source>
+                    <target>25</target>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.openjdk.jmh</groupId>
+                            <artifactId>jmh-generator-annprocess</artifactId>
+                            <version>1.37</version>
+                        </path>
+                    </annotationProcessorPaths>
                     <compilerArgs>
-                        <arg>--enable-preview</arg>
+                        <!-- removed enable-preview -->
                         <arg>--add-modules</arg>
                         <arg>jdk.incubator.vector</arg>
                     </compilerArgs>
@@ -75,7 +87,7 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>${maven.surefire.plugin.version}</version>
                 <configuration>
-                    <argLine>@{argLine} --enable-preview --add-modules jdk.incubator.vector</argLine>
+                    <argLine>@{argLine} --add-modules jdk.incubator.vector</argLine>
                 </configuration>
             </plugin>
             <plugin>
@@ -83,6 +95,7 @@
                 <artifactId>jacoco-maven-plugin</artifactId>
                 <version>${jacoco.plugin.version}</version>
                 <configuration>
+                    <skip>true</skip>
                     <includes>
                         <include>com/sbk/optionspricer/**</include>
                     </includes>
