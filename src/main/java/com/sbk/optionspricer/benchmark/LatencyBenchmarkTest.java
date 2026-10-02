@@ -31,8 +31,8 @@ public class LatencyBenchmarkTest {
         double averageLatencyNano = (double) totalDurationNano / iterations;
         double averageLatencyMicro = averageLatencyNano / 1_000.0;
         
-        System.out.printf("Total Time: %,d ms%n", totalDurationNano / 1_000_000);
-        System.out.printf("Average Latency per Option: %.2f nanoseconds (%.4f microseconds)%n", averageLatencyNano, averageLatencyMicro);
+        System.out.printf(java.util.Locale.ROOT, "Total Time: %,d ms%n", totalDurationNano / 1_000_000);
+        System.out.printf(java.util.Locale.ROOT, "Average Latency per Option: %.2f nanoseconds (%.4f microseconds)%n", averageLatencyNano, averageLatencyMicro);
         
         // Prevent dead code elimination
         if (results[0] == 0) {

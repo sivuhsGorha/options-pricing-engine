@@ -11,7 +11,7 @@ public class YieldCurveTest {
         
         System.out.println("Market Quotes:");
         for (int i = 0; i < maturities.length; i++) {
-            System.out.printf("  %2.0fY Swap: %.2f%%%n", maturities[i], swapRates[i] * 100);
+            System.out.printf(java.util.Locale.ROOT, "  %2.0fY Swap: %.2f%%%n", maturities[i], swapRates[i] * 100);
         }
         
         // Bootstrap the curve
@@ -26,7 +26,7 @@ public class YieldCurveTest {
             double df = curve.getDiscountFactor(t);
             double zRate = curve.getZeroRate(t);
             
-            System.out.printf("  t = %4.1fY  |  DF: %.6f  |  Zero Rate: %5.2f%%%n", t, df, zRate * 100);
+            System.out.printf(java.util.Locale.ROOT, "  t = %4.1fY  |  DF: %.6f  |  Zero Rate: %5.2f%%%n", t, df, zRate * 100);
         }
     }
 }

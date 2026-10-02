@@ -77,6 +77,11 @@ public class MmapStatePublisher {
         VH_LONG.setRelease(mappedSegment, 0L, seq);
     }
 
+    public void publishUnavailable() {
+        // Invalidate magic number to immediately mark state as UNAVAILABLE
+        VH_LONG.setRelease(mappedSegment, 8L, 0L);
+    }
+
     public void close() {
         arena.close();
     }

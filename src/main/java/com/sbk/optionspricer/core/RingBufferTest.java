@@ -24,8 +24,8 @@ public class RingBufferTest {
             
             long elapsed = System.nanoTime() - start;
             double ms = elapsed / 1_000_000.0;
-            System.out.printf("Consumer received %,d messages in %.2f ms%n", received, ms);
-            System.out.printf("Throughput: %,.0f messages / second%n", (received / (ms / 1000.0)));
+            System.out.printf(java.util.Locale.ROOT, "Consumer received %,d messages in %.2f ms%n", received, ms);
+            System.out.printf(java.util.Locale.ROOT, "Throughput: %,.0f messages / second%n", (received / (ms / 1000.0)));
         });
 
         Thread producer = new Thread(() -> {

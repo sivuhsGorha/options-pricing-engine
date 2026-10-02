@@ -25,7 +25,7 @@ public class WebSocketDashboardServer implements Runnable {
     private final CopyOnWriteArrayList<Socket> activeClients = new CopyOnWriteArrayList<>();
     private volatile boolean running = true;
     private static final int MAX_CLIENTS = 100;
-    private final ExecutorService clientExecutor = Executors.newFixedThreadPool(MAX_CLIENTS);
+    private final ExecutorService clientExecutor = Executors.newCachedThreadPool();
     private static final String API_SECRET = System.getenv("API_SECRET") != null ? System.getenv("API_SECRET") : "default-dev-secret";
     private static final String ALLOWED_ORIGIN = System.getenv("ALLOWED_ORIGIN") != null ? System.getenv("ALLOWED_ORIGIN") : "http://localhost:3000";
 
@@ -86,9 +86,10 @@ public class WebSocketDashboardServer implements Runnable {
 
             String signature = extractHeaderSafe(request, "X-Signature:");
             String timestamp = extractHeaderSafe(request, "X-Timestamp:");
+            String nonce = extractHeaderSafe(request, "X-Nonce:");
             // For WebSocket handshake, path is usually "/" or "/ws"
             String path = extractPath(request);
-            if (!HmacAuth.verify(API_SECRET, signature, "GET", path, timestamp)) {
+            if (!HmacAuth.verify(API_SECRET, signature, "GET", path, timestamp, nonce)) {
                 out.write("HTTP/1.1 401 Unauthorized\r\n\r\n".getBytes());
                 socket.close();
                 return;

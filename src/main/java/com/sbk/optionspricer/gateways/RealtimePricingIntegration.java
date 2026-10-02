@@ -54,7 +54,7 @@ public class RealtimePricingIntegration {
                     );
                     
                     if (impliedVolOpt.isEmpty()) {
-                        System.out.printf("Processed %-4s Strike: %.1f | Mid: %5.2f | IV: FAILED TO SOLVE%n",
+                        System.out.printf(java.util.Locale.ROOT, "Processed %-4s Strike: %.1f | Mid: %5.2f | IV: FAILED TO SOLVE%n",
                             type, strike, midPrice);
                     } else {
                         double impliedVol = impliedVolOpt.getAsDouble();
@@ -67,7 +67,7 @@ public class RealtimePricingIntegration {
                         double gamma = scratchGreeks[1];
                         double vega = scratchGreeks[2];
                         
-                        System.out.printf("Processed %-4s Strike: %.1f | Mid: %5.2f | IV: %5.2f%% | Delta: %6.3f | Gamma: %6.4f | Vega: %5.3f%n",
+                        System.out.printf(java.util.Locale.ROOT, "Processed %-4s Strike: %.1f | Mid: %5.2f | IV: %5.2f%% | Delta: %6.3f | Gamma: %6.4f | Vega: %5.3f%n",
                             type, strike, midPrice, impliedVol * 100, delta, gamma, vega / 100);
                     }
 

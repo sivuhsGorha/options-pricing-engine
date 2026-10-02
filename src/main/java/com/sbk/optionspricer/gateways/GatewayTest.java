@@ -27,7 +27,7 @@ public class GatewayTest {
                 if (tick != null) {
                     received++;
                     if (received <= 5) { // just print the first 5 to verify
-                        System.out.printf("Strategy Received Tick -> ID: %d, Bid: %.2f (x%d), Ask: %.2f (x%d)%n",
+                        System.out.printf(java.util.Locale.ROOT, "Strategy Received Tick -> ID: %d, Bid: %.2f (x%d), Ask: %.2f (x%d)%n",
                                 tick.getInstrumentId(), 
                                 tick.getBidPrice(), tick.getBidSize(),
                                 tick.getAskPrice(), tick.getAskSize());

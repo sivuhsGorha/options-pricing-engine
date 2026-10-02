@@ -15,12 +15,12 @@ public class VolatilitySurfaceTest {
         double rho = -0.6;   // Negative skew (leverage effect)
         double nu = 0.4;     // Vol of Vol
         
-        System.out.printf("Parameters: alpha=%.2f, beta=%.2f, rho=%.2f, nu=%.2f%n", alpha, beta, rho, nu);
+        System.out.printf(java.util.Locale.ROOT, "Parameters: alpha=%.2f, beta=%.2f, rho=%.2f, nu=%.2f%n", alpha, beta, rho, nu);
         
         double[] sabrStrikes = {80, 90, 100, 110, 120};
         for (double k : sabrStrikes) {
             double vol = SabrModel.impliedVolatility(f, k, t, alpha, beta, rho, nu);
-            System.out.printf("Strike %3.0f -> SABR Implied Vol: %5.2f%%%n", k, vol * 100);
+            System.out.printf(java.util.Locale.ROOT, "Strike %3.0f -> SABR Implied Vol: %5.2f%%%n", k, vol * 100);
         }
         
         System.out.println("\n2. SVI Model (Gatheral 2004)");
@@ -31,13 +31,13 @@ public class VolatilitySurfaceTest {
         double m = 0.1;     // Shift
         double sigma = 0.1; // Smoothness
         
-        System.out.printf("Parameters: a=%.2f, b=%.2f, rho=%.2f, m=%.2f, sigma=%.2f%n", a, b, rhoSvi, m, sigma);
+        System.out.printf(java.util.Locale.ROOT, "Parameters: a=%.2f, b=%.2f, rho=%.2f, m=%.2f, sigma=%.2f%n", a, b, rhoSvi, m, sigma);
         
         for (double k : sabrStrikes) {
             double logMoneyness = Math.log(k / f);
             double var = SviModel.impliedVariance(logMoneyness, a, b, rhoSvi, m, sigma);
             double vol = SviModel.impliedVolatility(var, t);
-            System.out.printf("Strike %3.0f (log-money %5.2f) -> SVI Implied Vol: %5.2f%%%n", k, logMoneyness, vol * 100);
+            System.out.printf(java.util.Locale.ROOT, "Strike %3.0f (log-money %5.2f) -> SVI Implied Vol: %5.2f%%%n", k, logMoneyness, vol * 100);
         }
     }
 }

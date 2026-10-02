@@ -13,13 +13,13 @@ import com.sbk.optionspricer.volatility.SlvApproximation.SlvParams;
 import com.sbk.optionspricer.web.MmapStateReader;
 
 /**
- * Empirical Verification Suite for Level 3 Proprietary Upgrades (Phase 6).
+ * Empirical Verification Suite for Level 3 Upgrades (Phase 6).
  */
 public class Level3UpgradesTest {
 
     public static void main(String[] args) throws Exception {
         System.out.println("=========================================================================");
-        System.out.println("       LEVEL 3 PROPRIETARY UPGRADES EMPIRICAL VERIFICATION SUITE         ");
+        System.out.println("       LEVEL 3 UPGRADES EMPIRICAL VERIFICATION SUITE         ");
         System.out.println("=========================================================================");
 
         testZeroGcMmapIpc();
@@ -28,7 +28,6 @@ public class Level3UpgradesTest {
         testDiscreteDividendPdeJump();
         testSlvCalibration();
 
-        System.out.println("\n[SUCCESS] ALL LEVEL 3 PROPRIETARY UPGRADES EMPIRICALLY VERIFIED!");
         System.out.println("=========================================================================");
     }
 
@@ -38,9 +37,9 @@ public class Level3UpgradesTest {
         publisher.publishRiskState(142.50, 12.35, 88.90, 45200.00);
 
         MmapStateReader reader = new MmapStateReader();
-        System.out.printf("Published: Delta=142.50, Gamma=12.35, Vega=88.90, Margin=45200.00%n");
+        System.out.printf(java.util.Locale.ROOT, "Published: Delta=142.50, Gamma=12.35, Vega=88.90, Margin=45200.00%n");
         MmapStateReader.RiskState state = reader.readState();
-        System.out.printf("Read mmap: Delta=%.2f, Gamma=%.2f, Vega=%.2f, Margin=%.2f%n",
+        System.out.printf(java.util.Locale.ROOT, "Read mmap: Delta=%.2f, Gamma=%.2f, Vega=%.2f, Margin=%.2f%n",
                 state.netDelta, state.netGamma, state.netVega, state.spanMargin);
 
         if (Math.abs(state.netDelta - 142.50) > 1e-4 || Math.abs(state.spanMargin - 45200.00) > 1e-4) {
@@ -48,7 +47,6 @@ public class Level3UpgradesTest {
         }
         publisher.close();
         reader.close();
-        System.out.println("-> Zero-GC IPC verification PASSED.");
     }
 
     private static void testFastMathPrecisionAndSpeed() {
@@ -65,14 +63,13 @@ public class Level3UpgradesTest {
 
         double xCdf = 1.96;
         double fastCdf = FastMath.fastCdf(xCdf);
-        System.out.printf("stdExp(%.3f) = %.8f | fastExp = %.8f | err = %.2e%n", xExp, stdExp, fastExp, errExp);
-        System.out.printf("stdLog(%.4f) = %.8f | fastLog = %.8f | err = %.2e%n", xLog, stdLog, fastLog, errLog);
-        System.out.printf("fastCdf(1.96) = %.6f (Expected ~0.975002)%n", fastCdf);
+        System.out.printf(java.util.Locale.ROOT, "stdExp(%.3f) = %.8f | fastExp = %.8f | err = %.2e%n", xExp, stdExp, fastExp, errExp);
+        System.out.printf(java.util.Locale.ROOT, "stdLog(%.4f) = %.8f | fastLog = %.8f | err = %.2e%n", xLog, stdLog, fastLog, errLog);
+        System.out.printf(java.util.Locale.ROOT, "fastCdf(1.96) = %.6f (Expected ~0.975002)%n", fastCdf);
 
         if (errExp > 1e-4 || errLog > 1e-4) {
             throw new AssertionError("FastMath approximation error exceeds tolerance!");
         }
-        System.out.println("-> FastMath Chebyshev approximations PASSED.");
     }
 
     private static void testVectorizedSimdPricer() {
@@ -93,7 +90,7 @@ public class Level3UpgradesTest {
 
         // SIMD batch pricing
         long startSimd = System.nanoTime();
-        VectorBlackScholesPricer.priceBatchVectorized(spot, strikes, t, r, vol, true, pricesSimd);
+        pricesSimd = VectorBlackScholesPricer.priceBatchParallel(spot, strikes, t, r, vol, true);
         long endSimd = System.nanoTime();
 
         // Scalar benchmark
@@ -108,14 +105,13 @@ public class Level3UpgradesTest {
             maxDiff = Math.max(maxDiff, Math.abs(pricesSimd[i] - pricesScalar[i]));
         }
 
-        System.out.printf("Priced %d strikes SIMD in %.2f us (Scalar: %.2f us)%n",
+        System.out.printf(java.util.Locale.ROOT, "Priced %d strikes SIMD in %.2f us (Scalar: %.2f us)%n",
                 numStrikes, (endSimd - startSimd) / 1000.0, (endScalar - startScalar) / 1000.0);
-        System.out.printf("Max SIMD vs Scalar price discrepancy: %.6f%n", maxDiff);
+        System.out.printf(java.util.Locale.ROOT, "Max SIMD vs Scalar price discrepancy: %.6f%n", maxDiff);
 
         if (maxDiff > 1e-2) {
             throw new AssertionError("SIMD batch price diverges from Black-Scholes benchmark!");
         }
-        System.out.println("-> SIMD Vector pricing PASSED.");
     }
 
     private static void testDiscreteDividendPdeJump() {
@@ -128,13 +124,12 @@ public class Level3UpgradesTest {
         double priceNoDiv = DiscreteDividendPricer.price(OptionType.CALL, params, null, 200, 200, true);
         double priceWithDiv = DiscreteDividendPricer.price(OptionType.CALL, params, divs, 200, 200, true);
 
-        System.out.printf("American Call (No Div):   %.4f%n", priceNoDiv);
-        System.out.printf("American Call (With Div $3.00 at t=0.5): %.4f%n", priceWithDiv);
+        System.out.printf(java.util.Locale.ROOT, "American Call (No Div):   %.4f%n", priceNoDiv);
+        System.out.printf(java.util.Locale.ROOT, "American Call (With Div $3.00 at t=0.5): %.4f%n", priceWithDiv);
 
         if (priceWithDiv >= priceNoDiv || priceWithDiv <= 0.0) {
             throw new AssertionError("Discrete dividend PDE price violated economic constraints!");
         }
-        System.out.println("-> Discrete Dividend PDE solver PASSED.");
     }
 
     private static void testSlvCalibration() {
@@ -143,12 +138,11 @@ public class Level3UpgradesTest {
         double dupireVol = SlvApproximation.computeDupireLocalVol(100.0, 105.0, 0.5, 0.05, 0.22, 0.01, -0.001, 0.0002);
         double leverageFactor = SlvApproximation.computeLeverageFactor(dupireVol, heston, 0.5);
 
-        System.out.printf("Dupire Local Vol: %.4f (22.00%%)%n", dupireVol);
-        System.out.printf("SLV Leverage Scale Factor: %.4f%n", leverageFactor);
+        System.out.printf(java.util.Locale.ROOT, "Dupire Local Vol: %.4f (22.00%%)%n", dupireVol);
+        System.out.printf(java.util.Locale.ROOT, "SLV Leverage Scale Factor: %.4f%n", leverageFactor);
 
         if (Double.isNaN(dupireVol) || Double.isNaN(leverageFactor) || leverageFactor <= 0) {
             throw new AssertionError("SLV Calibration produced NaN or negative leverage!");
         }
-        System.out.println("-> SLV Calibration PASSED.");
     }
 }

@@ -17,6 +17,7 @@ public class EobiDecoder {
     private static final int PACKET_LENGTH = 37;
     private final MarketDataRingBuffer ringBuffer;
     private long lastTimestamp = -1;
+    private long lastLogTime = 0;
 
     public EobiDecoder(MarketDataRingBuffer ringBuffer) {
         this.ringBuffer = ringBuffer;
@@ -61,11 +62,18 @@ public class EobiDecoder {
         double bidPrice = rawBidPrice * PRICE_SCALE;
         double askPrice = rawAskPrice * PRICE_SCALE;
 
+        long nowNs = System.currentTimeMillis();
         // Value bounds checks
         if (bidSize < 0 || askSize < 0 || bidPrice < 0 || askPrice < 0 || 
             Double.isNaN(bidPrice) || Double.isNaN(askPrice) || 
-            Double.isInfinite(bidPrice) || Double.isInfinite(askPrice)) {
-            System.err.println("[EOBI] Dropped corrupt payload values. Hex: " + HexFormat.of().formatHex(packet));
+            Double.isInfinite(bidPrice) || Double.isInfinite(askPrice) ||
+            timestamp < 0 || timestamp > nowNs + 86400000L) {
+            
+            long now = System.currentTimeMillis();
+            if (now - lastLogTime > 1000) {
+                System.err.println("[EOBI] Dropped corrupt payload values. Hex: " + HexFormat.of().formatHex(packet));
+                lastLogTime = now;
+            }
             return;
         }
 

@@ -24,47 +24,83 @@ public class DiscreteDividendPricer {
         }
     }
 
+    public static class Workspace {
+        public final double[] x;
+        public final double[] S;
+        public final double[] V;
+        public final double[] a;
+        public final double[] b;
+        public final double[] c;
+        public final double[] Z;
+        public final double[] cPrime;
+        public final double[] tempV;
+
+        public Workspace(int N) {
+            this.x = new double[N + 1];
+            this.S = new double[N + 1];
+            this.V = new double[N + 1];
+            this.a = new double[N + 1];
+            this.b = new double[N + 1];
+            this.c = new double[N + 1];
+            this.Z = new double[N + 1];
+            this.cPrime = new double[N + 1];
+            this.tempV = new double[N + 1];
+        }
+    }
+
+    private static final ThreadLocal<Workspace> THREAD_LOCAL_WORKSPACE = ThreadLocal.withInitial(() -> new Workspace(150));
+
     /**
      * Prices an option with discrete cash dividends using Crank-Nicolson PDE solver.
      */
     public static double price(OptionType type, OptionParameters p, DiscreteDividend[] dividends,
                                 int spaceSteps, int timeSteps, boolean isAmerican) {
-        if (p.timeToExpiry() <= 1e-10 || p.volatility() <= 1e-10) {
-            return intrinsic(type, p.spot(), p.strike());
+        Workspace ws = THREAD_LOCAL_WORKSPACE.get();
+        if (ws.x.length < spaceSteps + 1) {
+            ws = new Workspace(spaceSteps);
+            THREAD_LOCAL_WORKSPACE.set(ws);
+        }
+        return priceWorkspace(type, p.spot(), p.strike(), p.timeToExpiry(), p.riskFreeRate(), p.volatility(), dividends, spaceSteps, timeSteps, isAmerican, ws);
+    }
+
+    public static double priceWorkspace(OptionType type, double spot, double strike, double timeToExpiry, double riskFreeRate, double volatility, DiscreteDividend[] dividends,
+                                int spaceSteps, int timeSteps, boolean isAmerican, Workspace ws) {
+        if (timeToExpiry <= 1e-10 || volatility <= 1e-10) {
+            return intrinsic(type, spot, strike);
         }
 
         int N = spaceSteps;
         int M = timeSteps;
-        double dt = p.timeToExpiry() / M;
-        double vol = p.volatility();
+        double dt = timeToExpiry / M;
+        double vol = volatility;
 
-        double center = Math.log(p.spot());
-        double stdDev = vol * Math.sqrt(p.timeToExpiry());
+        double center = Math.log(spot);
+        double stdDev = vol * Math.sqrt(timeToExpiry);
         double xMin = center - 4.5 * stdDev;
         double xMax = center + 4.5 * stdDev;
         double dx = (xMax - xMin) / N;
 
-        double[] x = new double[N + 1];
-        double[] S = new double[N + 1];
-        double[] V = new double[N + 1];
+        double[] x = ws.x;
+        double[] S = ws.S;
+        double[] V = ws.V;
 
         for (int i = 0; i <= N; i++) {
             x[i] = xMin + i * dx;
             S[i] = Math.exp(x[i]);
-            V[i] = intrinsic(type, S[i], p.strike());
+            V[i] = intrinsic(type, S[i], strike);
         }
 
-        double nu = p.riskFreeRate() - 0.5 * vol * vol;
+        double nu = riskFreeRate - 0.5 * vol * vol;
         double alpha = (vol * vol * dt) / (4.0 * dx * dx);
         double beta = (nu * dt) / (4.0 * dx);
 
-        double[] a = new double[N + 1];
-        double[] b = new double[N + 1];
-        double[] c = new double[N + 1];
-        double[] Z = new double[N + 1];
-        double[] cPrime = new double[N + 1];
+        double[] a = ws.a;
+        double[] b = ws.b;
+        double[] c = ws.c;
+        double[] Z = ws.Z;
+        double[] cPrime = ws.cPrime;
 
-        double rDtHalf = 0.5 * p.riskFreeRate() * dt;
+        double rDtHalf = 0.5 * riskFreeRate * dt;
         double A_lower = -alpha + beta;
         double A_main  = 1.0 + 2.0 * alpha + rDtHalf;
         double A_upper = -alpha - beta;
@@ -76,7 +112,7 @@ public class DiscreteDividendPricer {
         // Backward induction loop
         for (int m = M - 1; m >= 0; m--) {
             double tCurrent = m * dt; // Current time from t=0
-            double tau = p.timeToExpiry() - tCurrent; // Time to expiry
+            double tau = timeToExpiry - tCurrent; // Time to expiry
 
             // Solve standard PDE step from t_{m+1} back to t_m
             for (int i = 1; i < N; i++) {
@@ -91,9 +127,9 @@ public class DiscreteDividendPricer {
 
             if (type == OptionType.CALL) {
                 Z[0] = 0.0;
-                Z[N] = sMax - p.strike() * Math.exp(-p.riskFreeRate() * tau);
+                Z[N] = sMax - strike * Math.exp(-riskFreeRate * tau);
             } else {
-                Z[0] = p.strike() * Math.exp(-p.riskFreeRate() * tau) - sMin;
+                Z[0] = strike * Math.exp(-riskFreeRate * tau) - sMin;
                 Z[N] = 0.0;
             }
 
@@ -111,12 +147,12 @@ public class DiscreteDividendPricer {
                 for (DiscreteDividend div : dividends) {
                     if (div.timeToDividend >= tCurrent && div.timeToDividend < tCurrent + dt) {
                         // Apply Dividend Jump Condition: V_jump(S) = Interpolated V(S - D)
-                        applyDividendJump(S, V, div.amount, N);
+                        applyDividendJump(S, V, div.amount, N, ws.tempV);
 
                         // If American, evaluate early exercise right before dividend drop
                         if (isAmerican) {
                             for (int i = 0; i <= N; i++) {
-                                V[i] = Math.max(V[i], intrinsic(type, S[i], p.strike()));
+                                V[i] = Math.max(V[i], intrinsic(type, S[i], strike));
                             }
                         }
                     }
@@ -125,7 +161,7 @@ public class DiscreteDividendPricer {
 
             if (isAmerican) {
                 for (int i = 0; i <= N; i++) {
-                    V[i] = Math.max(V[i], intrinsic(type, S[i], p.strike()));
+                    V[i] = Math.max(V[i], intrinsic(type, S[i], strike));
                 }
             }
         }
@@ -141,8 +177,7 @@ public class DiscreteDividendPricer {
         return V[N / 2];
     }
 
-    private static void applyDividendJump(double[] S, double[] V, double divAmount, int N) {
-        double[] tempV = new double[N + 1];
+    private static void applyDividendJump(double[] S, double[] V, double divAmount, int N, double[] tempV) {
         for (int i = 0; i <= N; i++) {
             double sPostDiv = Math.max(S[i] - divAmount, S[0]);
             tempV[i] = interpolateLinear(S, V, sPostDiv, N);

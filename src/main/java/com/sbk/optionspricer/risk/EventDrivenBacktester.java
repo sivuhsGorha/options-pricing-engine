@@ -36,7 +36,7 @@ public class EventDrivenBacktester {
     public static int simulateQueuePosition(int orderSize, int existingQueueSize) {
         // In a true L3 backtest, we track exactly how many contracts are ahead of us
         // As trades hit the tape, this number decrements.
-        System.out.printf("[BACKTEST] Placed %d contracts at back of queue. %d contracts ahead of us.%n", orderSize, existingQueueSize);
+        System.out.printf(java.util.Locale.ROOT, "[BACKTEST] Placed %d contracts at back of queue. %d contracts ahead of us.%n", orderSize, existingQueueSize);
         return existingQueueSize + orderSize;
     }
 }

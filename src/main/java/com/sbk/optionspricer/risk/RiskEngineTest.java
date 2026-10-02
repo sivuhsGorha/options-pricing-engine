@@ -22,9 +22,9 @@ public class RiskEngineTest {
         riskEngine.addPosition(puts);
         
         System.out.println("\n--- Real-Time Portfolio Greeks ---");
-        System.out.printf("Net Delta : %,.2f shares%n", riskEngine.calculateNetDelta());
-        System.out.printf("Net Gamma : %,.2f%n", riskEngine.calculateNetGamma());
-        System.out.printf("Net Vega  : $%,.2f%n", riskEngine.calculateNetVega());
+        System.out.printf(java.util.Locale.ROOT, "Net Delta : %,.2f shares%n", riskEngine.calculateNetDelta());
+        System.out.printf(java.util.Locale.ROOT, "Net Gamma : %,.2f%n", riskEngine.calculateNetGamma());
+        System.out.printf(java.util.Locale.ROOT, "Net Vega  : $%,.2f%n", riskEngine.calculateNetVega());
         
         System.out.println("\n--- Macro Limit Check ---");
         boolean isSafe = riskEngine.checkMacroLimits();
@@ -35,7 +35,7 @@ public class RiskEngineTest {
         System.out.println("\n--- SPAN / Eurex Prisma Margin Simulator ---");
         double spotPrice = 500.0;
         double initialMargin = SpanMarginApproximation.calculateInitialMargin(riskEngine, spotPrice);
-        System.out.printf("Required Clearinghouse Margin: $%,.2f%n", initialMargin);
+        System.out.printf(java.util.Locale.ROOT, "Required Clearinghouse Margin: $%,.2f%n", initialMargin);
         
         System.out.println("\n--- Historical Value-at-Risk (VaR) ---");
         // Simulate 252 days of historical daily PnL vectors (1 year of trading)
@@ -49,12 +49,12 @@ public class RiskEngineTest {
         historicalPnL[50] = -1200000.0;
         
         double var99 = HistoricalVaRCalculator.calculate99PercentVaR(historicalPnL);
-        System.out.printf("99%% Confidence Historical 1-Day VaR: $%,.2f%n", var99);
+        System.out.printf(java.util.Locale.ROOT, "99%% Confidence Historical 1-Day VaR: $%,.2f%n", var99);
         
         System.out.println("\n--- Event-Driven Backtester (Almgren-Chriss Impact) ---");
         // We want to dump 50,000 contracts into a market with 1,000,000 ADV over 10% of the day
         double slippage = EventDrivenBacktester.calculateAlmgrenChrissImpact(50000, 1000000, 0.15, 0.10);
-        System.out.printf("Estimated Market Impact (Slippage) for 50k order: $%,.4f per contract%n", slippage);
+        System.out.printf(java.util.Locale.ROOT, "Estimated Market Impact (Slippage) for 50k order: $%,.4f per contract%n", slippage);
         EventDrivenBacktester.simulateQueuePosition(50000, 125000);
         
         System.out.println("\n--- Hardware Kill Switch ---");

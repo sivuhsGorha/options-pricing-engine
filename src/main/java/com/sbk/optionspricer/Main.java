@@ -26,7 +26,7 @@ public class Main {
         OptionParameters params = OptionParameters.noDividend(100.0, 105.0, 0.5, 0.05, 0.25);
         double callPrice = BlackScholesPricer.price(OptionType.CALL, params);
         double putPrice = BlackScholesPricer.price(OptionType.PUT, params);
-        System.out.printf("Black-Scholes Call: %.4f | Put: %.4f | Parity: %.6f%n",
+        System.out.printf(java.util.Locale.ROOT, "Black-Scholes Call: %.4f | Put: %.4f | Parity: %.6f%n",
                 callPrice, putPrice, callPrice - putPrice);
 
         // 2. Lock-Free Ring Buffer IPC

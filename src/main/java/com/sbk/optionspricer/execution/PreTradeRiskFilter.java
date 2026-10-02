@@ -30,24 +30,24 @@ public class PreTradeRiskFilter {
     public synchronized boolean checkRisk(Order order) {
         // 0. Base Domain Constraints
         if (order.quantity() <= 0) {
-            System.err.printf("[RISK BLOCK] Invalid quantity: %d%n", order.quantity());
+            System.err.printf(java.util.Locale.ROOT, "[RISK BLOCK] Invalid quantity: %d%n", order.quantity());
             return false;
         }
         if (order.price() <= 0 || Double.isNaN(order.price()) || Double.isInfinite(order.price())) {
-            System.err.printf("[RISK BLOCK] Invalid price: %f%n", order.price());
+            System.err.printf(java.util.Locale.ROOT, "[RISK BLOCK] Invalid price: %f%n", order.price());
             return false;
         }
 
         // 1. Fat Finger Size Check
         if (order.quantity() > maxOrderQuantity) {
-            System.err.printf("[RISK BLOCK] Order size %d exceeds max %d%n", order.quantity(), maxOrderQuantity);
+            System.err.printf(java.util.Locale.ROOT, "[RISK BLOCK] Order size %d exceeds max %d%n", order.quantity(), maxOrderQuantity);
             return false;
         }
 
         // 2. Fat Finger Notional Value Check (Quantity * Price)
         double notional = order.quantity() * order.price();
         if (notional > maxOrderNotional) {
-            System.err.printf("[RISK BLOCK] Notional value %.2f exceeds max %.2f%n", notional, maxOrderNotional);
+            System.err.printf(java.util.Locale.ROOT, "[RISK BLOCK] Notional value %.2f exceeds max %.2f%n", notional, maxOrderNotional);
             return false;
         }
 
@@ -56,7 +56,7 @@ public class PreTradeRiskFilter {
         if (currentSecond == lastSecondWindow) {
             ordersInCurrentSecond++;
             if (ordersInCurrentSecond > maxOrdersPerSecond) {
-                System.err.printf("[RISK BLOCK] Message rate exceeded %d msgs/sec%n", maxOrdersPerSecond);
+                System.err.printf(java.util.Locale.ROOT, "[RISK BLOCK] Message rate exceeded %d msgs/sec%n", maxOrdersPerSecond);
                 return false;
             }
         } else {

@@ -46,7 +46,7 @@ public class InstitutionalSuiteTest {
         double vol = SsviApproximation.impliedVol(spot, strike, expiry, atmVol, params);
         boolean isArbFree = SsviApproximation.isArbitrageFree(Math.log(strike / spot), atmVol * atmVol * expiry, params);
 
-        System.out.printf("SSVI Implied Vol for K=%.1f, T=%.1f: %.2f%% (Butterfly Arbitrage Free: %b)%n",
+        System.out.printf(java.util.Locale.ROOT, "SSVI Implied Vol for K=%.1f, T=%.1f: %.2f%% (Butterfly Arbitrage Free: %b)%n",
                 strike, expiry, vol * 100.0, isArbFree);
 
         if (vol <= 0 || !isArbFree) {
@@ -62,7 +62,7 @@ public class InstitutionalSuiteTest {
         double expiry = 0.1; // Short expiry
 
         double vol = SabrFreeBoundaryModel.impliedVolatility(fwd, strike, expiry, 0.25, 1.0, -0.6, 0.4);
-        System.out.printf("Free-Boundary SABR Vol (Short Expiry T=0.1, Strike=80): %.2f%%%n", vol * 100.0);
+        System.out.printf(java.util.Locale.ROOT, "Free-Boundary SABR Vol (Short Expiry T=0.1, Strike=80): %.2f%%%n", vol * 100.0);
 
         if (vol <= 0 || Double.isNaN(vol)) {
             throw new AssertionError("Free-Boundary SABR produced non-positive or NaN volatility!");
@@ -83,7 +83,7 @@ public class InstitutionalSuiteTest {
         VectorPdeSolver.priceBatchPdeVectorized(true, spot, strikes, 1.0, 0.05, 0.20, prices);
         long durationUs = (System.nanoTime() - start) / 1000;
 
-        System.out.printf("Vectorized PDE Batch Priced %d strikes in %d us. Sample Call@90: %.4f%n",
+        System.out.printf(java.util.Locale.ROOT, "Vectorized PDE Batch Priced %d strikes in %d us. Sample Call@90: %.4f%n",
                 numStrikes, durationUs, prices[0]);
 
         if (prices[0] <= 0) {
@@ -102,7 +102,7 @@ public class InstitutionalSuiteTest {
             double ask = MemorySegmentStructs.getAskPrice(tick);
             int bidSize = MemorySegmentStructs.getBidSize(tick);
 
-            System.out.printf("FFM Off-Heap Struct Read: Bid=%.2f, Ask=%.2f, BidSize=%d%n", bid, ask, bidSize);
+            System.out.printf(java.util.Locale.ROOT, "FFM Off-Heap Struct Read: Bid=%.2f, Ask=%.2f, BidSize=%d%n", bid, ask, bidSize);
 
             if (Math.abs(bid - 51.39) > 1e-4 || bidSize != 100) {
                 throw new AssertionError("MemorySegmentStructs off-heap read mismatch!");
@@ -114,7 +114,7 @@ public class InstitutionalSuiteTest {
     private static void testQueuePositionEstimator() {
         System.out.println("\n--- 8.5 Level 3 MBO Queue Position Estimator ---");
         QueuePositionEstimator.QueueState state = QueuePositionEstimator.estimateQueuePosition(12, 1500, 200.0, 50.0, 5.0);
-        System.out.printf("Queue Pos: Orders Ahead=%d, Vol Ahead=%d, Fill Prob=%.1f%%%n",
+        System.out.printf(java.util.Locale.ROOT, "Queue Pos: Orders Ahead=%d, Vol Ahead=%d, Fill Prob=%.1f%%%n",
                 state.ordersAhead, state.volumeAhead, state.fillProbability * 100.0);
 
         if (state.fillProbability < 0 || state.fillProbability > 1.0) {
@@ -129,7 +129,7 @@ public class InstitutionalSuiteTest {
         List<SmartOrderRouter.SubOrder> subOrders = SmartOrderRouter.routeOrder(1000, weights);
 
         for (SmartOrderRouter.SubOrder so : subOrders) {
-            System.out.printf("SOR Sub-Order: Venue=%s, Qty=%d, Latency Offset=%.2f us%n",
+            System.out.printf(java.util.Locale.ROOT, "SOR Sub-Order: Venue=%s, Qty=%d, Latency Offset=%.2f us%n",
                     so.venue.name(), so.allocatedQty, so.delayOffsetMicros);
         }
 
@@ -142,7 +142,7 @@ public class InstitutionalSuiteTest {
     private static void testSpanMarginOptimizer() {
         System.out.println("\n--- 8.7 SPAN / Eurex Prisma Initial Margin Optimizer ---");
         SpanMarginOptimizer.OptimizationResult res = SpanMarginOptimizer.optimizeMargin(-500.0, -25.0, 100.0, 145000.0);
-        System.out.printf("SPAN Margin Optimization: Current=$%.2f -> Optimized=$%.2f (Hedge Qty: +%d shares, Reduction: %.1f%%)%n",
+        System.out.printf(java.util.Locale.ROOT, "SPAN Margin Optimization: Current=$%.2f -> Optimized=$%.2f (Hedge Qty: +%d shares, Reduction: %.1f%%)%n",
                 res.originalMargin, res.optimizedMargin, res.recommendedHedgeShares, res.marginReductionPct);
 
         if (res.recommendedHedgeShares != 500 || res.optimizedMargin >= res.originalMargin) {

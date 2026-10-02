@@ -56,12 +56,12 @@ public class GreekAggregator {
         double netVega = Math.abs(calculateNetVega());
         
         if (netDelta > maxNetDelta) {
-            System.err.printf("[MACRO RISK] Net Delta %.2f exceeds firm limit of %.2f! DELTA HEDGE REQUIRED.%n", netDelta, maxNetDelta);
+            System.err.printf(java.util.Locale.ROOT, "[MACRO RISK] Net Delta %.2f exceeds firm limit of %.2f! DELTA HEDGE REQUIRED.%n", netDelta, maxNetDelta);
             return false;
         }
         
         if (netVega > maxNetVega) {
-            System.err.printf("[MACRO RISK] Net Vega %.2f exceeds firm limit of %.2f! VOLATILITY EXPOSURE TOO HIGH.%n", netVega, maxNetVega);
+            System.err.printf(java.util.Locale.ROOT, "[MACRO RISK] Net Vega %.2f exceeds firm limit of %.2f! VOLATILITY EXPOSURE TOO HIGH.%n", netVega, maxNetVega);
             return false;
         }
         

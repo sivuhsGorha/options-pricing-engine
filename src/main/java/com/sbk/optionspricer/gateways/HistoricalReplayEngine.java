@@ -65,7 +65,7 @@ public class HistoricalReplayEngine {
                 messageCount++;
             }
             
-            System.out.printf("Replay finished. Streamed %,d binary messages into the gateway.%n", messageCount);
+            System.out.printf(java.util.Locale.ROOT, "Replay finished. Streamed %,d binary messages into the gateway.%n", messageCount);
         }
     }
 }

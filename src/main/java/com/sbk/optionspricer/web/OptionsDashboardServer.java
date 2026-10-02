@@ -28,7 +28,8 @@ public class OptionsDashboardServer {
         String path = exchange.getRequestURI().getPath();
         String signature = exchange.getRequestHeaders().getFirst("X-Signature");
         String timestamp = exchange.getRequestHeaders().getFirst("X-Timestamp");
-        return HmacAuth.verify(API_SECRET, signature, method, path, timestamp);
+        String nonce = exchange.getRequestHeaders().getFirst("X-Nonce");
+        return HmacAuth.verify(API_SECRET, signature, method, path, timestamp, nonce);
     }
 
     public static void main(String[] args) throws Exception {

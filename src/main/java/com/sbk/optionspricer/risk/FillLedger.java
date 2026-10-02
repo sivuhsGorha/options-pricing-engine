@@ -35,7 +35,7 @@ public class FillLedger {
     public static synchronized void recordFill(String symbol, int executedQty, int multiplier) {
         if (symbol == null || symbol.trim().isEmpty()) throw new IllegalArgumentException("Symbol cannot be null/empty");
         try (PrintWriter out = new PrintWriter(new BufferedWriter(new FileWriter(LEDGER_FILE.toFile(), true)))) {
-            out.printf("%s,%s,%d,%d%n", Instant.now().toString(), symbol, executedQty, multiplier);
+            out.printf(java.util.Locale.ROOT, "%s,%s,%d,%d%n", Instant.now().toString(), symbol, executedQty, multiplier);
         } catch (IOException e) {
             throw new RuntimeException("Failed to write to FillLedger", e);
         }

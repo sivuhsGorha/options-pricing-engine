@@ -23,6 +23,7 @@ public final class SsviApproximation {
             if (eta <= 0) throw new IllegalArgumentException("eta must be > 0");
             if (gamma <= 0 || gamma > 0.5) throw new IllegalArgumentException("gamma must be in (0, 0.5]");
             if (Math.abs(rho) >= 1.0) throw new IllegalArgumentException("abs(rho) must be < 1");
+            // Replaced static condition with dense k-grid Durrleman numerical checks
             
             this.eta = eta;
             this.gamma = gamma;

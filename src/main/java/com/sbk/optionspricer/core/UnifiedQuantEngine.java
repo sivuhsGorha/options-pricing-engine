@@ -28,9 +28,20 @@ public final class UnifiedQuantEngine {
     private double netVega = -400000.0;
     private double currentSpanMargin = 14611250.0;
 
+    public enum EngineState { RUNNING, STOPPED_FATAL }
+    private volatile EngineState engineState = EngineState.RUNNING;
+    private final java.util.function.IntConsumer exitHandler;
+
     public UnifiedQuantEngine(MmapStatePublisher publisher) {
-        this.publisher = publisher;
+        this(publisher, System::exit);
     }
+
+    public UnifiedQuantEngine(MmapStatePublisher publisher, java.util.function.IntConsumer exitHandler) {
+        this.publisher = publisher;
+        this.exitHandler = exitHandler;
+    }
+
+    public EngineState getState() { return engineState; }
 
     public void initialize() {
         System.out.println("=========================================================================");
@@ -46,6 +57,7 @@ public final class UnifiedQuantEngine {
      * Continuous quantitative tick processing cycle, driven by an external environment.
      */
     public void processTick(double spot, double deltaChange) {
+        if (engineState == EngineState.STOPPED_FATAL) return;
         try (Arena confined = Arena.ofConfined()) {
             currentSpot = spot;
             netDelta += deltaChange;
@@ -62,8 +74,7 @@ public final class UnifiedQuantEngine {
 
             // 3. SIMD Pricing Acceleration
             double[] strikes = new double[]{90.0, 95.0, 100.0, 105.0, 110.0};
-            double[] prices = new double[5];
-            VectorBlackScholesPricer.priceBatchVectorized(currentSpot, strikes, 0.5, 0.05, ssviVol, true, prices);
+            double[] prices = VectorBlackScholesPricer.priceBatchParallel(currentSpot, strikes, 0.5, 0.05, ssviVol, true);
             VectorPdeSolver.priceBatchPdeVectorized(true, currentSpot, strikes, 0.5, 0.05, sabrVol, prices);
 
             // 4. Portfolio Greeks Simulation & SPAN Margin Optimization
@@ -87,13 +98,21 @@ public final class UnifiedQuantEngine {
             publisher.publishRiskState(netDelta, netGamma, netVega, currentSpanMargin);
 
         } catch (Throwable t) {
+            if (this.engineState == EngineState.STOPPED_FATAL) return;
+            this.engineState = EngineState.STOPPED_FATAL;
+            publisher.publishUnavailable();
             System.err.println("[FATAL] UnifiedQuantEngine encountered a critical error: " + t.getMessage());
             t.printStackTrace();
+            exitHandler.accept(1);
         }
     }
 
     public synchronized void stop() {
         publisher.close();
-        System.out.println("[UNIFIED ENGINE] Service stopped cleanly.");
+        if (engineState == EngineState.STOPPED_FATAL) {
+            System.out.println("[UNIFIED ENGINE] Stopped after fatal error.");
+        } else {
+            System.out.println("[UNIFIED ENGINE] Service stopped cleanly.");
+        }
     }
 }

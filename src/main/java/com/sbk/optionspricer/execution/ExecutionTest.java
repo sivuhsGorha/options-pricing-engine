@@ -38,6 +38,6 @@ public class ExecutionTest {
             if (success) routedCount++;
             else rejectedCount++;
         }
-        System.out.printf("Throttle Test Results: %d routed, %d rejected%n", routedCount, rejectedCount);
+        System.out.printf(java.util.Locale.ROOT, "Throttle Test Results: %d routed, %d rejected%n", routedCount, rejectedCount);
     }
 }

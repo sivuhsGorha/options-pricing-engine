@@ -40,6 +40,9 @@ public class QuantSimulationHarness {
             
             engine.processTick(simulatedSpot, simulatedDeltaChange);
         } catch (Exception e) {
+            if (engine.getState() == UnifiedQuantEngine.EngineState.STOPPED_FATAL) {
+                throw new RuntimeException("Engine stopped fatally, halting scheduler.", e);
+            }
             e.printStackTrace();
         }
     }
@@ -48,6 +51,21 @@ public class QuantSimulationHarness {
         if (!isRunning) return;
         isRunning = false;
         engineScheduler.shutdown();
-        System.out.println("[SIMULATION HARNESS] Stopped cleanly.");
+        try {
+            if (!engineScheduler.awaitTermination(5, TimeUnit.SECONDS)) {
+                engineScheduler.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            engineScheduler.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+        
+        engine.stop();
+        
+        if (engine.getState() == UnifiedQuantEngine.EngineState.STOPPED_FATAL) {
+            System.out.println("[SIMULATION HARNESS] Stopped after fatal error.");
+        } else {
+            System.out.println("[SIMULATION HARNESS] Stopped cleanly.");
+        }
     }
 }
