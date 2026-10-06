@@ -27,7 +27,7 @@ public class WebSocketDashboardServerTest {
     @BeforeEach
     void startServer() throws Exception {
         webRoot = Files.createTempDirectory("ws-dashboard-test-web");
-        MmapStateReader reader = new MmapStateReader() {
+        MmapStateReader reader = new MmapStateReader(true) {
             @Override
             public RiskState readState() {
                 throw new IllegalStateException("UNAVAILABLE");
@@ -71,6 +71,7 @@ public class WebSocketDashboardServerTest {
                 "Connection: Upgrade\r\n" +
                 "Origin: " + origin + "\r\n" +
                 (cookie == null ? "" : "Cookie: " + cookie + "\r\n") +
+                // gitleaks:allow
                 "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" +
                 "Sec-WebSocket-Version: 13\r\n\r\n";
         output.write(request.getBytes(StandardCharsets.US_ASCII));

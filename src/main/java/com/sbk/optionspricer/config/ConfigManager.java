@@ -222,7 +222,7 @@ public final class ConfigManager {
             return Boolean.parseBoolean(trimmed);
         }
         if (trimmed.matches("-?\\d+")) {
-            return Integer.parseInt(trimmed);
+            return Long.parseLong(trimmed);
         }
         if (trimmed.matches("-?\\d+\\.\\d+")) {
             return Double.parseDouble(trimmed);

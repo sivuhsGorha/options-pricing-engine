@@ -60,6 +60,11 @@ public class MmapStateReader {
         }
     }
 
+    protected MmapStateReader(boolean mock) {
+        this.arena = null;
+        this.mappedSegment = null;
+    }
+
     public RiskState readState() {
         if (mappedSegment == null) throw new IllegalStateException("UNAVAILABLE");
 

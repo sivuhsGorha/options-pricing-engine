@@ -27,7 +27,7 @@ public class SecurityHeadersAndSessionTest {
     void setUp() throws Exception {
         webRoot = Files.createTempDirectory("security-headers-test");
         Files.writeString(webRoot.resolve("index.html"), "<html><body>Dashboard</body></html>");
-        MmapStateReader reader = new MmapStateReader() {
+        MmapStateReader reader = new MmapStateReader(true) {
             @Override
             public RiskState readState() {
                 return new RiskState(5.0, 10.0, 15.0, 25000.0);

@@ -32,7 +32,7 @@ public class OptionsDashboardServerTest {
     void startServer() throws Exception {
         webRoot = Files.createTempDirectory("dashboard-test-web");
         Files.writeString(webRoot.resolve("index.html"), "test dashboard");
-        MmapStateReader reader = new MmapStateReader() {
+        MmapStateReader reader = new MmapStateReader(true) {
             @Override
             public RiskState readState() {
                 return new RiskState(1.0, 2.0, 3.0, 40000.0);
@@ -114,7 +114,7 @@ public class OptionsDashboardServerTest {
 
     @Test
     void riskEndpointSanitizesNonFiniteValues() throws Exception {
-        MmapStateReader invalidReader = new MmapStateReader() {
+        MmapStateReader invalidReader = new MmapStateReader(true) {
             @Override
             public RiskState readState() {
                 return new RiskState(Double.NaN, Double.NaN, Double.NaN, Double.NaN);
