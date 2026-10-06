@@ -13,10 +13,20 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
+import java.util.ArrayDeque;
 import java.util.Collections;
+import java.util.Deque;
+import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
+import java.util.function.LongSupplier;
 import java.util.regex.Pattern;
 
 /**
@@ -29,8 +39,12 @@ import java.util.regex.Pattern;
  */
 public class LiveSpotProvider {
 
-    private static final long CACHE_TTL_MS = 20_000L;
     private static final int HTTP_TIMEOUT_MS = 2500;
+    /** How long a first-time caller (nothing cached) waits for the network before reporting UNAVAILABLE. */
+    private static final long FIRST_FETCH_WAIT_MS = 3_000L;
+    /** A served quote older than its lifetime by this much is labelled STALE: its refresh is evidently failing. */
+    private static final long STALE_AFTER_EXPIRY_MS = 60_000L;
+    private static final long FAILURE_LOG_INTERVAL_MS = 60_000L;
     private static final int MAX_CACHED_SYMBOLS = 64;
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final ZoneId MARKET_ZONE = ZoneId.of("America/New_York");
@@ -47,6 +61,109 @@ public class LiveSpotProvider {
         String get(String url, Map<String, String> headers) throws IOException;
     }
 
+    /** Thrown for HTTP error statuses so callers can tell throttling (429) and rejected credentials apart from outages. */
+    public static final class HttpStatusException extends IOException {
+        private final int status;
+        private final long retryAfterSeconds;
+
+        public HttpStatusException(int status, long retryAfterSeconds) {
+            super("HTTP " + status);
+            this.status = status;
+            this.retryAfterSeconds = retryAfterSeconds;
+        }
+
+        public int status() {
+            return status;
+        }
+
+        public long retryAfterSeconds() {
+            return retryAfterSeconds;
+        }
+    }
+
+    private enum Source {
+        POLYGON(20_000L), FINNHUB(20_000L), ALPHA_VANTAGE(900_000L), MARKETSTACK(21_600_000L);
+
+        /** How long a quote from this source is considered current: end-of-day feeds change at most daily. */
+        final long ttlMs;
+
+        Source(long ttlMs) {
+            this.ttlMs = ttlMs;
+        }
+
+        static Source of(String name) {
+            for (Source s : values()) {
+                if (s.name().equals(name)) return s;
+            }
+            return FINNHUB;
+        }
+    }
+
+    /** At most {@code maxCalls} calls in any {@code windowMs}; the free-plan limits of each provider. */
+    private record Budget(int maxCalls, long windowMs) {}
+
+    @FunctionalInterface
+    private interface Fetch {
+        Quote run() throws IOException;
+    }
+
+    /**
+     * Per-source admission control: exponential backoff after failures, longer cool-downs after
+     * throttling or rejected credentials, and call budgets that stay inside the provider's plan.
+     */
+    private static final class SourceGate {
+        private final Source source;
+        private final java.util.List<Budget> budgets;
+        private final java.util.List<Deque<Long>> calls = new java.util.ArrayList<>();
+        private int failures;
+        private long blockedUntilMs;
+        private long lastLoggedMs;
+
+        SourceGate(Source source, Budget... budgets) {
+            this.source = source;
+            this.budgets = java.util.List.of(budgets);
+            for (int i = 0; i < budgets.length; i++) calls.add(new ArrayDeque<>());
+        }
+
+        synchronized boolean admit(long now) {
+            if (now < blockedUntilMs) return false;
+            for (int i = 0; i < budgets.size(); i++) {
+                Deque<Long> window = calls.get(i);
+                while (!window.isEmpty() && now - window.peekFirst() >= budgets.get(i).windowMs()) window.pollFirst();
+                if (window.size() >= budgets.get(i).maxCalls()) return false;
+            }
+            for (Deque<Long> window : calls) window.addLast(now);
+            return true;
+        }
+
+        synchronized void succeeded() {
+            failures = 0;
+            blockedUntilMs = 0L;
+        }
+
+        /** Exponential backoff: 5s, 10s, 20s ... capped at 5 minutes. */
+        synchronized long failed(long now) {
+            failures++;
+            long delay = Math.min(300_000L, 5_000L << Math.min(failures - 1, 6));
+            blockedUntilMs = now + delay;
+            return delay;
+        }
+
+        synchronized long coolDown(long now, long ms) {
+            failures = Math.max(failures, 1);
+            blockedUntilMs = now + ms;
+            return ms;
+        }
+
+        synchronized boolean shouldLog(long now) {
+            if (lastLoggedMs == 0L || now - lastLoggedMs >= FAILURE_LOG_INTERVAL_MS) {
+                lastLoggedMs = now;
+                return true;
+            }
+            return false;
+        }
+    }
+
     /** Immutable, so a reader can never see a quote paired with another quote's fetch time. */
     private record CachedQuote(Quote quote, long fetchedAtMs) {}
 
@@ -55,6 +172,15 @@ public class LiveSpotProvider {
     private final String alphaVantageKey;
     private final String marketstackKey;
     private final HttpGetter http;
+    private final LongSupplier clock;
+    private final Consumer<String> log;
+    private final Map<Source, SourceGate> gates = new EnumMap<>(Source.class);
+    private final Map<String, CompletableFuture<Quote>> inFlight = new ConcurrentHashMap<>();
+    private final ExecutorService refreshExecutor = Executors.newFixedThreadPool(2, runnable -> {
+        Thread thread = new Thread(runnable, "quote-refresh");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     /** Per-symbol cache, bounded so arbitrary symbol requests cannot grow it without limit. */
     private final Map<String, CachedQuote> cache = Collections.synchronizedMap(new LinkedHashMap<>(16, 0.75f, false) {
@@ -74,6 +200,19 @@ public class LiveSpotProvider {
 
     public LiveSpotProvider(String finnhubKey, String polygonKey, String alphaVantageKey,
                             String marketstackKey, HttpGetter http) {
+        this(finnhubKey, polygonKey, alphaVantageKey, marketstackKey, http, System::currentTimeMillis, System.err::println);
+    }
+
+    /** Package-private: lets tests control the clock and capture log output. */
+    LiveSpotProvider(String finnhubKey, String polygonKey, String alphaVantageKey,
+                     String marketstackKey, HttpGetter http, LongSupplier clock, Consumer<String> log) {
+        this.clock = clock;
+        this.log = log;
+        // Free-plan limits: Polygon 5/min; Finnhub 60/min; Alpha Vantage 5/min and 25/day; Marketstack 100/month.
+        gates.put(Source.POLYGON, new SourceGate(Source.POLYGON, new Budget(5, 60_000L)));
+        gates.put(Source.FINNHUB, new SourceGate(Source.FINNHUB, new Budget(50, 60_000L)));
+        gates.put(Source.ALPHA_VANTAGE, new SourceGate(Source.ALPHA_VANTAGE, new Budget(5, 60_000L), new Budget(25, 86_400_000L)));
+        gates.put(Source.MARKETSTACK, new SourceGate(Source.MARKETSTACK, new Budget(100, 30L * 86_400_000L)));
         this.finnhubKey = blankToNull(finnhubKey);
         this.polygonKey = blankToNull(polygonKey);
         this.alphaVantageKey = blankToNull(alphaVantageKey);
@@ -114,25 +253,50 @@ public class LiveSpotProvider {
         return status;
     }
 
+    /**
+     * Returns the best known quote without making the caller wait on the network: a current cached
+     * quote is returned as is; an expired one is returned immediately while a single background
+     * refresh runs. Only a caller with nothing cached waits (briefly) for the first fetch.
+     */
     public Quote getQuote(String symbol) {
         String sym = sanitizeSymbol(symbol);
-        long now = System.currentTimeMillis();
+        long now = clock.getAsLong();
         CachedQuote cached = cache.get(sym);
-        if (cached != null && now - cached.fetchedAtMs() < CACHE_TTL_MS
-                && (MarketDataStatus.LIVE == cached.quote().status() || MarketDataStatus.DELAYED == cached.quote().status())) {
+        long ttl = cached == null ? 0L : Source.of(cached.quote().source()).ttlMs;
+        if (cached != null && now - cached.fetchedAtMs() < ttl) {
             return cached.quote();
         }
 
-        Quote fresh = fetchFromApis(sym);
-        if (fresh != null) {
-            cache.put(sym, new CachedQuote(fresh, now));
-            return fresh;
-        }
+        CompletableFuture<Quote> refresh = refresh(sym);
         if (cached != null) {
             Quote q = cached.quote();
-            return new Quote(q.symbol(), q.bid(), q.ask(), q.last(), q.volume(), q.source(), q.timestamp(), MarketDataStatus.STALE);
+            MarketDataStatus status = now - cached.fetchedAtMs() >= ttl + STALE_AFTER_EXPIRY_MS ? MarketDataStatus.STALE : q.status();
+            return new Quote(q.symbol(), q.bid(), q.ask(), q.last(), q.volume(), q.source(), q.timestamp(), status);
+        }
+        try {
+            Quote fresh = refresh.get(FIRST_FETCH_WAIT_MS, TimeUnit.MILLISECONDS);
+            if (fresh != null) {
+                return fresh;
+            }
+        } catch (Exception ignored) {
+            // timed out, interrupted or failed: report unavailable below; the refresh may still land later
         }
         return new Quote(sym, Double.NaN, Double.NaN, Double.NaN, 0L, "none", 0L, MarketDataStatus.UNAVAILABLE);
+    }
+
+    /** One refresh per symbol at a time; concurrent callers share it. */
+    private CompletableFuture<Quote> refresh(String symbol) {
+        return inFlight.computeIfAbsent(symbol, sym -> CompletableFuture.supplyAsync(() -> {
+            try {
+                Quote fresh = fetchFromApis(sym);
+                if (fresh != null) {
+                    cache.put(sym, new CachedQuote(fresh, clock.getAsLong()));
+                }
+                return fresh;
+            } finally {
+                inFlight.remove(sym);
+            }
+        }, refreshExecutor));
     }
 
     private Quote fetchFromApis(String symbol) {
@@ -155,51 +319,92 @@ public class LiveSpotProvider {
         if (finnhubKey == null) {
             return null;
         }
-        try {
+        return gated(Source.FINNHUB, () -> {
             // Finnhub accepts the key in a header, which keeps it out of URLs (and therefore logs and proxies).
             String url = "https://finnhub.io/api/v1/quote?symbol=" + symbol;
             return parseFinnhub(symbol, http.get(url, Map.of("X-Finnhub-Token", finnhubKey)));
-        } catch (Exception ignored) {
-            return null;
-        }
+        });
     }
 
     Quote fetchAlphaVantage(String symbol) {
         if (alphaVantageKey == null) {
             return null;
         }
-        try {
+        return gated(Source.ALPHA_VANTAGE, () -> {
             String url = "https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=" + symbol
                     + "&apikey=" + alphaVantageKey;
-            return parseAlphaVantage(symbol, http.get(url, Map.of()));
-        } catch (Exception ignored) {
-            return null;
-        }
+            String body = http.get(url, Map.of());
+            if (isAlphaVantageNotice(body)) {
+                // A 200 response carrying a rate-limit message: treat as throttling and leave it alone for 10 minutes.
+                throw new HttpStatusException(429, 600);
+            }
+            return parseAlphaVantage(symbol, body);
+        });
     }
 
     Quote fetchPolygonSnapshot(String symbol) {
         if (polygonKey == null) {
             return null;
         }
-        try {
+        return gated(Source.POLYGON, () -> {
             String url = "https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers/" + symbol;
             return parsePolygonSnapshot(symbol, http.get(url, Map.of("Authorization", "Bearer " + polygonKey)));
-        } catch (Exception ignored) {
-            return null;
-        }
+        });
     }
 
     Quote fetchMarketstack(String symbol) {
         if (marketstackKey == null) {
             return null;
         }
-        try {
+        return gated(Source.MARKETSTACK, () -> {
             String url = "https://api.marketstack.com/v1/eod/latest?access_key=" + marketstackKey
                     + "&symbols=" + symbol;
             return parseMarketstack(symbol, http.get(url, Map.of()));
-        } catch (Exception ignored) {
+        });
+    }
+
+    /** Runs a provider call if its gate admits it; records the outcome and reports failures (credentials redacted). */
+    private Quote gated(Source source, Fetch fetch) {
+        SourceGate gate = gates.get(source);
+        long now = clock.getAsLong();
+        if (!gate.admit(now)) {
             return null;
         }
+        try {
+            Quote quote = fetch.run();
+            gate.succeeded();
+            return quote;
+        } catch (HttpStatusException e) {
+            long wait;
+            String reason;
+            if (e.status() == 429) {
+                wait = gate.coolDown(now, e.retryAfterSeconds() > 0 ? Math.min(e.retryAfterSeconds(), 3_600L) * 1_000L : 60_000L);
+                reason = "rate limited (HTTP 429)";
+            } else if (e.status() == 401 || e.status() == 403) {
+                wait = gate.coolDown(now, 900_000L);
+                reason = "credentials rejected (HTTP " + e.status() + ")";
+            } else {
+                wait = gate.failed(now);
+                reason = "HTTP " + e.status();
+            }
+            logFailure(gate, source, reason, wait, now);
+            return null;
+        } catch (Exception e) {
+            long wait = gate.failed(now);
+            logFailure(gate, source, redact(e.toString()), wait, now);
+            return null;
+        }
+    }
+
+    private void logFailure(SourceGate gate, Source source, String reason, long waitMs, long now) {
+        if (gate.shouldLog(now)) {
+            log.accept("[MARKET DATA] " + source + " unavailable: " + reason + "; not retrying for " + waitMs / 1000 + "s");
+        }
+    }
+
+    private static boolean isAlphaVantageNotice(String body) {
+        JsonNode root = parseJson(body);
+        return root != null && (root.has("Note") || root.has("Information"));
     }
 
     private static final Pattern CREDENTIAL_PARAM =
@@ -376,7 +581,16 @@ public class LiveSpotProvider {
             }
         }
         if (code >= 400) {
-            throw new IOException("HTTP " + code);
+            long retryAfter = 0L;
+            String header = conn.getHeaderField("Retry-After");
+            if (header != null) {
+                try {
+                    retryAfter = Long.parseLong(header.trim());
+                } catch (NumberFormatException ignored) {
+                    // an HTTP-date form: fall back to the default cool-down
+                }
+            }
+            throw new HttpStatusException(code, retryAfter);
         }
         return body;
     }
