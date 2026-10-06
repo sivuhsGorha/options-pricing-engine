@@ -132,8 +132,9 @@ public class LiveSpotProvider {
             return null;
         }
         try {
-            String url = "https://finnhub.io/api/v1/quote?symbol=" + symbol + "&token=" + finnhubKey;
-            String body = http.get(url, Map.of());
+            // Finnhub accepts the key in a header, which keeps it out of URLs (and therefore logs and proxies).
+            String url = "https://finnhub.io/api/v1/quote?symbol=" + symbol;
+            String body = http.get(url, Map.of("X-Finnhub-Token", finnhubKey));
             Double px = parseFinnhubCurrent(body);
             if (px == null) {
                 return null;
@@ -191,6 +192,17 @@ public class LiveSpotProvider {
         } catch (Exception ignored) {
             return null;
         }
+    }
+
+    private static final java.util.regex.Pattern CREDENTIAL_PARAM =
+            java.util.regex.Pattern.compile("(?i)\\b(api_?key|access_key|token|key)=([^&\\s\"']+)");
+
+    /**
+     * Masks credential query parameters. Alpha Vantage and Marketstack only accept their key as a
+     * query parameter, so any URL or exception message must pass through this before it is logged.
+     */
+    static String redact(String text) {
+        return text == null ? null : CREDENTIAL_PARAM.matcher(text).replaceAll("$1=***");
     }
 
     static Double parseFinnhubCurrent(String json) {

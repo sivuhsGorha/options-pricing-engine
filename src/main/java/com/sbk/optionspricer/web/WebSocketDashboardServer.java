@@ -58,14 +58,19 @@ public class WebSocketDashboardServer implements Runnable {
 
     public WebSocketDashboardServer(String bindAddress, int port, MmapStateReader mmapReader, String apiSecret,
                                     BrowserSessionManager sessions) {
+        this(bindAddress, port, mmapReader, apiSecret, sessions, ClientAddressResolver.parseTrustedProxies(
+                com.sbk.optionspricer.config.EnvironmentConfigLoader.getOrDefault("TRUSTED_PROXIES", "")));
+    }
+
+    public WebSocketDashboardServer(String bindAddress, int port, MmapStateReader mmapReader, String apiSecret,
+                                    BrowserSessionManager sessions, Set<String> trustedProxies) {
         OptionsDashboardServer.validateApiSecret(apiSecret);
         this.bindAddress = (bindAddress == null || bindAddress.isBlank()) ? "127.0.0.1" : bindAddress;
         this.port = port;
         this.mmapReader = mmapReader;
         this.apiSecret = apiSecret;
         this.sessions = sessions;
-        this.trustedProxies = ClientAddressResolver.parseTrustedProxies(
-                com.sbk.optionspricer.config.EnvironmentConfigLoader.getOrDefault("TRUSTED_PROXIES", ""));
+        this.trustedProxies = Set.copyOf(trustedProxies);
     }
 
     public WebSocketDashboardServer(int port, MmapStateReader mmapReader, String apiSecret,

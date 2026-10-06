@@ -21,11 +21,62 @@ import com.sbk.optionspricer.market.MarketSnapshotAdapter;
 import com.sbk.optionspricer.market.MarketSnapshot;
 
 public class OptionsDashboardServer {
+
+    static {
+        // JDK HttpServer limits, read when the server class initialises. A request that never
+        // completes is closed instead of holding a connection open indefinitely.
+        String requestTimeout = com.sbk.optionspricer.config.EnvironmentConfigLoader.getOrDefault("HTTP_REQUEST_TIMEOUT_SECONDS", "30");
+        setPropertyIfAbsent("sun.net.httpserver.maxReqTime", requestTimeout);
+        setPropertyIfAbsent("sun.net.httpserver.maxRspTime", "60");
+        // The JDK evaluates these timeouts only once per tick (default 10s), so a short timeout fires late.
+        setPropertyIfAbsent("sun.net.httpserver.clockTick", "1000");
+        setPropertyIfAbsent("sun.net.httpserver.idleInterval", "30");
+        setPropertyIfAbsent("sun.net.httpserver.maxIdleConnections", "100");
+        setPropertyIfAbsent("sun.net.httpserver.maxReqHeaders", "50");
+    }
+
+    private static void setPropertyIfAbsent(String key, String value) {
+        if (System.getProperty(key) == null) {
+            System.setProperty(key, value);
+        }
+    }
+
+    /**
+     * Network-facing security settings.
+     *
+     * @param trustedProxies IPs of reverse proxies whose X-Forwarded-* headers are believed
+     * @param cookieSecure   always mark session cookies Secure and send HSTS (set when serving over TLS)
+     */
+    public record SecurityOptions(java.util.Set<String> trustedProxies, boolean cookieSecure) {
+        public SecurityOptions {
+            trustedProxies = java.util.Set.copyOf(trustedProxies);
+        }
+
+        public static SecurityOptions fromEnvironment() {
+            return new SecurityOptions(
+                    ClientAddressResolver.parseTrustedProxies(
+                            com.sbk.optionspricer.config.EnvironmentConfigLoader.getOrDefault("TRUSTED_PROXIES", "")),
+                    Boolean.parseBoolean(com.sbk.optionspricer.config.EnvironmentConfigLoader.getOrDefault("COOKIE_SECURE", "false")));
+        }
+    }
+
+    /** Bounded handler pool: a request flood is queued up to a limit and then shed, never unbounded. */
+    static java.util.concurrent.ThreadPoolExecutor createHttpExecutor() {
+        java.util.concurrent.atomic.AtomicInteger counter = new java.util.concurrent.atomic.AtomicInteger();
+        return new java.util.concurrent.ThreadPoolExecutor(8, 32, 60, java.util.concurrent.TimeUnit.SECONDS,
+                new java.util.concurrent.LinkedBlockingQueue<>(256),
+                runnable -> {
+                    Thread thread = new Thread(runnable, "http-handler-" + counter.incrementAndGet());
+                    thread.setDaemon(true);
+                    return thread;
+                });
+    }
     public static volatile int publicServerPort = 8080;
 
     private final String apiSecret;
     private final BrowserSessionManager sessions;
     private final java.util.Set<String> trustedProxies;
+    private final SecurityOptions securityOptions;
     private final MmapStateReader mmapReader;
     private final HttpServer server;
     private final ExecutorService httpExecutor;
@@ -39,6 +90,15 @@ public class OptionsDashboardServer {
                                   String bindAddress, int port, int wsPort, MmapStateReader mmapReader,
                                   String webRoot, OrderManager orderManager, PositionTracker positionTracker,
                                   MarketSnapshotAdapter marketAdapter) throws IOException {
+        this(apiSecret, operatorPassword, allowedOrigins, bindAddress, port, wsPort, mmapReader, webRoot,
+                orderManager, positionTracker, marketAdapter, SecurityOptions.fromEnvironment());
+    }
+
+    public OptionsDashboardServer(String apiSecret, String operatorPassword, String allowedOrigins,
+                                  String bindAddress, int port, int wsPort, MmapStateReader mmapReader,
+                                  String webRoot, OrderManager orderManager, PositionTracker positionTracker,
+                                  MarketSnapshotAdapter marketAdapter, SecurityOptions securityOptions) throws IOException {
+        this.securityOptions = securityOptions;
         try {
             validateApiSecret(apiSecret);
         } catch (IllegalArgumentException e) {
@@ -46,17 +106,16 @@ public class OptionsDashboardServer {
         }
         this.apiSecret = apiSecret;
         this.sessions = new BrowserSessionManager(operatorPassword, allowedOrigins);
-        this.trustedProxies = ClientAddressResolver.parseTrustedProxies(
-                com.sbk.optionspricer.config.EnvironmentConfigLoader.getOrDefault("TRUSTED_PROXIES", ""));
+        this.trustedProxies = securityOptions.trustedProxies();
         this.mmapReader = mmapReader;
         this.orderManager = orderManager;
         this.positionTracker = positionTracker;
         this.marketAdapter = marketAdapter;
         InetAddress address = InetAddress.getByName(bindAddress);
-        this.server = HttpServer.create(new InetSocketAddress(address, port), 0);
-        this.httpExecutor = Executors.newFixedThreadPool(10);
+        this.server = HttpServer.create(new InetSocketAddress(address, port), 128);
+        this.httpExecutor = createHttpExecutor();
         this.server.setExecutor(httpExecutor);
-        this.wsServer = new WebSocketDashboardServer(bindAddress, wsPort, mmapReader, apiSecret, sessions);
+        this.wsServer = new WebSocketDashboardServer(bindAddress, wsPort, mmapReader, apiSecret, sessions, trustedProxies);
         configureContexts(webRoot);
     }
 
@@ -135,7 +194,7 @@ public class OptionsDashboardServer {
         server.createContext("/login", guarded(this::handleLogin));
         server.createContext("/logout", guarded(this::handleLogout));
         server.createContext("/api/spot", guarded(exchange -> {
-            applySecurityHeaders(exchange, true);
+            applySecurityHeaders(exchange, true, isSecureRequest(exchange));
             if (!authorizeApi(exchange)) return;
             if (marketAdapter == null) {
                 sendJsonError(exchange, 503, "market data unavailable");
@@ -152,14 +211,14 @@ public class OptionsDashboardServer {
         }));
 
         server.createContext("/api/health", guarded(exchange -> {
-            applySecurityHeaders(exchange, true);
+            applySecurityHeaders(exchange, true, isSecureRequest(exchange));
             if (!authorizeApi(exchange)) return;
             exchange.getResponseHeaders().set("Content-Type", "application/json");
             send(exchange, 200, healthSnapshot(marketAdapter));
         }));
 
         server.createContext("/api/execution", guarded(exchange -> {
-            applySecurityHeaders(exchange, true);
+            applySecurityHeaders(exchange, true, isSecureRequest(exchange));
             if (!authorizeApi(exchange)) return;
             java.util.List<java.util.Map<String, Object>> rows = new java.util.ArrayList<>();
             if (orderManager != null) {
@@ -179,7 +238,7 @@ public class OptionsDashboardServer {
         }));
 
         server.createContext("/api/risk", guarded(exchange -> {
-            applySecurityHeaders(exchange, true);
+            applySecurityHeaders(exchange, true, isSecureRequest(exchange));
             if (!authorizeApi(exchange)) return;
             MmapStateReader.RiskState state;
             try {
@@ -197,7 +256,7 @@ public class OptionsDashboardServer {
         }));
 
         server.createContext("/api/surface3d", guarded(exchange -> {
-            applySecurityHeaders(exchange, true);
+            applySecurityHeaders(exchange, true, isSecureRequest(exchange));
             if (!authorizeApi(exchange)) return;
             String requested = queryParam(exchange.getRequestURI().getRawQuery(), "model");
             String model = "SSVI".equals(requested) ? "SSVI" : "FREE_SABR".equals(requested) ? "FREE_SABR" : "SABR";
@@ -227,17 +286,22 @@ public class OptionsDashboardServer {
             body.put("z", z);
             sendJson(exchange, 200, body);
         }));
-        server.createContext("/", new StaticFileHandler(webRoot));
+        server.createContext("/", new StaticFileHandler(webRoot, this::isSecureRequest));
     }
 
+    /** Convenience for callers that cannot tell whether the request arrived over TLS (no HSTS is sent). */
     public static void applySecurityHeaders(HttpExchange exchange, boolean isApi) {
+        applySecurityHeaders(exchange, isApi, false);
+    }
+
+    public static void applySecurityHeaders(HttpExchange exchange, boolean isApi, boolean secure) {
         var headers = exchange.getResponseHeaders();
         headers.set("Content-Security-Policy",
                 "default-src 'self'; " +
-                "script-src 'self' 'unsafe-inline' https://cdn.plot.ly; " +
+                "script-src 'self' https://cdn.plot.ly; " +
                 "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
                 "font-src 'self' https://fonts.gstatic.com; " +
-                "connect-src 'self' ws: wss:; " +
+                "connect-src 'self'; " +
                 "img-src 'self' data:; " +
                 "object-src 'none'; " +
                 "frame-ancestors 'none'; " +
@@ -247,7 +311,7 @@ public class OptionsDashboardServer {
         headers.set("X-Frame-Options", "DENY");
         headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
         headers.set("Permissions-Policy", "geolocation=(), camera=(), microphone=(), payment=()");
-        if (isSecureRequest(exchange)) {
+        if (secure) {
             headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
         }
         if (isApi) {
@@ -256,16 +320,25 @@ public class OptionsDashboardServer {
         }
     }
 
-    private static boolean isSecureRequest(HttpExchange exchange) {
-        String proto = exchange.getRequestHeaders().getFirst("X-Forwarded-Proto");
-        if (proto != null && "https".equalsIgnoreCase(proto.trim())) {
+    /**
+     * True when the connection should be treated as TLS: either COOKIE_SECURE is set, or a configured
+     * trusted proxy reports https. X-Forwarded-Proto from any other peer is ignored, so a client cannot
+     * forge it.
+     */
+    boolean isSecureRequest(HttpExchange exchange) {
+        if (securityOptions.cookieSecure()) {
             return true;
         }
-        return "https".equalsIgnoreCase(exchange.getRequestURI().getScheme());
+        String proto = exchange.getRequestHeaders().getFirst("X-Forwarded-Proto");
+        if (proto == null || !"https".equalsIgnoreCase(proto.trim())) {
+            return false;
+        }
+        InetSocketAddress peer = exchange.getRemoteAddress();
+        return peer != null && peer.getAddress() != null && trustedProxies.contains(peer.getAddress().getHostAddress());
     }
 
     private void handleLogin(HttpExchange exchange) throws IOException {
-        applySecurityHeaders(exchange, true);
+        applySecurityHeaders(exchange, true, isSecureRequest(exchange));
         if (!"/login".equals(exchange.getRequestURI().getPath())) {
             send(exchange, 404, "Not Found");
             return;
@@ -304,7 +377,7 @@ public class OptionsDashboardServer {
     }
 
     private void handleLogout(HttpExchange exchange) throws IOException {
-        applySecurityHeaders(exchange, true);
+        applySecurityHeaders(exchange, true, isSecureRequest(exchange));
         if (!"/logout".equals(exchange.getRequestURI().getPath())) {
             send(exchange, 404, "Not Found");
             return;
@@ -431,8 +504,15 @@ public class OptionsDashboardServer {
     public static class StaticFileHandler implements com.sun.net.httpserver.HttpHandler {
         private final Path rootPath;
 
+        private final java.util.function.Predicate<HttpExchange> secure;
+
         public StaticFileHandler(String rootDir) {
+            this(rootDir, exchange -> false);
+        }
+
+        public StaticFileHandler(String rootDir, java.util.function.Predicate<HttpExchange> secure) {
             this.rootPath = Path.of(rootDir).toAbsolutePath().normalize();
+            this.secure = secure;
         }
 
         public boolean isPathSafe(String requestPath) {
@@ -449,7 +529,7 @@ public class OptionsDashboardServer {
 
         @Override
         public void handle(HttpExchange exchange) throws IOException {
-            applySecurityHeaders(exchange, false);
+            applySecurityHeaders(exchange, false, secure.test(exchange));
             String path = exchange.getRequestURI().getPath();
             if (path == null || path.equals("/")) path = "/index.html";
             if (!isPathSafe(path)) {
@@ -469,6 +549,9 @@ public class OptionsDashboardServer {
             else if (fileName.endsWith(".css")) exchange.getResponseHeaders().set("Content-Type", "text/css; charset=utf-8");
             else if (fileName.endsWith(".js")) exchange.getResponseHeaders().set("Content-Type", "application/javascript; charset=utf-8");
             else if (fileName.endsWith(".svg")) exchange.getResponseHeaders().set("Content-Type", "image/svg+xml");
+            // Build output under /assets/ is content-hashed, so it can be cached forever; the shell must be revalidated.
+            exchange.getResponseHeaders().set("Cache-Control",
+                    path.startsWith("/assets/") ? "public, max-age=31536000, immutable" : "no-cache");
             exchange.sendResponseHeaders(200, bytes.length);
             try (OutputStream output = exchange.getResponseBody()) {
                 output.write(bytes);
