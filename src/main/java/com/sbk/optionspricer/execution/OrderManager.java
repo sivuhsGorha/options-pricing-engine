@@ -51,6 +51,7 @@ public class OrderManager {
     private final PreTradeRiskFilter riskFilter;
     private final ExchangeTransport transport;
     private final MarketDataPolicy marketDataPolicy;
+    private final TradingHalt tradingHalt;
     private final PositionTracker positionTracker;
     private final AtomicLong sequence = new AtomicLong(1L);
     private final Map<Long, Order> openOrders = new LinkedHashMap<>();
@@ -63,10 +64,19 @@ public class OrderManager {
 
     public OrderManager(PreTradeRiskFilter riskFilter, ExchangeTransport transport, PositionTracker positionTracker,
                         MarketDataPolicy marketDataPolicy) {
+        this(riskFilter, transport, positionTracker, marketDataPolicy, new TradingHalt());
+    }
+
+    public OrderManager(PreTradeRiskFilter riskFilter, ExchangeTransport transport, PositionTracker positionTracker,
+                        MarketDataPolicy marketDataPolicy, TradingHalt tradingHalt) {
         if (marketDataPolicy == null) {
             throw new IllegalArgumentException("marketDataPolicy must not be null");
         }
+        if (tradingHalt == null) {
+            throw new IllegalArgumentException("tradingHalt must not be null");
+        }
         this.marketDataPolicy = marketDataPolicy;
+        this.tradingHalt = tradingHalt;
         if (riskFilter == null) {
             throw new IllegalArgumentException("riskFilter must not be null");
         }
@@ -85,6 +95,13 @@ public class OrderManager {
         
         long orderId = sequence.getAndIncrement();
         com.sbk.optionspricer.market.MarketDataStatus mds = snapshot.status();
+
+        java.util.Optional<TradingHalt.Reason> halted = tradingHalt.reason();
+        if (halted.isPresent()) {
+            String reason = "trading halted: " + halted.get().message();
+            recordAudit(orderId, false, mds, reason, 0.0, 0);
+            return new OrderDecision(false, OrderStatus.REJECTED, reason, orderId);
+        }
 
         if (!marketDataPolicy.tradable().contains(mds)) {
             String reason = "market data not tradable: " + mds;
@@ -135,6 +152,10 @@ public class OrderManager {
         if (order == null) {
             throw new IllegalArgumentException("order not found: " + orderId);
         }
+    }
+
+    public TradingHalt getTradingHalt() {
+        return tradingHalt;
     }
 
     public Map<Long, Order> getOpenOrders() {

@@ -48,6 +48,10 @@ public final class UnifiedQuantEngine {
     private final com.sbk.optionspricer.risk.GreekAlertManager greekAlertManager =
             new com.sbk.optionspricer.risk.GreekAlertManager(50000, 100000, 5000, 10000, 300000, 600000);
 
+    public com.sbk.optionspricer.risk.GreekAlertManager getGreekAlertManager() {
+        return greekAlertManager;
+    }
+
     public enum EngineState { RUNNING, STOPPED_FATAL }
     private volatile EngineState engineState = EngineState.RUNNING;
     private final java.util.function.IntConsumer exitHandler;

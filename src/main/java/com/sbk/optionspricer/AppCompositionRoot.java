@@ -54,7 +54,9 @@ public class AppCompositionRoot {
         OrderManager.MarketDataPolicy dataPolicy = allowSimulated
                 ? OrderManager.MarketDataPolicy.allowSimulated()
                 : OrderManager.MarketDataPolicy.strict();
-        this.orderManager = new OrderManager(preTradeFilter, executionTransport, positionTracker, dataPolicy);
+        com.sbk.optionspricer.execution.TradingHalt tradingHalt = new com.sbk.optionspricer.execution.TradingHalt();
+        tradingHalt.haltOnCriticalAlerts(engine.getGreekAlertManager());
+        this.orderManager = new OrderManager(preTradeFilter, executionTransport, positionTracker, dataPolicy, tradingHalt);
         this.strategyLoop = new StrategyExecutionLoop(symbol, orderManager, riskAdmission, positionTracker, baseQuantity, triggerPct, marketAdapter);
         
         this.harness = new QuantSimulationHarness(engine, spotProvider, positionTracker, orderManager, riskAdmission, strategyLoop);
