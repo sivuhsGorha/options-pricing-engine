@@ -96,7 +96,11 @@ public class OrderManager {
         this.positionTracker = positionTracker;
     }
 
-    public OrderDecision submit(Order order, com.sbk.optionspricer.market.MarketSnapshot snapshot) {
+    /**
+     * Admission, risk, transmission and fill booking run as one atomic step under this manager's
+     * lock, so two concurrent orders can never both pass a limit check against the same book.
+     */
+    public synchronized OrderDecision submit(Order order, com.sbk.optionspricer.market.MarketSnapshot snapshot) {
         if (order == null || snapshot == null) {
             return new OrderDecision(false, OrderStatus.REJECTED, "order and snapshot must not be null", -1L);
         }
@@ -165,7 +169,7 @@ public class OrderManager {
         return new java.util.ArrayList<>(auditQueue);
     }
 
-    public void cancel(long orderId) {
+    public synchronized void cancel(long orderId) {
         Order order = openOrders.remove(orderId);
         if (order == null) {
             throw new IllegalArgumentException("order not found: " + orderId);
@@ -176,7 +180,7 @@ public class OrderManager {
         return tradingHalt;
     }
 
-    public Map<Long, Order> getOpenOrders() {
-        return Collections.unmodifiableMap(openOrders);
+    public synchronized Map<Long, Order> getOpenOrders() {
+        return Collections.unmodifiableMap(new LinkedHashMap<>(openOrders));
     }
 }

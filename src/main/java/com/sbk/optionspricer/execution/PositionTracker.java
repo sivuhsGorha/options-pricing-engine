@@ -41,7 +41,7 @@ public class PositionTracker {
         lastLiveTracker = this;
     }
 
-    public void applyFill(ExecutionFill fill) {
+    public synchronized void applyFill(ExecutionFill fill) {
         if (fill == null) {
             throw new IllegalArgumentException("fill must not be null");
         }
@@ -66,19 +66,19 @@ public class PositionTracker {
         lastLiveTracker = this;
     }
 
-    public PortfolioPosition getPosition(String symbol) {
+    public synchronized PortfolioPosition getPosition(String symbol) {
         if (symbol == null || symbol.isBlank()) {
             throw new IllegalArgumentException("symbol must not be blank");
         }
         return positions.get(symbol.trim().toUpperCase());
     }
 
-    public int getNetQuantity(String symbol) {
+    public synchronized int getNetQuantity(String symbol) {
         PortfolioPosition position = getPosition(symbol);
         return position == null ? 0 : position.getQuantity();
     }
 
-    public double getNotional(String symbol) {
+    public synchronized double getNotional(String symbol) {
         PortfolioPosition position = getPosition(symbol);
         if (position == null) {
             return 0.0;
@@ -90,11 +90,11 @@ public class PositionTracker {
         return Math.abs((double) position.getQuantity() * position.getMultiplier() * lastPrice);
     }
 
-    public Map<String, PortfolioPosition> getPositions() {
-        return Collections.unmodifiableMap(positions);
+    public synchronized Map<String, PortfolioPosition> getPositions() {
+        return Collections.unmodifiableMap(new LinkedHashMap<>(positions));
     }
 
-    public double getNetDelta() {
+    public synchronized double getNetDelta() {
         double total = 0.0;
         for (PortfolioPosition position : positions.values()) {
             total += position.getPositionDelta();
@@ -102,7 +102,7 @@ public class PositionTracker {
         return total;
     }
 
-    public double getNetGamma() {
+    public synchronized double getNetGamma() {
         double total = 0.0;
         for (PortfolioPosition position : positions.values()) {
             total += position.getPositionGamma();
@@ -110,7 +110,7 @@ public class PositionTracker {
         return total;
     }
 
-    public double getNetVega() {
+    public synchronized double getNetVega() {
         double total = 0.0;
         for (PortfolioPosition position : positions.values()) {
             total += position.getPositionVega();
@@ -118,7 +118,7 @@ public class PositionTracker {
         return total;
     }
 
-    public double getNetNotional() {
+    public synchronized double getNetNotional() {
         double total = 0.0;
         for (Map.Entry<String, PortfolioPosition> entry : positions.entrySet()) {
             total += getNotional(entry.getKey());
