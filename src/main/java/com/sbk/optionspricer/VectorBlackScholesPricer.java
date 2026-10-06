@@ -36,6 +36,14 @@ public final class VectorBlackScholesPricer {
 
     public static double[] priceBatchParallelSingleThread(double spot, double[] strikes, double timeToExpiry,
                                                       double riskFreeRate, double volatility, boolean isCall) {
+        if (timeToExpiry <= 1e-10 || volatility <= 1e-10) {
+            double[] out = new double[strikes.length];
+            for (int i = 0; i < strikes.length; i++) {
+                out[i] = BlackScholesPricer.price(isCall ? OptionType.CALL : OptionType.PUT, spot, strikes[i], timeToExpiry, riskFreeRate, volatility, 0.0);
+            }
+            return out;
+        }
+
         double[] out = new double[strikes.length];
         int upperBound = SPECIES.loopBound(strikes.length);
         int i = 0;
