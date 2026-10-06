@@ -7,6 +7,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class OptionsPropertyTest {
 
+    // NOTE: the reference below is itself an approximation (Abramowitz & Stegun 26.2.17, error ~7.5e-8), so this
+    // test only shows two approximations agree. True accuracy is checked in NormalDistributionAccuracyTest
+    // against a 60-digit BigDecimal reference.
     @Test
     void testNormalCdfMaxAbsoluteError() {
         double maxError = 0.0;
@@ -24,7 +27,7 @@ public class OptionsPropertyTest {
 
         System.out.printf(java.util.Locale.ROOT, "[CDF ACCURACY REPORT] Measured maximum absolute error of NormalDistribution.cdf: %.9e at x=%.3f%n",
                 maxError, maxErrorX);
-        assertTrue(maxError <= 1.5e-7, "Normal CDF max error (" + maxError + ") must be <= 1.5e-7");
+        assertTrue(maxError <= 1.5e-7, "Normal CDF max error (" + maxError + ") must be <= 1.5e-7 against the A&S 26.2.17 reference");
     }
 
     @Test

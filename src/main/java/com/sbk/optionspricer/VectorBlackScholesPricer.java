@@ -1,7 +1,6 @@
 package com.sbk.optionspricer;
 
 import jdk.incubator.vector.DoubleVector;
-import jdk.incubator.vector.VectorMask;
 import jdk.incubator.vector.VectorOperators;
 import jdk.incubator.vector.VectorSpecies;
 
@@ -12,12 +11,6 @@ import jdk.incubator.vector.VectorSpecies;
 public final class VectorBlackScholesPricer {
 
     private static final VectorSpecies<Double> SPECIES = DoubleVector.SPECIES_PREFERRED;
-    private static final double A1 = 0.254829592;
-    private static final double A2 = -0.284496736;
-    private static final double A3 = 1.421413741;
-    private static final double A4 = -1.453152027;
-    private static final double A5 = 1.061405429;
-    private static final double P = 0.3275911;
 
     private VectorBlackScholesPricer() {}
 
@@ -93,38 +86,18 @@ public final class VectorBlackScholesPricer {
         return out;
     }
 
+    /**
+     * Phi for every lane, using the same double-precision algorithm as {@link NormalDistribution#cdf}.
+     * The previous lane-wise A&S approximation was fast but differed from the scalar pricer by ~1e-5, so
+     * the SIMD and scalar paths could disagree on a price. The CDF is not vectorizable without that loss
+     * (it branches and iterates per value); the vector work here is the log and the arithmetic around it.
+     */
     static DoubleVector vectorCdf(DoubleVector x) {
-        DoubleVector sqrt2 = DoubleVector.broadcast(SPECIES, Math.sqrt(2.0));
-        DoubleVector erfVal = vectorErf(x.div(sqrt2));
-        DoubleVector one = DoubleVector.broadcast(SPECIES, 1.0);
-        DoubleVector half = DoubleVector.broadcast(SPECIES, 0.5);
-        return one.add(erfVal).mul(half);
-    }
-
-    static DoubleVector vectorErf(DoubleVector x) {
-        VectorMask<Double> isNeg = x.lt(0.0);
-        DoubleVector absX = x.lanewise(VectorOperators.ABS);
-
-        DoubleVector one = DoubleVector.broadcast(SPECIES, 1.0);
-        DoubleVector p = DoubleVector.broadcast(SPECIES, P);
-        DoubleVector t = one.div(one.add(p.mul(absX)));
-
-        DoubleVector a1 = DoubleVector.broadcast(SPECIES, A1);
-        DoubleVector a2 = DoubleVector.broadcast(SPECIES, A2);
-        DoubleVector a3 = DoubleVector.broadcast(SPECIES, A3);
-        DoubleVector a4 = DoubleVector.broadcast(SPECIES, A4);
-        DoubleVector a5 = DoubleVector.broadcast(SPECIES, A5);
-
-        // a5*t + a4
-        DoubleVector poly = a5.mul(t).add(a4);
-        poly = poly.mul(t).add(a3);
-        poly = poly.mul(t).add(a2);
-        poly = poly.mul(t).add(a1);
-
-        DoubleVector expTerm = absX.mul(absX).neg().lanewise(VectorOperators.EXP);
-        DoubleVector y = one.sub(poly.mul(t).mul(expTerm));
-
-        DoubleVector negY = y.neg();
-        return y.blend(negY, isNeg);
+        double[] lanes = new double[SPECIES.length()];
+        x.intoArray(lanes, 0);
+        for (int i = 0; i < lanes.length; i++) {
+            lanes[i] = NormalDistribution.cdf(lanes[i]);
+        }
+        return DoubleVector.fromArray(SPECIES, lanes, 0);
     }
 }

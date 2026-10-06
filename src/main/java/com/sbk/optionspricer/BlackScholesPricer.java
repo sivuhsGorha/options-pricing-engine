@@ -34,11 +34,11 @@ public class BlackScholesPricer {
         double discountedSpot = spot * Math.exp(-dividendYield * timeToExpiry);
         double discountedStrike = strike * Math.exp(-riskFreeRate * timeToExpiry);
 
-        if (type == OptionType.CALL) {
-            return discountedSpot * NormalDistribution.cdf(d1) - discountedStrike * NormalDistribution.cdf(d2);
-        } else {
-            return discountedStrike * NormalDistribution.cdf(-d2) - discountedSpot * NormalDistribution.cdf(-d1);
-        }
+        // Far out of the money the two terms nearly cancel; rounding can leave -1e-17. An option is never worth less than zero.
+        double value = type == OptionType.CALL
+                ? discountedSpot * NormalDistribution.cdf(d1) - discountedStrike * NormalDistribution.cdf(d2)
+                : discountedStrike * NormalDistribution.cdf(-d2) - discountedSpot * NormalDistribution.cdf(-d1);
+        return Math.max(0.0, value);
     }
 
     public static Greeks greeks(OptionType type, OptionParameters p) {
