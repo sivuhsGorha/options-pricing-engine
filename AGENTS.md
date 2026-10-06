@@ -60,4 +60,4 @@ When executing multi-faceted quantitative tasks, spawn specialized subagents:
 - **Accidental Data Loss Prevention**: **NEVER** run commands that perform irreversible deletion (`rm -rf`, `git reset --hard` on uncommitted work, `DROP DATABASE`) without explicit user permission.
 - **Resource Attribution**: Ensure all command invocations follow proper environment constraints.
 - **Log Extraction Rigor**: If a compilation command or unit test fails, immediately retrieve and inspect the un-truncated stdout/stderr logs before forming any fix hypothesis.
-- **No Test Code Commits**: **NEVER** stage or commit modifications to test files (e.g., files in `src/test/` or ending in `*Test.java`) unless explicitly instructed by the user. You may modify tests locally for verification purposes, but they must be excluded from `git commit` payloads.
+- **Tests Are Committed**: Tests under `src/test/` are part of the repository and CI verification. Commit them alongside the change they cover. **NEVER** delete, disable, or weaken a test just to make a build pass.
