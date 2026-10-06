@@ -4,11 +4,11 @@ import com.sbk.optionspricer.OptionParameters;
 import com.sbk.optionspricer.OptionType;
 
 /**
- * Recombining Trinomial Tree pricer for American and European options.
+ * Recombining trinomial tree pricer for American options (continuous dividend yield; no discrete dividends).
  *
- * Achieves high performance and ZERO memory allocation on the critical path by
- * utilizing a single 1D double[] array (reused iteratively) instead of a
- * 2D matrix structure.
+ * <p>Memory is O(steps): the option values live in one reused 1D array and the node spots in another,
+ * computed once as powers of the up factor (they were recomputed with Math.pow for every node at every step,
+ * which made the pricer quadratic in transcendental calls). Each call allocates those two arrays.
  */
 public class AmericanTreePricer {
 
@@ -30,6 +30,15 @@ public class AmericanTreePricer {
         
         // Number of terminal nodes is 2 * steps + 1
         int numNodes = 2 * steps + 1;
+
+        // Node spots S0 * u^j for j = -steps..steps, built by repeated multiplication (a node at net j jumps has the
+        // same spot at every time level, so one table serves the whole tree).
+        double[] spots = new double[numNodes];
+        spots[steps] = p.spot();
+        for (int j = 1; j <= steps; j++) {
+            spots[steps + j] = spots[steps + j - 1] * treeParams.upFactor();
+            spots[steps - j] = spots[steps - j + 1] * treeParams.downFactor();
+        }
         
         // Single 1D array to track option values at the current time step.
         // Avoids allocating massive 2D structures (O(N) memory instead of O(N^2)).
@@ -40,9 +49,7 @@ public class AmericanTreePricer {
             // Node index 'i' corresponds to net up-jumps
             // At bottom node (i=0), we had 'steps' down-jumps and 'steps' left-jumps (wait, it's 2*steps down relative to max up)
             // Let j = i - steps. Thus j ranges from -steps to +steps.
-            int j = i - steps;
-            double nodeSpot = p.spot() * Math.pow(treeParams.upFactor(), j);
-            values[i] = intrinsicValue(type, nodeSpot, p.strike());
+            values[i] = intrinsicValue(type, spots[i], p.strike());
         }
 
         // 2. Backward induction through the tree
@@ -57,9 +64,8 @@ public class AmericanTreePricer {
                 );
 
                 // Check early exercise premium
-                int j = i - step;
-                double nodeSpot = p.spot() * Math.pow(treeParams.upFactor(), j);
-                double earlyExerciseValue = intrinsicValue(type, nodeSpot, p.strike());
+                // Node i at this level has net jump j = i - step, i.e. table index steps + (i - step).
+                double earlyExerciseValue = intrinsicValue(type, spots[steps - step + i], p.strike());
 
                 // American option value is max(continuation, early exercise)
                 values[i] = Math.max(continuationValue, earlyExerciseValue);
