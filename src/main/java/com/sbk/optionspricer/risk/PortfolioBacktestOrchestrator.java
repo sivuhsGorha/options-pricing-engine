@@ -43,7 +43,8 @@ public class PortfolioBacktestOrchestrator {
         OrderManager orderManager = new OrderManager(
                 new PreTradeRiskFilter(1000, 10_000_000.0, 1000),
                 (order, sym, bid, ask) -> new com.sbk.optionspricer.execution.ExecutionResult(sym, order.quantity(), order.price(), true, "EXECUTED"),
-                tracker
+                tracker,
+                OrderManager.MarketDataPolicy.allowSimulated()
         );
         PortfolioRiskAdmission admission = new PortfolioRiskAdmission(1_000_000.0, 5_000.0, 10_000.0, 2_000.0, 100.0);
         StrategyExecutionLoop strategy = new StrategyExecutionLoop("SPY", orderManager, admission, tracker, 10.0, 0.004);

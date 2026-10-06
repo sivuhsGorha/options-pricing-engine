@@ -18,14 +18,55 @@ public class OrderManager {
             String rejectionReason, double fillPrice, int quantity, java.time.Instant timestamp
     ) {}
 
+    /**
+     * Which market data may back an order. STALE and UNAVAILABLE data is never tradable;
+     * SIMULATED data is tradable only when explicitly allowed (paper trading without a live feed).
+     */
+    public record MarketDataPolicy(java.util.Set<com.sbk.optionspricer.market.MarketDataStatus> tradable, long maxQuoteAgeMs) {
+        public MarketDataPolicy {
+            tradable = java.util.Set.copyOf(tradable);
+            if (tradable.contains(com.sbk.optionspricer.market.MarketDataStatus.STALE)
+                    || tradable.contains(com.sbk.optionspricer.market.MarketDataStatus.UNAVAILABLE)) {
+                throw new IllegalArgumentException("STALE and UNAVAILABLE market data can never be tradable");
+            }
+            if (maxQuoteAgeMs <= 0L) {
+                throw new IllegalArgumentException("maxQuoteAgeMs must be positive");
+            }
+        }
+
+        public static MarketDataPolicy strict() {
+            return new MarketDataPolicy(java.util.EnumSet.of(
+                    com.sbk.optionspricer.market.MarketDataStatus.LIVE,
+                    com.sbk.optionspricer.market.MarketDataStatus.DELAYED), 30_000L);
+        }
+
+        public static MarketDataPolicy allowSimulated() {
+            return new MarketDataPolicy(java.util.EnumSet.of(
+                    com.sbk.optionspricer.market.MarketDataStatus.LIVE,
+                    com.sbk.optionspricer.market.MarketDataStatus.DELAYED,
+                    com.sbk.optionspricer.market.MarketDataStatus.SIMULATED), 30_000L);
+        }
+    }
+
     private final PreTradeRiskFilter riskFilter;
     private final ExchangeTransport transport;
+    private final MarketDataPolicy marketDataPolicy;
     private final PositionTracker positionTracker;
     private final AtomicLong sequence = new AtomicLong(1L);
     private final Map<Long, Order> openOrders = new LinkedHashMap<>();
     private final java.util.Deque<ExecutionAuditRecord> auditQueue = new java.util.ArrayDeque<>();
 
+    /** Uses {@link MarketDataPolicy#strict()}: only fresh LIVE/DELAYED data is tradable. */
     public OrderManager(PreTradeRiskFilter riskFilter, ExchangeTransport transport, PositionTracker positionTracker) {
+        this(riskFilter, transport, positionTracker, MarketDataPolicy.strict());
+    }
+
+    public OrderManager(PreTradeRiskFilter riskFilter, ExchangeTransport transport, PositionTracker positionTracker,
+                        MarketDataPolicy marketDataPolicy) {
+        if (marketDataPolicy == null) {
+            throw new IllegalArgumentException("marketDataPolicy must not be null");
+        }
+        this.marketDataPolicy = marketDataPolicy;
         if (riskFilter == null) {
             throw new IllegalArgumentException("riskFilter must not be null");
         }
@@ -44,6 +85,17 @@ public class OrderManager {
         
         long orderId = sequence.getAndIncrement();
         com.sbk.optionspricer.market.MarketDataStatus mds = snapshot.status();
+
+        if (!marketDataPolicy.tradable().contains(mds)) {
+            String reason = "market data not tradable: " + mds;
+            recordAudit(orderId, false, mds, reason, 0.0, 0);
+            return new OrderDecision(false, OrderStatus.REJECTED, reason, orderId);
+        }
+        if (snapshot.derivedQuoteAgeMs() > marketDataPolicy.maxQuoteAgeMs()) {
+            String reason = "market data too old: " + snapshot.derivedQuoteAgeMs() + "ms";
+            recordAudit(orderId, false, mds, reason, 0.0, 0);
+            return new OrderDecision(false, OrderStatus.REJECTED, reason, orderId);
+        }
 
         if (!riskFilter.checkRisk(order, snapshot.symbol(), snapshot.bid(), snapshot.ask(), snapshot.volume())) {
             recordAudit(orderId, false, mds, "failed pre-trade risk validation", 0.0, 0);

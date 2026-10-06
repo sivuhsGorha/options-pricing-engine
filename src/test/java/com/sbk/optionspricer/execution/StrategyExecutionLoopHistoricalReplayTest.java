@@ -18,7 +18,8 @@ class StrategyExecutionLoopHistoricalReplayTest {
         OrderManager orderManager = new OrderManager(
                 new PreTradeRiskFilter(1000, 10_000_000.0, 1000),
                 (order, sym, bid, ask) -> new ExecutionResult(sym, order.quantity(), order.price(), true, "Executed"),
-                new PositionTracker()
+                new PositionTracker(),
+                OrderManager.MarketDataPolicy.allowSimulated()
         );
         PortfolioRiskAdmission admission = new PortfolioRiskAdmission(1_000_000.0, 5_000.0, 10_000.0, 2_000.0, 100.0);
 

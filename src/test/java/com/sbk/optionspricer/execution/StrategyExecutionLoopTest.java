@@ -14,7 +14,7 @@ class StrategyExecutionLoopTest {
     @Test
     void executesStrategySignalsWithinRiskLimitsAndTracksAcceptedOrders() {
         PositionTracker tracker = new PositionTracker();
-        OrderManager orderManager = new OrderManager(new PreTradeRiskFilter(1000, 10_000_000.0, 1000), (order, sym, bid, ask) -> new ExecutionResult(sym, order.quantity(), order.price(), true, "Executed"), tracker);
+        OrderManager orderManager = new OrderManager(new PreTradeRiskFilter(1000, 10_000_000.0, 1000), (order, sym, bid, ask) -> new ExecutionResult(sym, order.quantity(), order.price(), true, "Executed"), tracker, OrderManager.MarketDataPolicy.allowSimulated());
         PortfolioRiskAdmission admission = new PortfolioRiskAdmission(1_000_000.0, 5_000.0, 10_000.0, 2_000.0, 50_000.0);
 
         StrategyExecutionLoop loop = new StrategyExecutionLoop("SPY", orderManager, admission, tracker, 10.0, 0.02);
@@ -37,7 +37,7 @@ class StrategyExecutionLoopTest {
                 new ConcentrationLimitManager(Map.of("SPY", 500.0)),
                 new LiquidityRiskMonitor(25.0, 1000L)
         );
-        OrderManager orderManager = new OrderManager(filter, (order, sym, bid, ask) -> new ExecutionResult(sym, order.quantity(), order.price(), true, "Executed"), tracker);
+        OrderManager orderManager = new OrderManager(filter, (order, sym, bid, ask) -> new ExecutionResult(sym, order.quantity(), order.price(), true, "Executed"), tracker, OrderManager.MarketDataPolicy.allowSimulated());
         PortfolioRiskAdmission admission = new PortfolioRiskAdmission(1_000_000.0, 5_000.0, 10_000.0, 2_000.0, 50_000.0);
 
         StrategyExecutionLoop loop = new StrategyExecutionLoop("SPY", orderManager, admission, tracker, 10.0, 0.01);
@@ -50,7 +50,7 @@ class StrategyExecutionLoopTest {
     @Test
     void updatesPortfolioGreeksAfterAcceptedFillToKeepRiskLimitsMeaningful() {
         PositionTracker tracker = new PositionTracker();
-        OrderManager orderManager = new OrderManager(new PreTradeRiskFilter(1000, 10_000_000.0, 1000), (order, sym, bid, ask) -> new ExecutionResult(sym, order.quantity(), order.price(), true, "Executed"), tracker);
+        OrderManager orderManager = new OrderManager(new PreTradeRiskFilter(1000, 10_000_000.0, 1000), (order, sym, bid, ask) -> new ExecutionResult(sym, order.quantity(), order.price(), true, "Executed"), tracker, OrderManager.MarketDataPolicy.allowSimulated());
         PortfolioRiskAdmission admission = new PortfolioRiskAdmission(1_000_000.0, 5_000.0, 10_000.0, 2_000.0, 50_000.0);
 
         StrategyExecutionLoop loop = new StrategyExecutionLoop("SPY", orderManager, admission, tracker, 10.0, 0.02);

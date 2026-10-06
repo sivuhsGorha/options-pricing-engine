@@ -49,7 +49,12 @@ public class AppCompositionRoot {
         this.preTradeFilter = new PreTradeRiskFilter((int) maxPositionAbs, maxNotional, 100);
         this.riskAdmission = new PortfolioRiskAdmission(maxNotional, maxDelta, maxGamma, maxVega, maxPositionAbs);
         this.executionTransport = new PaperTradingExecutionAdapter(positionTracker, slippageBps);
-        this.orderManager = new OrderManager(preTradeFilter, executionTransport, positionTracker);
+        boolean allowSimulated = Boolean.parseBoolean(
+                com.sbk.optionspricer.config.EnvironmentConfigLoader.getOrDefault("ALLOW_SIMULATED_DATA", "false"));
+        OrderManager.MarketDataPolicy dataPolicy = allowSimulated
+                ? OrderManager.MarketDataPolicy.allowSimulated()
+                : OrderManager.MarketDataPolicy.strict();
+        this.orderManager = new OrderManager(preTradeFilter, executionTransport, positionTracker, dataPolicy);
         this.strategyLoop = new StrategyExecutionLoop(symbol, orderManager, riskAdmission, positionTracker, baseQuantity, triggerPct, marketAdapter);
         
         this.harness = new QuantSimulationHarness(engine, spotProvider, positionTracker, orderManager, riskAdmission, strategyLoop);
