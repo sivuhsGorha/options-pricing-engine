@@ -29,8 +29,10 @@ jobs:
           docker build -t options-engine .
           docker run -d -p 8080:8080 -e API_SECRET=ci-only-dummy-secret-0123456789abcdef -e BIND_ADDRESS=0.0.0.0 --name options-app options-engine
           sleep 10
-          docker logs options-app
-          curl -f -H "X-Signature: test" -H "X-Timestamp: 1" http://localhost:8080/ || exit 1
+          docker logs options-app | tail -n 50
+          code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/api/health)
+          echo "Unauthenticated /api/health -> HTTP $code"
+          [ "$code" = "401" ] || { docker rm -f options-app; exit 1; }
           docker rm -f options-app
 
       - name: Upload JaCoCo Code Coverage Report
