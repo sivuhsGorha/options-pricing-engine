@@ -20,15 +20,22 @@ public class PortfolioPosition {
     
     // Contract multiplier (e.g., 100 shares per option contract)
     private final int multiplier;
+    private final FillRecorder fillRecorder;
 
     public PortfolioPosition(String symbol, int quantity, int multiplier) {
+        this(symbol, quantity, multiplier, FillRecorder.LEDGER);
+    }
+
+    public PortfolioPosition(String symbol, int quantity, int multiplier, FillRecorder fillRecorder) {
+        if (fillRecorder == null) throw new IllegalArgumentException("fillRecorder must not be null");
         if (symbol == null || symbol.trim().isEmpty()) throw new IllegalArgumentException("Symbol must be valid");
         if (multiplier <= 0) throw new IllegalArgumentException("Multiplier must be positive");
         this.symbol = symbol;
         this.quantity = quantity;
         this.multiplier = multiplier;
+        this.fillRecorder = fillRecorder;
         if (quantity != 0) {
-            FillLedger.recordFill(symbol, quantity, multiplier);
+            fillRecorder.record(symbol, quantity, multiplier);
         }
     }
 
@@ -54,8 +61,11 @@ public class PortfolioPosition {
     }
     
     public void addQuantity(int executedQty) {
-        this.quantity = Math.addExact(this.quantity, executedQty);
-        FillLedger.recordFill(symbol, executedQty, multiplier);
+        // Record first: if the ledger write fails the in-memory position is left unchanged,
+        // so memory never runs ahead of the authoritative record.
+        int updated = Math.addExact(this.quantity, executedQty);
+        fillRecorder.record(symbol, executedQty, multiplier);
+        this.quantity = updated;
     }
 
     // --- Risk Exposure Calculations (Quantity * Multiplier * Greek) ---

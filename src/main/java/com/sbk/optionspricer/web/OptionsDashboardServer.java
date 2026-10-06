@@ -175,7 +175,9 @@ public class OptionsDashboardServer {
                 double netGamma = sanitizeRiskValue(state.netGamma, 0.0);
                 double netVega = sanitizeRiskValue(state.netVega, 0.0);
                 double scenarioMargin = sanitizeRiskValue(state.scenarioMargin, 0.0);
-                PositionTracker.PortfolioExposure trackedExposure = PositionTracker.snapshotPortfolioExposure();
+                PositionTracker.PortfolioExposure trackedExposure = positionTracker == null
+                        ? new PositionTracker.PortfolioExposure(0.0, 0.0, 0.0, 0.0)
+                        : positionTracker.snapshotExposure();
                 double trackedNetDelta = sanitizeRiskValue(trackedExposure.netDelta(), 0.0);
                 double trackedNetGamma = sanitizeRiskValue(trackedExposure.netGamma(), 0.0);
                 double trackedNetVega = sanitizeRiskValue(trackedExposure.netVega(), 0.0);

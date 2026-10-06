@@ -63,7 +63,7 @@ class PositionTrackerTest {
         tracker.applyFill(new PositionTracker.ExecutionFill("SPY", 10, 100, 101.0));
         tracker.applyFill(new PositionTracker.ExecutionFill("SPY", -4, 100, 102.5));
 
-        PositionTracker.PortfolioExposure exposure = PositionTracker.snapshotPortfolioExposure();
+        PositionTracker.PortfolioExposure exposure = tracker.snapshotExposure();
         assertTrue(exposure.netDelta() != 0.0 || exposure.netGamma() != 0.0 || exposure.netVega() != 0.0,
                 "accepted fills should produce a non-zero tracked exposure snapshot");
         assertTrue(exposure.netNotional() > 0.0, "tracked notional should remain positive after fills");

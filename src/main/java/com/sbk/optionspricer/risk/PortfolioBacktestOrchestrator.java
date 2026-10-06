@@ -39,7 +39,7 @@ public class PortfolioBacktestOrchestrator {
         List<OptionSnapshot> ordered = new ArrayList<>(snapshots);
         ordered.sort(Comparator.comparing(OptionSnapshot::timestamp));
 
-        PositionTracker tracker = new PositionTracker();
+        PositionTracker tracker = PositionTracker.inMemory();
         OrderManager orderManager = new OrderManager(
                 new PreTradeRiskFilter(1000, 10_000_000.0, 1000),
                 (order, sym, bid, ask) -> new com.sbk.optionspricer.execution.ExecutionResult(sym, order.quantity(), order.price(), true, "EXECUTED"),
@@ -58,7 +58,7 @@ public class PortfolioBacktestOrchestrator {
                 strategySummary.acceptedOrders(),
                 strategySummary.rejectedOrders(),
                 strategySummary.netQuantity(),
-                replay.totalPnL() + strategySummary.netQuantity() * 0.01,
+                replay.totalPnL(),
                 replay.averageSlippage(),
                 replay.maxDrawdown()
         );

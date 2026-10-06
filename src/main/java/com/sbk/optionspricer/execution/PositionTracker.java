@@ -1,5 +1,7 @@
 package com.sbk.optionspricer.execution;
 
+import com.sbk.optionspricer.risk.FillLedger;
+import com.sbk.optionspricer.risk.FillRecorder;
 import com.sbk.optionspricer.risk.PortfolioPosition;
 
 import java.util.Collections;
@@ -12,8 +14,6 @@ import java.util.Map;
  * the risk/accounting layer.
  */
 public class PositionTracker {
-
-    private static volatile PositionTracker lastLiveTracker = null;
 
     public record PortfolioExposure(double netDelta, double netGamma, double netVega, double netNotional) {}
 
@@ -36,9 +36,23 @@ public class PositionTracker {
 
     private final Map<String, PortfolioPosition> positions = new LinkedHashMap<>();
     private final Map<String, Double> lastExecutionPrice = new LinkedHashMap<>();
+    private final FillRecorder fillRecorder;
 
+    /** Live tracker: fills are recorded to the authoritative {@link FillLedger}. */
     public PositionTracker() {
-        lastLiveTracker = this;
+        this(FillRecorder.LEDGER);
+    }
+
+    public PositionTracker(FillRecorder fillRecorder) {
+        if (fillRecorder == null) {
+            throw new IllegalArgumentException("fillRecorder must not be null");
+        }
+        this.fillRecorder = fillRecorder;
+    }
+
+    /** Tracker for backtests and simulations: never writes to the fill ledger. */
+    public static PositionTracker inMemory() {
+        return new PositionTracker(FillRecorder.NONE);
     }
 
     public synchronized void applyFill(ExecutionFill fill) {
@@ -49,7 +63,7 @@ public class PositionTracker {
         String symbol = fill.symbol().trim().toUpperCase();
         PortfolioPosition position = positions.get(symbol);
         if (position == null) {
-            position = new PortfolioPosition(symbol, 0, fill.multiplier());
+            position = new PortfolioPosition(symbol, 0, fill.multiplier(), fillRecorder);
             // Linear underlying exposure until a pricer supplies instrument Greeks:
             // +1 delta per unit, no gamma or vega. Exposure then scales as quantity * multiplier * delta.
             position.updateGreeks(1.0, 0.0, 0.0);
@@ -63,7 +77,6 @@ public class PositionTracker {
         position.addQuantity(fill.quantity());
 
         lastExecutionPrice.put(symbol, fill.executionPrice());
-        lastLiveTracker = this;
     }
 
     public synchronized PortfolioPosition getPosition(String symbol) {
@@ -126,11 +139,7 @@ public class PositionTracker {
         return total;
     }
 
-    public static PortfolioExposure snapshotPortfolioExposure() {
-        PositionTracker tracker = lastLiveTracker;
-        if (tracker == null) {
-            return new PortfolioExposure(0.0, 0.0, 0.0, 0.0);
-        }
-        return new PortfolioExposure(tracker.getNetDelta(), tracker.getNetGamma(), tracker.getNetVega(), tracker.getNetNotional());
+    public synchronized PortfolioExposure snapshotExposure() {
+        return new PortfolioExposure(getNetDelta(), getNetGamma(), getNetVega(), getNetNotional());
     }
 }
