@@ -80,6 +80,29 @@ class EngineRiskStateTest {
     }
 
     @Test
+    void marginIsUnavailableNotInventedWhenThereIsNoMarketPrice() {
+        List<Published> published = new ArrayList<>();
+        UnifiedQuantEngine engine = engine(published);
+        engine.setExposureSource(() -> new PositionTracker.PortfolioExposure(1_000.0, 20.0, 300.0, 0.0));
+
+        engine.processTick(Double.NaN);
+
+        assertEquals(1_000.0, published.get(0).delta(), "position Greeks do not need a market price");
+        assertTrue(Double.isNaN(published.get(0).margin()), "scenario margin needs a spot; without one it is unknown, not 0 or a guess");
+    }
+
+    @Test
+    void riskEndpointReportsUnknownMarginAsNullNotZero() throws Exception {
+        MmapStateReader.RiskState state = new MmapStateReader.RiskState(-250.0, 3.0, 40.0, Double.NaN);
+
+        com.fasterxml.jackson.databind.JsonNode node = new com.fasterxml.jackson.databind.ObjectMapper()
+                .readTree(OptionsDashboardServer.riskJson(state, new PositionTracker.PortfolioExposure(-250.0, 3.0, 40.0, 0.0)));
+
+        assertTrue(node.get("scenarioMargin").isNull(), node.toString());
+        assertEquals(-250.0, node.get("netDelta").asDouble(), 1e-9);
+    }
+
+    @Test
     void marginOverloadMatchesTheAggregatorVersion() {
         PortfolioPosition position = new PortfolioPosition("SPY", 10, 100, FillRecorder.NONE);
         position.updateGreeks(0.5, 0.02, 40.0);

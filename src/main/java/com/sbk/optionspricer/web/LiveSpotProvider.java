@@ -1,29 +1,45 @@
 package com.sbk.optionspricer.web;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sbk.optionspricer.config.EnvironmentConfigLoader;
+import com.sbk.optionspricer.market.MarketDataStatus;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
+import java.time.LocalTime;
+import java.time.ZoneId;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
  * Pulls SPY (or another equity) spot from configured market-data APIs.
  * HMAC {@code API_SECRET} only authenticates the dashboard; it is not a market feed.
+ *
+ * <p>Every quote carries the time its price was actually set, taken from the provider's response
+ * (Finnhub {@code t}, Polygon quote time, or the close of the trading day for end-of-day sources).
+ * A quote whose time is unknown has timestamp 0, so consumers see it as very old rather than current.
  */
-import com.sbk.optionspricer.market.MarketDataStatus;
-
 public class LiveSpotProvider {
 
     private static final long CACHE_TTL_MS = 20_000L;
     private static final int HTTP_TIMEOUT_MS = 2500;
+    private static final int MAX_CACHED_SYMBOLS = 64;
+    private static final ObjectMapper JSON = new ObjectMapper();
+    private static final ZoneId MARKET_ZONE = ZoneId.of("America/New_York");
+    private static final LocalTime MARKET_CLOSE = LocalTime.of(16, 0);
 
+    /**
+     * Bid/ask are real only for sources that publish a book (Polygon); other sources give a last
+     * price and the spread is a nominal +/- 1c around it. Timestamp is epoch millis of the price, or 0 if unknown.
+     */
     public record Quote(String symbol, double bid, double ask, double last, long volume, String source, long timestamp, MarketDataStatus status) {}
 
     @FunctionalInterface
@@ -31,14 +47,22 @@ public class LiveSpotProvider {
         String get(String url, Map<String, String> headers) throws IOException;
     }
 
+    /** Immutable, so a reader can never see a quote paired with another quote's fetch time. */
+    private record CachedQuote(Quote quote, long fetchedAtMs) {}
+
     private final String finnhubKey;
     private final String polygonKey;
     private final String alphaVantageKey;
     private final String marketstackKey;
     private final HttpGetter http;
 
-    private volatile Quote cache;
-    private volatile long cacheAtMs;
+    /** Per-symbol cache, bounded so arbitrary symbol requests cannot grow it without limit. */
+    private final Map<String, CachedQuote> cache = Collections.synchronizedMap(new LinkedHashMap<>(16, 0.75f, false) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<String, CachedQuote> eldest) {
+            return size() > MAX_CACHED_SYMBOLS;
+        }
+    });
 
     public LiveSpotProvider() {
         this(EnvironmentConfigLoader.get("FINNHUB_KEY"),
@@ -93,20 +117,20 @@ public class LiveSpotProvider {
     public Quote getQuote(String symbol) {
         String sym = sanitizeSymbol(symbol);
         long now = System.currentTimeMillis();
-        Quote cached = cache;
-        if (cached != null && now - cacheAtMs < CACHE_TTL_MS
-                && (MarketDataStatus.LIVE == cached.status() || MarketDataStatus.DELAYED == cached.status())) {
-            return cached;
+        CachedQuote cached = cache.get(sym);
+        if (cached != null && now - cached.fetchedAtMs() < CACHE_TTL_MS
+                && (MarketDataStatus.LIVE == cached.quote().status() || MarketDataStatus.DELAYED == cached.quote().status())) {
+            return cached.quote();
         }
 
         Quote fresh = fetchFromApis(sym);
         if (fresh != null) {
-            cache = fresh;
-            cacheAtMs = now;
+            cache.put(sym, new CachedQuote(fresh, now));
             return fresh;
         }
         if (cached != null) {
-            return new Quote(cached.symbol(), cached.bid(), cached.ask(), cached.last(), cached.volume(), cached.source(), cached.timestamp(), MarketDataStatus.STALE);
+            Quote q = cached.quote();
+            return new Quote(q.symbol(), q.bid(), q.ask(), q.last(), q.volume(), q.source(), q.timestamp(), MarketDataStatus.STALE);
         }
         return new Quote(sym, Double.NaN, Double.NaN, Double.NaN, 0L, "none", 0L, MarketDataStatus.UNAVAILABLE);
     }
@@ -134,12 +158,7 @@ public class LiveSpotProvider {
         try {
             // Finnhub accepts the key in a header, which keeps it out of URLs (and therefore logs and proxies).
             String url = "https://finnhub.io/api/v1/quote?symbol=" + symbol;
-            String body = http.get(url, Map.of("X-Finnhub-Token", finnhubKey));
-            Double px = parseFinnhubCurrent(body);
-            if (px == null) {
-                return null;
-            }
-            return new Quote(symbol, px - 0.01, px + 0.01, px, 2000L, "FINNHUB", System.currentTimeMillis(), MarketDataStatus.DELAYED);
+            return parseFinnhub(symbol, http.get(url, Map.of("X-Finnhub-Token", finnhubKey)));
         } catch (Exception ignored) {
             return null;
         }
@@ -152,12 +171,7 @@ public class LiveSpotProvider {
         try {
             String url = "https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=" + symbol
                     + "&apikey=" + alphaVantageKey;
-            String body = http.get(url, Map.of());
-            Double px = parseAlphaVantagePrice(body);
-            if (px == null) {
-                return null;
-            }
-            return new Quote(symbol, px - 0.01, px + 0.01, px, 2000L, "ALPHA_VANTAGE", System.currentTimeMillis(), MarketDataStatus.DELAYED);
+            return parseAlphaVantage(symbol, http.get(url, Map.of()));
         } catch (Exception ignored) {
             return null;
         }
@@ -169,8 +183,7 @@ public class LiveSpotProvider {
         }
         try {
             String url = "https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers/" + symbol;
-            String body = http.get(url, Map.of("Authorization", "Bearer " + polygonKey));
-            return parsePolygonSnapshot(symbol, body);
+            return parsePolygonSnapshot(symbol, http.get(url, Map.of("Authorization", "Bearer " + polygonKey)));
         } catch (Exception ignored) {
             return null;
         }
@@ -183,19 +196,14 @@ public class LiveSpotProvider {
         try {
             String url = "https://api.marketstack.com/v1/eod/latest?access_key=" + marketstackKey
                     + "&symbols=" + symbol;
-            String body = http.get(url, Map.of());
-            Double px = parseMarketstackClose(body);
-            if (px == null) {
-                return null;
-            }
-            return new Quote(symbol, px - 0.01, px + 0.01, px, 2000L, "MARKETSTACK", System.currentTimeMillis(), MarketDataStatus.DELAYED);
+            return parseMarketstack(symbol, http.get(url, Map.of()));
         } catch (Exception ignored) {
             return null;
         }
     }
 
-    private static final java.util.regex.Pattern CREDENTIAL_PARAM =
-            java.util.regex.Pattern.compile("(?i)\\b(api_?key|access_key|token|key)=([^&\\s\"']+)");
+    private static final Pattern CREDENTIAL_PARAM =
+            Pattern.compile("(?i)\\b(api_?key|access_key|token|key)=([^&\\s\"']+)");
 
     /**
      * Masks credential query parameters. Alpha Vantage and Marketstack only accept their key as a
@@ -205,94 +213,148 @@ public class LiveSpotProvider {
         return text == null ? null : CREDENTIAL_PARAM.matcher(text).replaceAll("$1=***");
     }
 
-    static Double parseFinnhubCurrent(String json) {
-        Double c = extractNumber(json, "c");
-        if (c == null || c <= 0.0 || !Double.isFinite(c)) {
+    // ---------------------------------------------------------------- parsing
+
+    /** Finnhub /quote: {@code c} = current price, {@code t} = time of that price in epoch seconds. */
+    static Quote parseFinnhub(String symbol, String body) {
+        JsonNode root = parseJson(body);
+        Double price = positive(root == null ? null : root.get("c"));
+        if (price == null) {
             return null;
         }
-        return c;
+        long timestamp = normalizeEpochMillis(longValue(root.get("t")));
+        return new Quote(symbol, price - 0.01, price + 0.01, price, 2000L, "FINNHUB", timestamp, MarketDataStatus.DELAYED);
     }
 
-    static Double parseAlphaVantagePrice(String json) {
-        if (json == null) {
+    /** Alpha Vantage GLOBAL_QUOTE. Rate-limit and error notices arrive as 200 responses without a quote. */
+    static Quote parseAlphaVantage(String symbol, String body) {
+        JsonNode root = parseJson(body);
+        if (root == null || root.has("Note") || root.has("Information") || root.has("Error Message")) {
             return null;
         }
-        Matcher m = Pattern.compile("\"05\\. price\"\\s*:\\s*\"([0-9]+(?:\\.[0-9]+)?)\"").matcher(json);
-        if (!m.find()) {
+        JsonNode quote = root.get("Global Quote");
+        Double price = positive(quote == null ? null : quote.get("05. price"));
+        if (price == null) {
             return null;
         }
-        double px = Double.parseDouble(m.group(1));
-        return px > 0.0 ? px : null;
+        long timestamp = closeOfTradingDay(quote.get("07. latest trading day"));
+        return new Quote(symbol, price - 0.01, price + 0.01, price, 2000L, "ALPHA_VANTAGE", timestamp, MarketDataStatus.DELAYED);
     }
 
-    static Quote parsePolygonSnapshot(String symbol, String json) {
-        if (json == null) return null;
-        // Parse lastQuote object
-        Matcher lastQuoteMatcher = Pattern.compile("\"lastQuote\"\\s*:\\s*\\{([^}]+)\\}").matcher(json);
-        if (!lastQuoteMatcher.find()) return null;
-        String lqJson = lastQuoteMatcher.group(1);
-
-        Double bid = extractNumber("{" + lqJson + "}", "p");
-        Double ask = extractNumber("{" + lqJson + "}", "P");
-        if (bid == null || ask == null || bid <= 0.0 || ask <= 0.0 || bid >= ask) {
+    /** Polygon single-ticker snapshot: real bid/ask from lastQuote, last trade if present, else the midpoint. */
+    static Quote parsePolygonSnapshot(String symbol, String body) {
+        JsonNode root = parseJson(body);
+        if (root == null) {
             return null;
         }
-
-        Matcher lastTradeMatcher = Pattern.compile("\"lastTrade\"\\s*:\\s*\\{([^}]+)\\}").matcher(json);
-        Double last = null;
-        if (lastTradeMatcher.find()) {
-            last = extractNumber("{" + lastTradeMatcher.group(1) + "}", "p");
+        JsonNode ticker = root.get("ticker") != null && root.get("ticker").isObject() ? root.get("ticker") : root;
+        JsonNode lastQuote = ticker.get("lastQuote");
+        if (lastQuote == null || !lastQuote.isObject()) {
+            return null;
         }
-        if (last == null) last = bid; // fallback
-
-        Matcher minMatcher = Pattern.compile("\"min\"\\s*:\\s*\\{([^}]+)\\}").matcher(json);
-        Long volume = 2000L;
-        if (minMatcher.find()) {
-            Double v = extractNumber("{" + minMatcher.group(1) + "}", "v");
-            if (v != null) volume = v.longValue();
+        Double bid = positive(lastQuote.get("p"));
+        Double ask = positive(lastQuote.get("P"));
+        if (bid == null || ask == null || bid >= ask) {
+            return null;
         }
-
-        Long timestamp = null;
-        Matcher tMatcher = Pattern.compile("\"t\"\\s*:\\s*([0-9]+)").matcher(lqJson);
-        if (tMatcher.find()) {
-            timestamp = Long.parseLong(tMatcher.group(1));
-            // Ensure nanoseconds convert to millis
-            if (timestamp > 1_000_000_000_000_000L) {
-                timestamp = timestamp / 1_000_000L;
-            }
+        JsonNode lastTrade = ticker.get("lastTrade");
+        Double last = positive(lastTrade == null ? null : lastTrade.get("p"));
+        if (last == null) {
+            last = (bid + ask) / 2.0; // no trade in the snapshot: the midpoint, not a price that never traded
         }
-        if (timestamp == null) timestamp = System.currentTimeMillis();
+        JsonNode minute = ticker.get("min");
+        Double minuteVolume = positive(minute == null ? null : minute.get("v"));
+        long volume = minuteVolume != null ? minuteVolume.longValue() : 2000L;
 
+        long timestamp = normalizeEpochMillis(longValue(lastQuote.get("t")));
+        if (timestamp == 0L && lastTrade != null) {
+            timestamp = normalizeEpochMillis(longValue(lastTrade.get("t")));
+        }
         return new Quote(symbol, bid, ask, last, volume, "POLYGON", timestamp, MarketDataStatus.LIVE);
     }
 
-    static Double parseMarketstackClose(String json) {
-        Double c = extractNumber(json, "close");
-        if (c == null || c <= 0.0) {
+    /** Marketstack end-of-day: the quote is the close of the bar's trading date. */
+    static Quote parseMarketstack(String symbol, String body) {
+        JsonNode root = parseJson(body);
+        JsonNode data = root == null ? null : root.get("data");
+        JsonNode bar = data != null && data.isArray() && !data.isEmpty() ? data.get(0) : null;
+        Double price = positive(bar == null ? null : bar.get("close"));
+        if (price == null) {
             return null;
         }
-        return c;
+        long timestamp = closeOfTradingDay(bar.get("date"));
+        return new Quote(symbol, price - 0.01, price + 0.01, price, 2000L, "MARKETSTACK", timestamp, MarketDataStatus.DELAYED);
     }
 
-    static Double extractNumber(String json, String key) {
-        if (json == null) {
+    private static JsonNode parseJson(String body) {
+        if (body == null || body.isBlank()) {
             return null;
         }
-        Pattern p = Pattern.compile("\"" + Pattern.quote(key) + "\"\\s*:\\s*(-?[0-9]+(?:\\.[0-9]+)?)");
-        Matcher m = p.matcher(json);
-        if (!m.find()) {
+        try {
+            JsonNode node = JSON.readTree(body);
+            return node != null && node.isObject() ? node : null;
+        } catch (Exception e) {
             return null;
         }
-        return Double.parseDouble(m.group(1));
+    }
+
+    /** A finite, strictly positive number from a JSON number or numeric string; otherwise null. */
+    private static Double positive(JsonNode node) {
+        if (node == null || node.isNull()) {
+            return null;
+        }
+        double value;
+        if (node.isNumber()) {
+            value = node.asDouble();
+        } else if (node.isTextual()) {
+            try {
+                value = Double.parseDouble(node.asText().trim());
+            } catch (NumberFormatException e) {
+                return null;
+            }
+        } else {
+            return null;
+        }
+        return Double.isFinite(value) && value > 0.0 ? value : null;
+    }
+
+    private static long longValue(JsonNode node) {
+        return node != null && node.isIntegralNumber() ? node.asLong() : 0L;
+    }
+
+    /**
+     * Epoch value in seconds, milliseconds, microseconds or nanoseconds (providers differ) to epoch
+     * millis. 0 means unknown.
+     */
+    static long normalizeEpochMillis(long value) {
+        if (value <= 0L) return 0L;
+        if (value >= 100_000_000_000_000_000L) return value / 1_000_000L; // nanoseconds
+        if (value >= 100_000_000_000_000L) return value / 1_000L;         // microseconds
+        if (value >= 100_000_000_000L) return value;                      // milliseconds
+        return value * 1_000L;                                            // seconds
+    }
+
+    /** Close (16:00 New York) of the trading day named by the first 10 characters of the value; 0 if unusable. */
+    private static long closeOfTradingDay(JsonNode node) {
+        if (node == null || !node.isTextual() || node.asText().length() < 10) {
+            return 0L;
+        }
+        try {
+            LocalDate day = LocalDate.parse(node.asText().substring(0, 10));
+            return day.atTime(MARKET_CLOSE).atZone(MARKET_ZONE).toInstant().toEpochMilli();
+        } catch (Exception e) {
+            return 0L;
+        }
     }
 
     public static String toJson(Quote q) {
-        String price = Double.isNaN(q.last())
-                ? "null"
-                : String.format(Locale.US, "%.2f", q.last());
-        return String.format(Locale.US,
-                "{\n  \"symbol\": \"%s\",\n  \"spotPrice\": %s,\n  \"source\": \"%s\",\n  \"timestamp\": %d,\n  \"status\": \"%s\"\n}",
-                q.symbol(), price, q.source(), q.timestamp(), q.status());
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("symbol", q.symbol());
+        body.put("spotPrice", Double.isFinite(q.last()) ? Json.round(q.last(), 2) : null);
+        body.put("source", q.source());
+        body.put("timestamp", q.timestamp());
+        body.put("status", q.status().name());
+        return Json.write(body);
     }
 
     static String httpGet(String url, Map<String, String> headers) throws IOException {

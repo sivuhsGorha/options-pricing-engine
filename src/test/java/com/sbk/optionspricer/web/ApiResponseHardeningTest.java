@@ -120,6 +120,18 @@ class ApiResponseHardeningTest {
     }
 
     @Test
+    void spotEndpointDoesNotReportAPriceWhenTheSourceIsUnavailable() throws Exception {
+        start(reader(() -> new MmapStateReader.RiskState(0, 0, 0, 0)), null, null,
+                symbol -> new MarketSnapshot("SPY", 99.5, 100.5, 100.0, 0L, Instant.now(), Instant.EPOCH,
+                        Long.MAX_VALUE / 4, "SIMULATED", MarketDataStatus.UNAVAILABLE));
+
+        JsonNode body = MAPPER.readTree(get("/api/spot").body());
+
+        assertEquals("UNAVAILABLE", body.get("status").asText());
+        assertTrue(body.get("spotPrice").isNull(), "a placeholder price must not be shown as the spot: " + body);
+    }
+
+    @Test
     void surfaceModelParameterIsParsedExactlyNotBySubstring() throws Exception {
         start(reader(() -> new MmapStateReader.RiskState(0, 0, 0, 0)), null, null, null);
 

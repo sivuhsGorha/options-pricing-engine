@@ -10,6 +10,8 @@ import java.time.Instant;
  * original provider status for diagnostics and dashboards.
  */
 public class LiveMarketSnapshotAdapter implements MarketSnapshotAdapter {
+    /** A quote whose price is older than this is STALE, whatever its provider label says. */
+    static final long STALE_AFTER_MS = 30_000L;
     private final LiveSpotProvider liveSpotProvider;
     private final double fallbackSpot;
     private final double spreadFraction;
@@ -41,8 +43,9 @@ public class LiveMarketSnapshotAdapter implements MarketSnapshotAdapter {
         if (quote != null && Double.isFinite(quote.last()) && quote.last() > 0.0) {
             long ageMs = now - quote.timestamp();
             MarketDataStatus status = quote.status();
-            // Demote to STALE if older than 30s for live NBBO check
-            if (status == MarketDataStatus.LIVE && ageMs > 30000L) {
+            // Freshness is a property of the price's own timestamp, not of the provider label: a DELAYED
+            // or end-of-day quote from hours ago is stale, and a quote with no timestamp (0) is as old as it gets.
+            if ((status == MarketDataStatus.LIVE || status == MarketDataStatus.DELAYED) && ageMs > STALE_AFTER_MS) {
                 status = MarketDataStatus.STALE;
             }
             return new MarketSnapshot(
@@ -62,6 +65,9 @@ public class LiveMarketSnapshotAdapter implements MarketSnapshotAdapter {
         double simulatedMid = fallbackSpot;
         double spread = Math.max(simulatedMid * spreadFraction, 0.01d);
         MarketDataStatus status = liveSpotProvider.hasMarketDataKeys() ? MarketDataStatus.UNAVAILABLE : MarketDataStatus.SIMULATED;
+        // SIMULATED data is current by construction. UNAVAILABLE has no source time at all: report the
+        // epoch and a correspondingly huge age instead of pretending the placeholder was just observed.
+        boolean unavailable = status == MarketDataStatus.UNAVAILABLE;
         return new MarketSnapshot(
                 normalizedSymbol,
                 simulatedMid - (spread / 2.0d),
@@ -69,8 +75,8 @@ public class LiveMarketSnapshotAdapter implements MarketSnapshotAdapter {
                 simulatedMid,
                 2000L,
                 Instant.now(),
-                Instant.now(),
-                0L,
+                unavailable ? Instant.EPOCH : Instant.now(),
+                unavailable ? now : 0L,
                 "SIMULATED",
                 status
         );

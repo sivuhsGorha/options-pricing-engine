@@ -15,7 +15,7 @@ class OptionsDashboardServerHealthTest {
                 "demo-marketstack",
                 (url, headers) -> {
                     if (url.contains("finnhub")) {
-                        return "{\"c\":101.25}";
+                        return "{\"c\":101.25,\"t\":" + System.currentTimeMillis() / 1000 + "}"; // a current quote
                     }
                     if (url.contains("polygon")) {
                         return "{\"results\":[{\"c\":101.75}]}";

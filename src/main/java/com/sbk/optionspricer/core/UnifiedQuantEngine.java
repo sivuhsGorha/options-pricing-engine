@@ -54,7 +54,10 @@ public final class UnifiedQuantEngine {
         netDelta = exposure.netDelta();
         netGamma = exposure.netGamma();
         netVega = exposure.netVega();
-        scenarioMargin = com.sbk.optionspricer.risk.MarginApproximation.calculateInitialMargin(netDelta, netGamma, netVega, spot);
+        // The stress test shocks the spot, so without a market price the margin is unknown (NaN), not 0.
+        scenarioMargin = Double.isFinite(spot) && spot > 0.0
+                ? com.sbk.optionspricer.risk.MarginApproximation.calculateInitialMargin(netDelta, netGamma, netVega, spot)
+                : Double.NaN;
     }
 
     public com.sbk.optionspricer.risk.GreekAlertManager getGreekAlertManager() {

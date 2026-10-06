@@ -203,7 +203,9 @@ public class OptionsDashboardServer {
             MarketSnapshot snapshot = marketAdapter.getSnapshot("SPY");
             java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
             body.put("symbol", snapshot.symbol());
-            body.put("spotPrice", Json.round(snapshot.last(), 2));
+            // An unavailable source has no price; the snapshot's placeholder must not be shown as the spot.
+            body.put("spotPrice", snapshot.status() == com.sbk.optionspricer.market.MarketDataStatus.UNAVAILABLE
+                    ? null : Json.round(snapshot.last(), 2));
             body.put("source", snapshot.source());
             body.put("timestamp", snapshot.timestamp().toEpochMilli());
             body.put("status", snapshot.status().name());
@@ -409,7 +411,7 @@ public class OptionsDashboardServer {
         body.put("netDelta", Json.round(netDelta, 2));
         body.put("netGamma", Json.round(netGamma, 2));
         body.put("netVega", Json.round(netVega, 2));
-        body.put("scenarioMargin", Json.round(scenarioMargin, 2));
+        body.put("scenarioMargin", Double.isFinite(state.scenarioMargin) ? Json.round(scenarioMargin, 2) : null);
         body.put("recommendedHedge", hedgeQty);
         body.put("optimizedMargin", null);
         body.put("marginReductionPct", null);

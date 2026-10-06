@@ -20,7 +20,8 @@ public class QuantSimulationHarness {
     private final StrategyExecutionLoop strategyLoop;
     private boolean isRunning = false;
     
-    private double currentSpot = 100.0;
+    // NaN until a real price arrives: nothing downstream may be fed an invented spot.
+    private double currentSpot = Double.NaN;
 
     public QuantSimulationHarness(UnifiedQuantEngine engine) {
         this(engine, new LiveSpotProvider());
@@ -86,7 +87,7 @@ public class QuantSimulationHarness {
                     spot = quote.last();
                 }
             } else {
-                spot = 100.0;
+                spot = Double.NaN; // no market-data keys: there is no spot to report
             }
             currentSpot = spot;
 
