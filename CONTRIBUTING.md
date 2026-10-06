@@ -16,7 +16,7 @@ Thank you for contributing to the Options Pricing & Quantitative Trading Platfor
 
 ```
 1. Fork / Branch (feature/short-description or fix/short-description)
-2. Implement Code & Unit Tests (100% test coverage required on core pricing math)
+2. Implement Code & Unit Tests (tests required for every change; CI enforces a JaCoCo coverage minimum that only ratchets upward)
 3. Run Local Benchmarks & Micro-suite Verification
 4. Submit PR with Detailed Quantitative Justification
 5. Automated CI Checks & Peer Code Review

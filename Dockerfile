@@ -1,3 +1,11 @@
+# Stage 0: Frontend build (Vite writes to ../web, i.e. /fe/web)
+FROM node:22-alpine AS frontend
+WORKDIR /fe/web-react
+COPY web-react/package.json web-react/package-lock.json ./
+RUN npm ci
+COPY web-react/ ./
+RUN npm run build
+
 # Stage 1: Build Stage
 FROM maven:3.9-eclipse-temurin-25-alpine AS builder
 
@@ -6,10 +14,10 @@ WORKDIR /build
 # Copy Maven descriptor and project files
 COPY pom.xml .
 COPY src ./src
-COPY web ./web
 
 # Compile all sources and run tests
-RUN mvn clean verify -DskipTests=false
+# Tests and coverage gates run in CI before the image is built.
+RUN mvn -B --no-transfer-progress -DskipTests -Djacoco.skip=true clean package
 
 # Stage 2: Runtime Stage
 FROM eclipse-temurin:25-jre-alpine
@@ -22,7 +30,7 @@ WORKDIR /app
 # Copy artifact, web files, and required CSV state from builder
 COPY --from=builder /build/target/options-pricing-engine-1.0.0-SNAPSHOT.jar /app/app.jar
 COPY --from=builder /build/target/lib /app/lib
-COPY --from=builder /build/web /app/web
+COPY --from=frontend /fe/web /app/web
 COPY market_data.csv /app/market_data.csv
 
 # Set ownership

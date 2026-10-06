@@ -2,7 +2,7 @@
 
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)](https://github.com/)
 [![Market Coverage](https://img.shields.io/badge/exchanges-Euronext%20%7C%20LSEG%20%7C%20Eurex%20%7C%20SIX%20%7C%20Nasdaq%20Nordic-blue.svg)](https://github.com/)
-[![Java Version](https://img.shields.io/badge/java-21%2B%20LTS-orange.svg)](https://oracle.com)
+[![Java Version](https://img.shields.io/badge/java-25-orange.svg)](https://oracle.com)
 [![Latency](https://img.shields.io/badge/tick--to--trade-%3C%208.5%20%CE%BCs-red.svg)](https://github.com/)
 
 An institutional-grade, multi-asset quantitative options pricing, risk management, and execution platform engineered for high-frequency market making, volatility arbitrage, and portfolio risk management across major European exchanges.
@@ -59,7 +59,7 @@ Designed specifically to interface directly with top-tier European derivatives v
 └───────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-1. **Ultra-Low Latency Core**: Written in modern Java 21 LTS utilizing `MemorySegment` off-heap allocations, LMAX Disruptor zero-copy ring buffers, and vector API SIMD instructions to achieve sub-microsecond pricing.
+1. **Ultra-Low Latency Core**: Written in modern Java 25 utilizing `MemorySegment` off-heap allocations, LMAX Disruptor zero-copy ring buffers, and vector API SIMD instructions to achieve sub-microsecond pricing.
 2. **Comprehensive Option Models**:
    - **Analytical**: Closed-form Black-Scholes-Merton with continuous dividends & yields.
    - **American / Early Exercise**: Trinomial Trees and Longstaff-Schwartz Monte Carlo (LSMC).
@@ -92,14 +92,14 @@ options-pricing-engine/
 ## 🛠 Quick Start
 
 ### Prerequisites
-- **Java 21 LTS** or higher
+- **Java 25** or higher
 - **Maven 3.9+** or **Gradle 8.5+**
 - Linux kernel 5.15+ (with `cgroups v2` and isolated CPU cores for production)
 
 ### Build & Run
 ### Build & Run
 ```bash
-# 1. Compile Java 21 codebase with Incubator Vector API support
+# 1. Compile Java 25 codebase with Incubator Vector API support
 javac --add-modules jdk.incubator.vector -d target/classes (Get-ChildItem -Recurse src/main/java/*.java)
 
 # 2. Ingest Live Market Data (Finnhub, Polygon, Alpha Vantage, MarketStack)

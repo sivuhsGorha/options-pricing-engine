@@ -1,0 +1,14 @@
+.git
+.github
+.idea
+audit
+target
+data
+*.dat
+*.class
+.env
+cookie.txt
+config.yaml
+web/assets
+web-react/node_modules
+web-react/dist

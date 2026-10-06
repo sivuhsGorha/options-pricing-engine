@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [ main, master ]
 
+permissions:
+  contents: read
+
 jobs:
   build-and-test:
     name: Build, Test, & JaCoCo Verification
@@ -14,26 +17,30 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Set up JDK 26 (Temurin)
+      - name: Set up JDK 25 (Temurin)
         uses: actions/setup-java@v4
         with:
-          java-version: '26'
+          java-version: '25'
           distribution: 'temurin'
           cache: maven
 
       - name: Execute Maven Verification (mvn verify)
-        run: mvn clean verify
+        run: mvn -B --no-transfer-progress clean verify
 
       - name: Docker Container Readiness Test
         run: |
           docker build -t options-engine .
+          trap 'docker rm -f options-app >/dev/null 2>&1 || true' EXIT
           docker run -d -p 8080:8080 -e API_SECRET=ci-only-dummy-secret-0123456789abcdef -e OPERATOR_PASSWORD=ci-only-operator-pass -e BIND_ADDRESS=0.0.0.0 --name options-app options-engine
-          sleep 10
+          code=000
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/api/health || true)
+            [ "$code" != "000" ] && break
+            sleep 1
+          done
           docker logs options-app | tail -n 50
-          code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/api/health)
           echo "Unauthenticated /api/health -> HTTP $code"
-          [ "$code" = "401" ] || { docker rm -f options-app; exit 1; }
-          docker rm -f options-app
+          [ "$code" = "401" ]
 
       - name: Upload JaCoCo Code Coverage Report
         uses: actions/upload-artifact@v4
