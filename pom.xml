@@ -124,7 +124,7 @@
                     <archive>
                         <manifest>
                             <addClasspath>true</addClasspath>
-                            <mainClass>com.sbk.optionspricer.web.OptionsDashboardServer</mainClass>
+                            <mainClass>com.sbk.optionspricer.Main</mainClass>
                         </manifest>
                     </archive>
                 </configuration>
