@@ -20,8 +20,8 @@ class OrderManagerTest {
         OrderManager.OrderDecision decision = manager.submit(order, snapshot);
 
         assertTrue(decision.accepted());
-        assertEquals(OrderStatus.ACCEPTED, decision.status());
-        assertEquals(1, manager.getOpenOrders().size());
+        assertEquals(OrderStatus.FILLED, decision.status());
+        assertEquals(0, manager.getOpenOrders().size(), "a fully filled order is not left in the working set");
     }
 
     private static OrderManager managerWith(OrderManager.MarketDataPolicy policy, java.util.concurrent.atomic.AtomicInteger transmitted) {

@@ -55,7 +55,16 @@ public class OrderManager {
     private final PortfolioRiskAdmission portfolioAdmission;
     private final PositionTracker positionTracker;
     private final AtomicLong sequence = new AtomicLong(1L);
+    /** Orders still working at the venue (ACCEPTED or PARTIALLY_FILLED). Filled/cancelled/rejected orders are not kept here. */
     private final Map<Long, Order> openOrders = new LinkedHashMap<>();
+    private static final int MAX_TRACKED_ORDERS = 10_000;
+    /** Latest status per order id, bounded so a long-running process cannot grow it without limit. */
+    private final Map<Long, OrderStatus> orderStatuses = new LinkedHashMap<>() {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<Long, OrderStatus> eldest) {
+            return size() > MAX_TRACKED_ORDERS;
+        }
+    };
     private final java.util.Deque<ExecutionAuditRecord> auditQueue = new java.util.ArrayDeque<>();
 
     /** Uses {@link MarketDataPolicy#strict()}: only fresh LIVE/DELAYED data is tradable. */
@@ -104,57 +113,80 @@ public class OrderManager {
         if (order == null || snapshot == null) {
             return new OrderDecision(false, OrderStatus.REJECTED, "order and snapshot must not be null", -1L);
         }
-        
+
         long orderId = sequence.getAndIncrement();
         com.sbk.optionspricer.market.MarketDataStatus mds = snapshot.status();
 
         java.util.Optional<TradingHalt.Reason> halted = tradingHalt.reason();
         if (halted.isPresent()) {
             String reason = "trading halted: " + halted.get().message();
-            recordAudit(orderId, false, mds, reason, 0.0, 0);
-            return new OrderDecision(false, OrderStatus.REJECTED, reason, orderId);
+            return reject(orderId, mds, reason, reason);
         }
 
         if (!marketDataPolicy.tradable().contains(mds)) {
             String reason = "market data not tradable: " + mds;
-            recordAudit(orderId, false, mds, reason, 0.0, 0);
-            return new OrderDecision(false, OrderStatus.REJECTED, reason, orderId);
+            return reject(orderId, mds, reason, reason);
         }
         if (snapshot.derivedQuoteAgeMs() > marketDataPolicy.maxQuoteAgeMs()) {
             String reason = "market data too old: " + snapshot.derivedQuoteAgeMs() + "ms";
-            recordAudit(orderId, false, mds, reason, 0.0, 0);
-            return new OrderDecision(false, OrderStatus.REJECTED, reason, orderId);
+            return reject(orderId, mds, reason, reason);
         }
 
         if (portfolioAdmission != null && positionTracker != null) {
             int signedRequest = order.isBuy() ? order.quantity() : -order.quantity();
             if (!portfolioAdmission.canAdmitOrder(snapshot.symbol(), signedRequest, order.price(), positionTracker)) {
-                recordAudit(orderId, false, mds, "failed portfolio risk admission", 0.0, 0);
-                return new OrderDecision(false, OrderStatus.REJECTED, "order failed portfolio risk admission", orderId);
+                return reject(orderId, mds, "failed portfolio risk admission", "order failed portfolio risk admission");
             }
         }
 
         if (!riskFilter.checkRisk(order, snapshot.symbol(), snapshot.bid(), snapshot.ask(), snapshot.volume())) {
-            recordAudit(orderId, false, mds, "failed pre-trade risk validation", 0.0, 0);
-            return new OrderDecision(false, OrderStatus.REJECTED, "order failed pre-trade risk validation", orderId);
+            return reject(orderId, mds, "failed pre-trade risk validation", "order failed pre-trade risk validation");
         }
 
         ExecutionResult result = transport.transmit(order, snapshot.symbol(), snapshot.bid(), snapshot.ask());
         if (!result.executed()) {
-            recordAudit(orderId, false, mds, result.message(), 0.0, 0);
-            return new OrderDecision(false, OrderStatus.REJECTED, "execution transport rejected the order", orderId);
+            return reject(orderId, mds, result.message(), "execution transport rejected the order");
         }
 
-        if (positionTracker != null) {
-            int signedQuantity = order.isBuy() ? result.filledQuantity() : -result.filledQuantity();
-            positionTracker.applyFill(new PositionTracker.ExecutionFill(result.symbol(), signedQuantity, 1, result.executionPrice()));
+        int filled = result.filledQuantity();
+        if (filled <= 0 || filled > order.quantity()) {
+            // The venue says it executed, but the quantity cannot be reconciled with what we sent.
+            // Do not book a number we cannot trust, and stop trading until someone reconciles.
+            tradingHalt.halt("transport reported fill quantity " + filled + " for order " + orderId
+                    + " (requested " + order.quantity() + "); reconcile with the venue");
+            return reject(orderId, mds, "invalid fill quantity from transport: " + filled,
+                    "transport reported an invalid fill quantity; trading halted");
         }
-        double filledNotional = (double) result.filledQuantity() * result.executionPrice();
-        riskFilter.recordFill(result.symbol(), order.isBuy() ? filledNotional : -filledNotional);
 
-        recordAudit(orderId, true, mds, "EXECUTED", result.executionPrice(), result.filledQuantity());
-        openOrders.put(orderId, order);
-        return new OrderDecision(true, OrderStatus.ACCEPTED, "order accepted and routed", orderId);
+        OrderStatus status = filled == order.quantity() ? OrderStatus.FILLED : OrderStatus.PARTIALLY_FILLED;
+        try {
+            if (positionTracker != null) {
+                int signedQuantity = order.isBuy() ? filled : -filled;
+                positionTracker.applyFill(new PositionTracker.ExecutionFill(result.symbol(), signedQuantity, 1, result.executionPrice()));
+            }
+            double filledNotional = (double) filled * result.executionPrice();
+            riskFilter.recordFill(result.symbol(), order.isBuy() ? filledNotional : -filledNotional);
+        } catch (RuntimeException e) {
+            // The order executed at the venue but our books may not reflect it. Never throw to the
+            // caller as if nothing happened, and never keep trading on an unknown position.
+            tradingHalt.halt("fill booking failed for order " + orderId + ": " + e.getMessage());
+            recordAudit(orderId, true, mds, "EXECUTED_BOOKING_FAILED: " + e.getMessage(), result.executionPrice(), filled);
+            orderStatuses.put(orderId, status);
+            return new OrderDecision(true, status, "order executed but booking failed; trading halted", orderId);
+        }
+
+        recordAudit(orderId, true, mds, "EXECUTED", result.executionPrice(), filled);
+        orderStatuses.put(orderId, status);
+        if (status == OrderStatus.PARTIALLY_FILLED) {
+            openOrders.put(orderId, order);
+        }
+        return new OrderDecision(true, status, status == OrderStatus.FILLED ? "order filled" : "order partially filled", orderId);
+    }
+
+    private OrderDecision reject(long orderId, com.sbk.optionspricer.market.MarketDataStatus mds, String auditReason, String message) {
+        recordAudit(orderId, false, mds, auditReason, 0.0, 0);
+        orderStatuses.put(orderId, OrderStatus.REJECTED);
+        return new OrderDecision(false, OrderStatus.REJECTED, message, orderId);
     }
 
     private synchronized void recordAudit(long orderId, boolean accepted, com.sbk.optionspricer.market.MarketDataStatus sourceStatus,
@@ -169,11 +201,24 @@ public class OrderManager {
         return new java.util.ArrayList<>(auditQueue);
     }
 
+    /**
+     * Cancels the unfilled remainder of a working order. Quantity already executed stays booked.
+     * Note: {@link ExchangeTransport} has no cancel operation yet, so this updates local state only;
+     * a venue-side cancel must be added with a real gateway.
+     */
     public synchronized void cancel(long orderId) {
-        Order order = openOrders.remove(orderId);
-        if (order == null) {
+        OrderStatus status = orderStatuses.get(orderId);
+        if (status == null) {
             throw new IllegalArgumentException("order not found: " + orderId);
         }
+        if (openOrders.remove(orderId) == null) {
+            throw new IllegalStateException("order " + orderId + " is not working (status " + status + ")");
+        }
+        orderStatuses.put(orderId, OrderStatus.CANCELLED);
+    }
+
+    public synchronized java.util.Optional<OrderStatus> getOrderStatus(long orderId) {
+        return java.util.Optional.ofNullable(orderStatuses.get(orderId));
     }
 
     public TradingHalt getTradingHalt() {

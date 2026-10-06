@@ -64,6 +64,6 @@ class OrderManagerConcurrencyTest {
 
         assertEquals(limit, accepted.get(), "exactly `limit` one-share buys fit under the delta limit");
         assertEquals(limit, tracker.getNetQuantity("SPY"), "the book must never exceed the limit");
-        assertEquals(limit, manager.getOpenOrders().size());
+        assertEquals(0, manager.getOpenOrders().size(), "every accepted order was fully filled");
     }
 }
