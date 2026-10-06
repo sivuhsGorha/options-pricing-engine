@@ -3,35 +3,40 @@ package com.sbk.optionspricer;
 import java.util.OptionalDouble;
 
 /**
- * Solves for the implied volatility that makes the Black-Scholes price
- * match a given observed market price — the reverse of normal pricing.
+ * Solves for the Black-Scholes implied volatility that reproduces an observed option price.
  *
- * Enforces strict input validation and no-arbitrage lower/upper price bounds.
- * Returns an OptionalDouble.empty() typed failure if no valid root exists.
+ * <p>The price is strictly increasing in volatility, so the root is bracketed and found with a
+ * safeguarded Newton iteration: a Newton step is taken when it stays inside the bracket, otherwise the
+ * bracket is bisected. Convergence is judged on the volatility itself (step below 1e-13), not on the
+ * price, because an absolute price tolerance leaves a volatility error of tolerance / vega, which is
+ * large for short-dated and far-out-of-the-money options where vega is tiny.
+ *
+ * <p>This is a <em>European</em> model: feeding it American option prices attributes the early-exercise
+ * premium to volatility. Inputs are validated and prices outside the no-arbitrage bounds, or outside what
+ * volatilities in [1e-6, 5.0] can produce, return an empty result rather than a wrong root.
  */
 public class ImpliedVolatilitySolver {
 
-    private static final int MAX_NEWTON_ITERATIONS = 50;
-    private static final double PRICE_TOLERANCE = 1e-6;
-    private static final double MIN_VEGA = 1e-8;
-    private static final int MAX_BISECTION_ITERATIONS = 100;
+    private static final int MAX_ITERATIONS = 100;
+    private static final double VOL_STEP_TOLERANCE = 1e-13;
+    private static final double MIN_VEGA = 1e-12;
     private static final double VOL_LOWER_BOUND = 1e-6;
     private static final double VOL_UPPER_BOUND = 5.0; // 500% annualized vol ceiling
+    /** If iteration ends without meeting the step tolerance, accept a bracket narrower than this. */
+    private static final double ACCEPTABLE_BRACKET = 1e-9;
 
     public static OptionalDouble solve(OptionType type, OptionParameters knownParams, double marketPrice) {
         double[] scratch = new double[5];
         return solve(type, knownParams.spot(), knownParams.strike(), knownParams.timeToExpiry(), knownParams.riskFreeRate(), knownParams.dividendYield(), marketPrice, scratch);
     }
 
+    /** {@code scratchGreeks} is accepted for source compatibility and is no longer used. */
     public static OptionalDouble solve(OptionType type, double spot, double strike, double timeToExpiry, double riskFreeRate, double dividendYield, double marketPrice, double[] scratchGreeks) {
         // 1. Input Validation
-        if (Double.isNaN(spot) || Double.isNaN(strike) || Double.isNaN(timeToExpiry) ||
-            Double.isNaN(riskFreeRate) || Double.isNaN(dividendYield) || Double.isNaN(marketPrice) ||
-            Double.isInfinite(spot) || Double.isInfinite(strike) || Double.isInfinite(timeToExpiry) ||
-            Double.isInfinite(riskFreeRate) || Double.isInfinite(dividendYield) || Double.isInfinite(marketPrice)) {
+        if (!Double.isFinite(spot) || !Double.isFinite(strike) || !Double.isFinite(timeToExpiry)
+                || !Double.isFinite(riskFreeRate) || !Double.isFinite(dividendYield) || !Double.isFinite(marketPrice)) {
             return OptionalDouble.empty();
         }
-
         if (spot <= 0 || strike <= 0 || timeToExpiry <= 0 || marketPrice <= 0) {
             return OptionalDouble.empty();
         }
@@ -39,82 +44,64 @@ public class ImpliedVolatilitySolver {
         // 2. Arbitrage & Price Bound Checks
         double discountedSpot = spot * Math.exp(-dividendYield * timeToExpiry);
         double discountedStrike = strike * Math.exp(-riskFreeRate * timeToExpiry);
-
         double lowerBound = (type == OptionType.CALL)
                 ? Math.max(discountedSpot - discountedStrike, 0.0)
                 : Math.max(discountedStrike - discountedSpot, 0.0);
         double upperBound = (type == OptionType.CALL) ? discountedSpot : discountedStrike;
-
         if (marketPrice <= lowerBound + 1e-12 || marketPrice >= upperBound - 1e-12) {
             return OptionalDouble.empty();
         }
 
-        // 3. Newton-Raphson Solver
-        OptionalDouble newtonResult = newtonRaphson(type, spot, strike, timeToExpiry, riskFreeRate, dividendYield, marketPrice, scratchGreeks);
-        if (newtonResult.isPresent()) {
-            return newtonResult;
-        }
-
-        // 4. Bisection Fallback
-        return bisection(type, spot, strike, timeToExpiry, riskFreeRate, dividendYield, marketPrice);
-    }
-
-    private static OptionalDouble newtonRaphson(OptionType type, double spot, double strike, double timeToExpiry, double riskFreeRate, double dividendYield, double marketPrice, double[] scratchGreeks) {
-        double vol = 0.3; // 30% initial guess
-
-        for (int i = 0; i < MAX_NEWTON_ITERATIONS; i++) {
-            double price = BlackScholesPricer.price(type, spot, strike, timeToExpiry, riskFreeRate, vol, dividendYield);
-            double diff = price - marketPrice;
-
-            if (Math.abs(diff) < PRICE_TOLERANCE) {
-                return OptionalDouble.of(vol);
-            }
-
-            BlackScholesPricer.greeks(type, spot, strike, timeToExpiry, riskFreeRate, vol, dividendYield, scratchGreeks);
-            double vega = scratchGreeks[2];
-            if (Math.abs(vega) < MIN_VEGA) {
-                return OptionalDouble.empty();
-            }
-
-            vol -= diff / vega;
-            if (vol <= 0 || Double.isNaN(vol) || vol > VOL_UPPER_BOUND) {
-                return OptionalDouble.empty();
-            }
-        }
-        return OptionalDouble.empty();
-    }
-
-    private static OptionalDouble bisection(OptionType type, double spot, double strike, double timeToExpiry, double riskFreeRate, double dividendYield, double marketPrice) {
+        // 3. Bracket the root. Price is increasing in vol, so f(lo) <= 0 <= f(hi) must hold.
         double lo = VOL_LOWER_BOUND;
         double hi = VOL_UPPER_BOUND;
-
-        double priceLo = BlackScholesPricer.price(type, spot, strike, timeToExpiry, riskFreeRate, lo, dividendYield) - marketPrice;
-        double priceHi = BlackScholesPricer.price(type, spot, strike, timeToExpiry, riskFreeRate, hi, dividendYield) - marketPrice;
-
-        // Verify endpoint bracket signs
-        if (priceLo > 0.0 || priceHi < 0.0) {
-            return OptionalDouble.empty(); // Market price is outside [price(VOL_LOWER), price(VOL_UPPER)]
+        double fLo = BlackScholesPricer.price(type, spot, strike, timeToExpiry, riskFreeRate, lo, dividendYield) - marketPrice;
+        double fHi = BlackScholesPricer.price(type, spot, strike, timeToExpiry, riskFreeRate, hi, dividendYield) - marketPrice;
+        if (fLo > 0.0 || fHi < 0.0) {
+            return OptionalDouble.empty(); // outside [price(1e-6 vol), price(500% vol)]
         }
+        if (fLo == 0.0) return OptionalDouble.of(lo);
+        if (fHi == 0.0) return OptionalDouble.of(hi);
 
-        for (int i = 0; i < MAX_BISECTION_ITERATIONS; i++) {
-            double mid = (lo + hi) / 2.0;
-            double priceMid = BlackScholesPricer.price(type, spot, strike, timeToExpiry, riskFreeRate, mid, dividendYield) - marketPrice;
-
-            if (Math.abs(priceMid) < PRICE_TOLERANCE) {
-                return OptionalDouble.of(mid);
+        // 4. Safeguarded Newton.
+        double vol = initialGuess(spot, strike, timeToExpiry, riskFreeRate, dividendYield, marketPrice, lo, hi);
+        for (int i = 0; i < MAX_ITERATIONS; i++) {
+            double f = BlackScholesPricer.price(type, spot, strike, timeToExpiry, riskFreeRate, vol, dividendYield) - marketPrice;
+            if (f == 0.0) {
+                return OptionalDouble.of(vol);
             }
-            if (Math.signum(priceMid) == Math.signum(priceLo)) {
-                lo = mid;
-                priceLo = priceMid;
-            } else {
-                hi = mid;
-            }
-        }
+            if (f > 0.0) hi = vol; else lo = vol;
 
-        double finalPrice = BlackScholesPricer.price(type, spot, strike, timeToExpiry, riskFreeRate, (lo + hi) / 2.0, dividendYield);
-        if (Math.abs(finalPrice - marketPrice) < 1e-4) {
-            return OptionalDouble.of((lo + hi) / 2.0);
+            double next = Double.NaN;
+            double vega = vega(spot, strike, timeToExpiry, riskFreeRate, dividendYield, vol);
+            if (vega > MIN_VEGA) {
+                next = vol - f / vega;
+            }
+            if (!(next > lo && next < hi)) {
+                next = 0.5 * (lo + hi); // Newton left the bracket (or vega vanished): bisect
+            }
+            if (Math.abs(next - vol) <= VOL_STEP_TOLERANCE * Math.max(1.0, vol)) {
+                return OptionalDouble.of(next);
+            }
+            vol = next;
         }
-        return OptionalDouble.empty();
+        return hi - lo < ACCEPTABLE_BRACKET ? OptionalDouble.of(0.5 * (lo + hi)) : OptionalDouble.empty();
+    }
+
+    /** Black-Scholes vega (per unit of volatility), computed directly rather than via all five Greeks. */
+    private static double vega(double spot, double strike, double t, double r, double q, double vol) {
+        double sqrtT = Math.sqrt(t);
+        double d1 = (Math.log(spot / strike) + (r - q + 0.5 * vol * vol) * t) / (vol * sqrtT);
+        return spot * Math.exp(-q * t) * NormalDistribution.pdf(d1) * sqrtT;
+    }
+
+    /** Brenner-Subrahmanyam near-the-money estimate, clamped into the bracket; 30% if it is unusable. */
+    private static double initialGuess(double spot, double strike, double t, double r, double q, double price, double lo, double hi) {
+        double forward = spot * Math.exp((r - q) * t);
+        double guess = Math.sqrt(2.0 * Math.PI / t) * price / (spot * Math.exp(-q * t));
+        if (!Double.isFinite(guess) || guess <= lo || guess >= hi || Math.abs(Math.log(forward / strike)) > 0.5) {
+            return 0.3;
+        }
+        return guess;
     }
 }
