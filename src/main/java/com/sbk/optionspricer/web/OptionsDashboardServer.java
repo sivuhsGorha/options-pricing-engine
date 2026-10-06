@@ -25,6 +25,7 @@ public class OptionsDashboardServer {
 
     private final String apiSecret;
     private final BrowserSessionManager sessions;
+    private final java.util.Set<String> trustedProxies;
     private final MmapStateReader mmapReader;
     private final HttpServer server;
     private final ExecutorService httpExecutor;
@@ -45,6 +46,8 @@ public class OptionsDashboardServer {
         }
         this.apiSecret = apiSecret;
         this.sessions = new BrowserSessionManager(operatorPassword, allowedOrigins);
+        this.trustedProxies = parseTrustedProxies(
+                com.sbk.optionspricer.config.EnvironmentConfigLoader.getOrDefault("TRUSTED_PROXIES", ""));
         this.mmapReader = mmapReader;
         this.orderManager = orderManager;
         this.positionTracker = positionTracker;
@@ -278,8 +281,10 @@ public class OptionsDashboardServer {
             send(exchange, 413, "Payload Too Large");
             return;
         }
+        String clientKey = ClientAddressResolver.resolve(exchange.getRemoteAddress(),
+                exchange.getRequestHeaders().getFirst("X-Forwarded-For"), trustedProxies);
         BrowserSessionManager.LoginResult result = sessions.login(
-                new String(body, StandardCharsets.UTF_8), exchange.getRemoteAddress());
+                new String(body, StandardCharsets.UTF_8), clientKey);
         if (result.rateLimited()) {
             exchange.getResponseHeaders().set("Retry-After", "60");
             send(exchange, 429, "Too Many Requests");
@@ -333,6 +338,13 @@ public class OptionsDashboardServer {
                 netDelta, netGamma, netVega, scenarioMargin, hedgeQty,
                 sanitizeRiskValue(trackedExposure.netDelta(), 0.0), sanitizeRiskValue(trackedExposure.netGamma(), 0.0),
                 sanitizeRiskValue(trackedExposure.netVega(), 0.0), sanitizeRiskValue(trackedExposure.netNotional(), 0.0));
+    }
+
+    private static java.util.Set<String> parseTrustedProxies(String csv) {
+        return java.util.Arrays.stream(csv.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
     }
 
     private boolean authorizeApi(HttpExchange exchange) throws IOException {
