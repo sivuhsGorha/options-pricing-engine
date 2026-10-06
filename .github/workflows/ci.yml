@@ -27,7 +27,7 @@ jobs:
       - name: Docker Container Readiness Test
         run: |
           docker build -t options-engine .
-          docker run -d -p 8080:8080 -e API_SECRET=test --name options-app options-engine
+          docker run -d -p 8080:8080 -e API_SECRET=ci-only-dummy-secret-0123456789abcdef -e BIND_ADDRESS=0.0.0.0 --name options-app options-engine
           sleep 10
           docker logs options-app
           curl -f -H "X-Signature: test" -H "X-Timestamp: 1" http://localhost:8080/ || exit 1
