@@ -1,0 +1,13 @@
+title = "options-pricing-engine gitleaks config"
+
+[extend]
+# Keep every default rule; only the allowlist below is added.
+useDefault = true
+
+[allowlist]
+description = "Test fixtures and placeholder files. Real secrets belong in .env, which is gitignored."
+paths = [
+    '''^src/test/''',
+    '''^\.env\.example$''',
+    '''^config\.example\.yaml$''',
+]
