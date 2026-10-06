@@ -6,10 +6,6 @@ import com.sbk.optionspricer.execution.PositionTracker;
 import com.sbk.optionspricer.execution.StrategyExecutionLoop;
 import com.sbk.optionspricer.web.LiveSpotProvider;
 
-import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.Deque;
-import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -22,7 +18,6 @@ public class QuantSimulationHarness {
     private final OrderManager orderManager;
     private final PortfolioRiskAdmission riskAdmission;
     private final StrategyExecutionLoop strategyLoop;
-    private final Deque<Double> recentPrices = new ArrayDeque<>();
     private boolean isRunning = false;
     
     private double currentSpot = 100.0;
@@ -78,23 +73,12 @@ public class QuantSimulationHarness {
         if (strategyLoop == null) {
             return new StrategyExecutionLoop.ExecutionSummary(0, 0, 0, 0);
         }
-        recentPrices.addLast(price);
-        if (recentPrices.size() > 10) {
-            recentPrices.removeFirst();
-        }
-        List<Double> window = new ArrayList<>(recentPrices);
-        List<com.sbk.optionspricer.market.MarketSnapshot> contexts = new ArrayList<>(window.size());
-        for (double px : window) {
-            double spread = Math.max(0.01, px * 0.0005);
-            contexts.add(new com.sbk.optionspricer.market.MarketSnapshot("SPY", px - spread, px + spread, px, 2000L, java.time.Instant.now(), java.time.Instant.now(), 0L, "SIMULATED", com.sbk.optionspricer.market.MarketDataStatus.SIMULATED));
-        }
-        return strategyLoop.run(window, contexts);
+        return strategyLoop.onPrice(price, null);
     }
 
     private void tick() {
         try {
             double spot = currentSpot;
-
             if (spotProvider.hasMarketDataKeys()) {
                 LiveSpotProvider.Quote quote = spotProvider.getQuote("SPY");
                 if (quote != null && !Double.isNaN(quote.last())
@@ -104,21 +88,42 @@ public class QuantSimulationHarness {
             } else {
                 spot = 100.0;
             }
-            
             currentSpot = spot;
 
             engine.processTick(spot);
+            if (engine.getState() == UnifiedQuantEngine.EngineState.STOPPED_FATAL) {
+                // processTick handles its own fatal path; stop the scheduler instead of ticking no-ops.
+                throw new IllegalStateException("Engine stopped fatally, halting scheduler.");
+            }
             if (strategyLoop != null) {
                 runStrategyStep(spot);
             }
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             if (engine.getState() == UnifiedQuantEngine.EngineState.STOPPED_FATAL) {
-                throw new RuntimeException("Engine stopped fatally, halting scheduler.", e);
+                throw e;
             }
-            e.printStackTrace();
+            logTickFailure(e);
         }
     }
-    
+
+    private static final long FAILURE_LOG_INTERVAL_MS = 5_000L;
+    private long lastFailureLogMs = 0L;
+    private long suppressedFailures = 0L;
+
+    /** A failure repeating every 10 ms tick is logged once per interval, with a count of suppressed repeats. */
+    private void logTickFailure(RuntimeException e) {
+        long now = System.currentTimeMillis();
+        if (lastFailureLogMs == 0L || now - lastFailureLogMs >= FAILURE_LOG_INTERVAL_MS) {
+            System.err.println("[SIMULATION HARNESS] tick failed"
+                    + (suppressedFailures > 0 ? " (" + suppressedFailures + " similar failures suppressed)" : "")
+                    + ": " + e);
+            lastFailureLogMs = now;
+            suppressedFailures = 0L;
+        } else {
+            suppressedFailures++;
+        }
+    }
+
     public synchronized void stop() {
         if (!isRunning) return;
         isRunning = false;

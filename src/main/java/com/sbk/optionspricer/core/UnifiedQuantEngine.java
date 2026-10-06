@@ -7,31 +7,22 @@ import com.sbk.optionspricer.OptionQuote;
 import com.sbk.optionspricer.OptionType;
 import com.sbk.optionspricer.SyntheticOptionChainProvider;
 import com.sbk.optionspricer.TdAmeritradeOptionChain;
-import com.sbk.optionspricer.VectorBlackScholesPricer;
 import com.sbk.optionspricer.YahooFinanceOptionChain;
 import com.sbk.optionspricer.config.ConfigManager;
 import com.sbk.optionspricer.config.ConfigValidator;
 import com.sbk.optionspricer.data.HistoricalDataManager;
 import com.sbk.optionspricer.data.OptionSnapshot;
-import com.sbk.optionspricer.gateways.QueuePositionEstimator;
-import com.sbk.optionspricer.gateways.SmartOrderRouter;
-import com.sbk.optionspricer.models.pde.ParallelPdeBatchSolver;
 import com.sbk.optionspricer.risk.PortfolioBacktestOrchestrator;
-import com.sbk.optionspricer.volatility.SabrFreeBoundaryModel;
-import com.sbk.optionspricer.volatility.SsviApproximation;
 
-import java.lang.foreign.Arena;
-import java.lang.foreign.MemorySegment;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 
 /**
- * Unified Production-Grade Quantitative Options Pricing, Risk & Execution Engine.
- * End-to-end integration of off-heap FFM struct ingestion, SPSC ring buffer,
- * SSVI / SABR vol surfaces, Parallel pricing, L3 MBO queue estimation, SOR routing,
- * Scenario margin optimization, and zero-GC Mmap IPC state publishing for the web terminal.
+ * Risk engine: publishes portfolio Greeks and a stress-test scenario margin derived from the live
+ * position book, raises Greek limit alerts, and runs portfolio backtests. Option-chain loading and
+ * historical snapshot storage happen at initialization.
  */
 public final class UnifiedQuantEngine {
 
@@ -176,46 +167,22 @@ public final class UnifiedQuantEngine {
     }
 
     /**
-     * Continuous quantitative tick processing cycle, driven by an external environment.
+     * One engine cycle: read the portfolio exposure, derive scenario margin, check Greek limits and
+     * publish the risk state over the mmap IPC channel. Cheap and allocation-light by design;
+     * pricing and calibration are not done here.
      */
     public void processTick(double spot) {
-        processTick(spot, spot - 0.05, spot + 0.05, 500, 500);
-    }
-
-    /**
-     * Continuous quantitative tick processing cycle with full market data parameters.
-     */
-    public void processTick(double spot, double bidPrice, double askPrice, int bidSize, int askSize) {
         if (engineState == EngineState.STOPPED_FATAL) return;
-        try (Arena confined = Arena.ofConfined()) {
+        try {
             currentSpot = spot;
             refreshRisk(spot);
-            
-            // 1. Off-Heap FFM Ingestion
-            MemorySegment tickSegment = MemorySegmentStructs.allocateTick(confined);
-            long nowNs = System.nanoTime();
-            MemorySegmentStructs.setTickData(tickSegment, nowNs, 450000L, bidPrice, askPrice, bidSize, askSize, 1L);
 
-            // 2. Volatility Surface Calibration Update (SSVI & Free-Boundary SABR)
-            SsviApproximation.SsviParams ssviParams = new SsviApproximation.SsviParams(0.5, 0.25, -0.4);
-            double ssviVol = SsviApproximation.impliedVol(currentSpot, 105.0, 0.5, 0.25, ssviParams);
-            double sabrVol = SabrFreeBoundaryModel.impliedVolatility(currentSpot, 95.0, 0.25, 0.25, 1.0, -0.6, 0.4);
-
-            // 3. Parallel Pricing Acceleration
-            double[] strikes = new double[]{90.0, 95.0, 100.0, 105.0, 110.0};
-            double[] prices = VectorBlackScholesPricer.priceBatchParallel(currentSpot, strikes, 0.5, 0.05, ssviVol, true);
-            ParallelPdeBatchSolver.priceBatchPdeVectorized(true, currentSpot, strikes, 0.5, 0.05, sabrVol, prices);
-
-            // 6. Real-time Risk Monitoring & Alerts
             com.sbk.optionspricer.risk.GreekRiskMonitor.PortfolioRisk currentRisk = new com.sbk.optionspricer.risk.GreekRiskMonitor.PortfolioRisk(netDelta, netGamma, netVega, 0.0, 0.0, 0.0, 0.0, 0.0);
             greekAlertManager.checkLimits(currentRisk);
 
-            com.sbk.optionspricer.volatility.SlvApproximation.SlvParams hestonParams = new com.sbk.optionspricer.volatility.SlvApproximation.SlvParams(2.0, 0.04, 0.1, -0.7, 0.04);
-            double var99 = com.sbk.optionspricer.risk.MonteCarloVaRCalculator.calculate99PercentVaR(currentSpot, hestonParams, 0.05, 0.0, 10, netDelta, netGamma, netVega);
-            
-            // 7. Zero-GC Off-Heap Mmap IPC State Publish
             publisher.publishRiskState(netDelta, netGamma, netVega, scenarioMargin);
         } catch (Throwable t) {
+            // Fail-stop: an unexpected error here means the published risk can no longer be trusted.
             if (this.engineState == EngineState.STOPPED_FATAL) return;
             this.engineState = EngineState.STOPPED_FATAL;
             publisher.publishUnavailable();
