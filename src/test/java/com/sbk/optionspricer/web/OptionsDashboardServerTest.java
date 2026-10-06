@@ -100,7 +100,7 @@ public class OptionsDashboardServerTest {
             .build();
         HttpResponse<String> risk = HttpClient.newHttpClient().send(riskRequest, HttpResponse.BodyHandlers.ofString());
         assertEquals(200, risk.statusCode());
-        assertTrue(risk.body().contains("\"scenarioMargin\":40000.00"));
+        assertEquals(40000.0, new com.fasterxml.jackson.databind.ObjectMapper().readTree(risk.body()).get("scenarioMargin").asDouble(), 1e-9, risk.body());
 
         HttpRequest wrongOriginRequest = HttpRequest.newBuilder(URI.create(
                 "http://127.0.0.1:" + server.getPort() + "/api/risk"))
@@ -147,7 +147,7 @@ public class OptionsDashboardServerTest {
             HttpResponse<String> risk = HttpClient.newHttpClient().send(riskRequest, HttpResponse.BodyHandlers.ofString());
             assertEquals(200, risk.statusCode());
             assertTrue(!risk.body().contains("NaN"), risk.body());
-            assertTrue(risk.body().contains("\"netDelta\":0.00"), risk.body());
+            assertEquals(0.0, new com.fasterxml.jackson.databind.ObjectMapper().readTree(risk.body()).get("netDelta").asDouble(), 1e-9, risk.body());
         } finally {
             invalidServer.stop();
         }

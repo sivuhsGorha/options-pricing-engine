@@ -99,9 +99,13 @@ public class OptionsDashboardServer {
             lastUpdate = System.currentTimeMillis();
         }
 
-        return String.format(java.util.Locale.US,
-                "{\"symbol\":\"%s\",\"sourceStatus\":\"%s\",\"lastUpdate\":%d,\"quoteAgeMs\":%d,\"tradable\":%b}",
-                symbol, sourceStatus, lastUpdate, quoteAge, tradable);
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("symbol", symbol);
+        body.put("sourceStatus", sourceStatus);
+        body.put("lastUpdate", lastUpdate);
+        body.put("quoteAgeMs", quoteAge);
+        body.put("tradable", tradable);
+        return Json.write(body);
     }
 
     public void start() {
@@ -128,102 +132,101 @@ public class OptionsDashboardServer {
     }
 
     private void configureContexts(String webRoot) {
-        server.createContext("/login", this::handleLogin);
-        server.createContext("/logout", this::handleLogout);
-        server.createContext("/api/spot", exchange -> {
+        server.createContext("/login", guarded(this::handleLogin));
+        server.createContext("/logout", guarded(this::handleLogout));
+        server.createContext("/api/spot", guarded(exchange -> {
             applySecurityHeaders(exchange, true);
             if (!authorizeApi(exchange)) return;
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            if (marketAdapter == null) {
+                sendJsonError(exchange, 503, "market data unavailable");
+                return;
+            }
             MarketSnapshot snapshot = marketAdapter.getSnapshot("SPY");
-            String snapshotJson = String.format(java.util.Locale.US,
-                "{\"symbol\": \"%s\", \"spotPrice\": %.2f, \"source\": \"%s\", \"timestamp\": %d, \"status\": \"%s\"}",
-                snapshot.symbol(), snapshot.last(), snapshot.source(), snapshot.timestamp().toEpochMilli(), snapshot.status().name());
-            send(exchange, 200, snapshotJson);
-        });
+            java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+            body.put("symbol", snapshot.symbol());
+            body.put("spotPrice", Json.round(snapshot.last(), 2));
+            body.put("source", snapshot.source());
+            body.put("timestamp", snapshot.timestamp().toEpochMilli());
+            body.put("status", snapshot.status().name());
+            sendJson(exchange, 200, body);
+        }));
 
-        server.createContext("/api/health", exchange -> {
+        server.createContext("/api/health", guarded(exchange -> {
             applySecurityHeaders(exchange, true);
             if (!authorizeApi(exchange)) return;
             exchange.getResponseHeaders().set("Content-Type", "application/json");
             send(exchange, 200, healthSnapshot(marketAdapter));
-        });
+        }));
 
-        server.createContext("/api/execution", exchange -> {
+        server.createContext("/api/execution", guarded(exchange -> {
             applySecurityHeaders(exchange, true);
             if (!authorizeApi(exchange)) return;
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            StringBuilder json = new StringBuilder("[");
+            java.util.List<java.util.Map<String, Object>> rows = new java.util.ArrayList<>();
             if (orderManager != null) {
-                var audits = orderManager.getAuditTrail();
-                boolean first = true;
-                for (var a : audits) {
-                    if (!first) json.append(",");
-                    first = false;
-                    json.append(String.format(java.util.Locale.US,
-                        "{\"orderId\":%d,\"accepted\":%b,\"sourceStatus\":\"%s\",\"rejectionReason\":\"%s\",\"fillPrice\":%.2f,\"quantity\":%d,\"timestamp\":%d}",
-                        a.orderId(), a.accepted(), a.sourceStatus().name(), a.rejectionReason(), a.fillPrice(), a.quantity(), a.timestamp().toEpochMilli()));
+                for (var audit : orderManager.getAuditTrail()) {
+                    java.util.Map<String, Object> row = new java.util.LinkedHashMap<>();
+                    row.put("orderId", audit.orderId());
+                    row.put("accepted", audit.accepted());
+                    row.put("sourceStatus", audit.sourceStatus().name());
+                    row.put("rejectionReason", audit.rejectionReason());
+                    row.put("fillPrice", Json.round(audit.fillPrice(), 2));
+                    row.put("quantity", audit.quantity());
+                    row.put("timestamp", audit.timestamp().toEpochMilli());
+                    rows.add(row);
                 }
             }
-            json.append("]");
-            send(exchange, 200, json.toString());
-        });
+            sendJson(exchange, 200, rows);
+        }));
 
-        server.createContext("/api/risk", exchange -> {
+        server.createContext("/api/risk", guarded(exchange -> {
             applySecurityHeaders(exchange, true);
             if (!authorizeApi(exchange)) return;
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            MmapStateReader.RiskState state;
             try {
-                MmapStateReader.RiskState state = mmapReader.readState();
-                PositionTracker.PortfolioExposure trackedExposure = positionTracker == null
-                        ? new PositionTracker.PortfolioExposure(0.0, 0.0, 0.0, 0.0)
-                        : positionTracker.snapshotExposure();
-                String json = riskJson(state, trackedExposure);
-                send(exchange, 200, json);
+                state = mmapReader.readState();
             } catch (IllegalStateException e) {
-                System.out.println("Serving ZERO risk state due to IllegalStateException");
-                send(exchange, 200, "{\"netDelta\":0.00,\"netGamma\":0.00,\"netVega\":0.00,\"scenarioMargin\":0.00,\"recommendedHedge\":0,\"optimizedMargin\":0.00,\"marginReductionPct\":0.0,\"l3FillProb\":75.0,\"sorAllocations\":\"EUREX: 50% | OPTIQ: 30% | SOLA: 20%\"}");
+                // Reporting "zero risk" here would tell monitoring the book is flat while the engine is down.
+                sendJsonError(exchange, 503, "risk state unavailable");
+                return;
             }
-        });
+            PositionTracker.PortfolioExposure trackedExposure = positionTracker == null
+                    ? new PositionTracker.PortfolioExposure(0.0, 0.0, 0.0, 0.0)
+                    : positionTracker.snapshotExposure();
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            send(exchange, 200, riskJson(state, trackedExposure));
+        }));
 
-        server.createContext("/api/surface3d", exchange -> {
+        server.createContext("/api/surface3d", guarded(exchange -> {
             applySecurityHeaders(exchange, true);
             if (!authorizeApi(exchange)) return;
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            String query = exchange.getRequestURI().getQuery();
-            String model = query != null && query.contains("model=SSVI") ? "SSVI" :
-                    query != null && query.contains("model=FREE_SABR") ? "FREE_SABR" : "SABR";
+            String requested = queryParam(exchange.getRequestURI().getRawQuery(), "model");
+            String model = "SSVI".equals(requested) ? "SSVI" : "FREE_SABR".equals(requested) ? "FREE_SABR" : "SABR";
             int[] strikes = {50, 65, 80, 90, 100, 110, 120, 135, 150};
             double[] expiries = {0.1, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0};
-            StringBuilder json = new StringBuilder("{\"model\":\"").append(model).append("\",\"x\":[");
-            for (int i = 0; i < strikes.length; i++) {
-                if (i > 0) json.append(',');
-                json.append(strikes[i]);
-            }
-            json.append("],\"y\":[");
-            for (int i = 0; i < expiries.length; i++) {
-                if (i > 0) json.append(',');
-                json.append(String.format(java.util.Locale.US, "%.2f", expiries[i]));
-            }
-            json.append("],\"z\":[");
             com.sbk.optionspricer.volatility.SsviApproximation.SsviParams ssviParams =
                     new com.sbk.optionspricer.volatility.SsviApproximation.SsviParams(0.55, 0.25, -0.50);
+            double[][] z = new double[expiries.length][strikes.length];
             for (int i = 0; i < expiries.length; i++) {
-                if (i > 0) json.append(',');
-                json.append('[');
                 for (int j = 0; j < strikes.length; j++) {
-                    if (j > 0) json.append(',');
                     double vol = "SSVI".equals(model)
                             ? com.sbk.optionspricer.volatility.SsviApproximation.impliedVol(100.0, strikes[j], expiries[i], 0.22, ssviParams)
                             : "FREE_SABR".equals(model)
                             ? com.sbk.optionspricer.volatility.SabrFreeBoundaryModel.impliedVolatility(100.0, strikes[j], expiries[i], 0.30, 0.6, -0.65, 0.60)
                             : SabrModel.impliedVolatility(100.0, strikes[j], expiries[i], 0.35, 0.5, -0.75, 0.85);
-                    json.append(String.format(java.util.Locale.US, "%.4f", vol));
+                    z[i][j] = Json.round(vol, 4);
                 }
-                json.append(']');
             }
-            json.append("]}");
-            send(exchange, 200, json.toString());
-        });
+            double[] y = new double[expiries.length];
+            for (int i = 0; i < expiries.length; i++) {
+                y[i] = Json.round(expiries[i], 2);
+            }
+            java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+            body.put("model", model);
+            body.put("x", strikes);
+            body.put("y", y);
+            body.put("z", z);
+            sendJson(exchange, 200, body);
+        }));
         server.createContext("/", new StaticFileHandler(webRoot));
     }
 
@@ -329,15 +332,70 @@ public class OptionsDashboardServer {
         double netVega = sanitizeRiskValue(state.netVega, 0.0);
         double scenarioMargin = sanitizeRiskValue(state.scenarioMargin, 0.0);
         int hedgeQty = (int) Math.round(-netDelta);
-        return String.format(java.util.Locale.US,
-                "{\"netDelta\":%.2f,\"netGamma\":%.2f,\"netVega\":%.2f," +
-                        "\"scenarioMargin\":%.2f,\"recommendedHedge\":%d," +
-                        "\"optimizedMargin\":null,\"marginReductionPct\":null," +
-                        "\"trackedNetDelta\":%.2f,\"trackedNetGamma\":%.2f,\"trackedNetVega\":%.2f," +
-                        "\"trackedNotional\":%.2f,\"l3FillProb\":null,\"sorAllocations\":null}",
-                netDelta, netGamma, netVega, scenarioMargin, hedgeQty,
-                sanitizeRiskValue(trackedExposure.netDelta(), 0.0), sanitizeRiskValue(trackedExposure.netGamma(), 0.0),
-                sanitizeRiskValue(trackedExposure.netVega(), 0.0), sanitizeRiskValue(trackedExposure.netNotional(), 0.0));
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("netDelta", Json.round(netDelta, 2));
+        body.put("netGamma", Json.round(netGamma, 2));
+        body.put("netVega", Json.round(netVega, 2));
+        body.put("scenarioMargin", Json.round(scenarioMargin, 2));
+        body.put("recommendedHedge", hedgeQty);
+        body.put("optimizedMargin", null);
+        body.put("marginReductionPct", null);
+        body.put("trackedNetDelta", Json.round(sanitizeRiskValue(trackedExposure.netDelta(), 0.0), 2));
+        body.put("trackedNetGamma", Json.round(sanitizeRiskValue(trackedExposure.netGamma(), 0.0), 2));
+        body.put("trackedNetVega", Json.round(sanitizeRiskValue(trackedExposure.netVega(), 0.0), 2));
+        body.put("trackedNotional", Json.round(sanitizeRiskValue(trackedExposure.netNotional(), 0.0), 2));
+        body.put("l3FillProb", null);
+        body.put("sorAllocations", null);
+        return Json.write(body);
+    }
+
+    /** Returns the decoded value of a query parameter (exact name match), or null. */
+    static String queryParam(String rawQuery, String name) {
+        if (rawQuery == null || rawQuery.isEmpty()) {
+            return null;
+        }
+        for (String pair : rawQuery.split("&")) {
+            int eq = pair.indexOf('=');
+            String key = eq < 0 ? pair : pair.substring(0, eq);
+            String value = eq < 0 ? "" : pair.substring(eq + 1);
+            try {
+                if (name.equals(java.net.URLDecoder.decode(key, StandardCharsets.UTF_8))) {
+                    return java.net.URLDecoder.decode(value, StandardCharsets.UTF_8);
+                }
+            } catch (IllegalArgumentException ignored) {
+                // malformed percent-encoding: treat as not present
+            }
+        }
+        return null;
+    }
+
+    private static void sendJson(HttpExchange exchange, int status, Object body) throws IOException {
+        exchange.getResponseHeaders().set("Content-Type", "application/json");
+        send(exchange, status, Json.write(body));
+    }
+
+    private static void sendJsonError(HttpExchange exchange, int status, String message) throws IOException {
+        sendJson(exchange, status, java.util.Map.of("error", message));
+    }
+
+    /**
+     * Wraps a handler so an unexpected failure becomes a generic 500 JSON error. The cause is
+     * logged server-side only; without this the JDK server just drops the connection.
+     */
+    private static com.sun.net.httpserver.HttpHandler guarded(com.sun.net.httpserver.HttpHandler delegate) {
+        return exchange -> {
+            try {
+                delegate.handle(exchange);
+            } catch (Exception e) {
+                System.err.println("[HTTP] " + exchange.getRequestMethod() + " "
+                        + exchange.getRequestURI().getPath() + " failed: " + e);
+                try {
+                    sendJsonError(exchange, 500, "internal error");
+                } catch (Exception alreadyResponding) {
+                    exchange.close();
+                }
+            }
+        };
     }
 
     private boolean authorizeApi(HttpExchange exchange) throws IOException {

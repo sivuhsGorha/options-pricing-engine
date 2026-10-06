@@ -97,11 +97,17 @@ class EngineRiskStateTest {
 
         String json = OptionsDashboardServer.riskJson(state, tracked);
 
-        assertTrue(json.contains("\"recommendedHedge\":250"), json);
-        assertTrue(json.contains("\"scenarioMargin\":12345.00"), json);
-        assertTrue(json.contains("\"optimizedMargin\":null"), "no optimizer exists, so no optimized margin: " + json);
-        assertTrue(json.contains("\"marginReductionPct\":null"), json);
-        assertTrue(json.contains("\"l3FillProb\":null"), "no L3 feed exists: " + json);
-        assertTrue(json.contains("\"sorAllocations\":null"), "no router allocation exists: " + json);
+        com.fasterxml.jackson.databind.JsonNode node;
+        try {
+            node = new com.fasterxml.jackson.databind.ObjectMapper().readTree(json);
+        } catch (Exception e) {
+            throw new AssertionError("riskJson must be valid JSON: " + json, e);
+        }
+        assertEquals(250, node.get("recommendedHedge").asInt(), json);
+        assertEquals(12_345.0, node.get("scenarioMargin").asDouble(), 1e-9, json);
+        assertTrue(node.get("optimizedMargin").isNull(), "no optimizer exists, so no optimized margin: " + json);
+        assertTrue(node.get("marginReductionPct").isNull(), json);
+        assertTrue(node.get("l3FillProb").isNull(), "no L3 feed exists: " + json);
+        assertTrue(node.get("sorAllocations").isNull(), "no router allocation exists: " + json);
     }
 }

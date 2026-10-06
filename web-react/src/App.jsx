@@ -160,6 +160,7 @@ function App() {
       const updateRiskMetrics = async () => {
           try {
               const response = await secureFetch(`/risk`);
+              if (!response.ok) throw new Error(`risk endpoint returned ${response.status}`);
               const data = await response.json();
               setMetrics(data);
           } catch (error) {

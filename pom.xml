@@ -19,11 +19,17 @@
         <jacoco.plugin.version>0.8.14</jacoco.plugin.version>
         <jacoco.skip>false</jacoco.skip>
         <jetty.version>12.0.40</jetty.version>
+        <jackson.version>2.21.7</jackson.version>
         <maven.compiler.plugin.version>3.13.0</maven.compiler.plugin.version>
         <maven.surefire.plugin.version>3.5.0</maven.surefire.plugin.version>
     </properties>
 
     <dependencies>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>${jackson.version}</version>
+        </dependency>
         <dependency>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-server</artifactId>
