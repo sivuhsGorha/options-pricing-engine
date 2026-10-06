@@ -45,6 +45,8 @@ public final class UnifiedQuantEngine {
     private double netGamma = -3500.0;
     private double netVega = -400000.0;
     private double scenarioMargin = 14611250.0;
+    private final com.sbk.optionspricer.risk.GreekAlertManager greekAlertManager =
+            new com.sbk.optionspricer.risk.GreekAlertManager(50000, 100000, 5000, 10000, 300000, 600000);
 
     public enum EngineState { RUNNING, STOPPED_FATAL }
     private volatile EngineState engineState = EngineState.RUNNING;
@@ -199,9 +201,8 @@ public final class UnifiedQuantEngine {
             }
 
             // 6. Real-time Risk Monitoring & Alerts
-            com.sbk.optionspricer.risk.GreekAlertManager alertManager = new com.sbk.optionspricer.risk.GreekAlertManager(50000, 100000, 5000, 10000, 300000, 600000);
             com.sbk.optionspricer.risk.GreekRiskMonitor.PortfolioRisk currentRisk = new com.sbk.optionspricer.risk.GreekRiskMonitor.PortfolioRisk(netDelta, netGamma, netVega, 0.0, 0.0, 0.0, 0.0, 0.0);
-            alertManager.checkLimits(currentRisk);
+            greekAlertManager.checkLimits(currentRisk);
 
             com.sbk.optionspricer.volatility.SlvApproximation.SlvParams hestonParams = new com.sbk.optionspricer.volatility.SlvApproximation.SlvParams(2.0, 0.04, 0.1, -0.7, 0.04);
             double var99 = com.sbk.optionspricer.risk.MonteCarloVaRCalculator.calculate99PercentVaR(currentSpot, hestonParams, 0.05, 0.0, 10, netDelta, netGamma, netVega);

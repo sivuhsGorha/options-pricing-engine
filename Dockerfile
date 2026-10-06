@@ -21,6 +21,7 @@ WORKDIR /app
 
 # Copy artifact, web files, and required CSV state from builder
 COPY --from=builder /build/target/options-pricing-engine-1.0.0-SNAPSHOT.jar /app/app.jar
+COPY --from=builder /build/target/lib /app/lib
 COPY --from=builder /build/web /app/web
 COPY market_data.csv /app/market_data.csv
 
