@@ -4,6 +4,8 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.security.MessageDigest;
@@ -11,6 +13,7 @@ import java.util.Base64;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Semaphore;
 
 /**
  * Zero-Allocation Binary WebSocket Server for ultra-low-latency market & risk telemetry.
@@ -22,22 +25,45 @@ public class WebSocketDashboardServer implements Runnable {
     private static final String WS_MAGIC_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
     private final int port;
     private final MmapStateReader mmapReader;
+    private final String apiSecret;
+    private final BrowserSessionManager sessions;
     private final CopyOnWriteArrayList<Socket> activeClients = new CopyOnWriteArrayList<>();
     private volatile boolean running = true;
     private static final int MAX_CLIENTS = 100;
     private final ExecutorService clientExecutor = Executors.newCachedThreadPool();
-    private static final String API_SECRET = System.getenv("API_SECRET") != null ? System.getenv("API_SECRET") : "default-dev-secret";
-    private static final String ALLOWED_ORIGIN = System.getenv("ALLOWED_ORIGIN") != null ? System.getenv("ALLOWED_ORIGIN") : "http://localhost:3000";
+    private final Semaphore clientSlots = new Semaphore(MAX_CLIENTS);
+    private volatile int boundPort;
+    private volatile ServerSocket listeningSocket;
+    private long lastConnectLogTime = 0;
 
-    public WebSocketDashboardServer(int port, MmapStateReader mmapReader) {
+    private final String bindAddress;
+
+    public WebSocketDashboardServer(String bindAddress, int port, MmapStateReader mmapReader, String apiSecret,
+                                    BrowserSessionManager sessions) {
+        OptionsDashboardServer.validateApiSecret(apiSecret);
+        this.bindAddress = (bindAddress == null || bindAddress.isBlank()) ? "127.0.0.1" : bindAddress;
         this.port = port;
         this.mmapReader = mmapReader;
+        this.apiSecret = apiSecret;
+        this.sessions = sessions;
+    }
+
+    public WebSocketDashboardServer(int port, MmapStateReader mmapReader, String apiSecret,
+                                    BrowserSessionManager sessions) {
+        this("127.0.0.1", port, mmapReader, apiSecret, sessions);
+    }
+
+    public int getPort() {
+        return boundPort;
     }
 
     @Override
     public void run() {
-        try (ServerSocket serverSocket = new ServerSocket(port)) {
-            System.out.println("WebSocket Live Feed Server listening on ws://localhost:" + port);
+        try (ServerSocket serverSocket = new ServerSocket()) {
+            listeningSocket = serverSocket;
+            serverSocket.bind(new InetSocketAddress(InetAddress.getByName(bindAddress), port));
+            boundPort = serverSocket.getLocalPort();
+            System.out.println("WebSocket Live Feed Server listening on ws://" + bindAddress + ":" + boundPort);
 
             // Background broadcaster thread
             Thread broadcastThread = new Thread(this::broadcastLoop, "ws-broadcaster");
@@ -56,14 +82,32 @@ public class WebSocketDashboardServer implements Runnable {
         } catch (Exception e) {
             System.err.println("WebSocket Server stopped: " + e.getMessage());
         } finally {
+            listeningSocket = null;
             clientExecutor.shutdownNow();
         }
     }
 
+    public static final int DEFAULT_MAX_CONNECTIONS_PER_IP = 5;
+    private final int maxConnectionsPerIp = Integer.parseInt(
+            System.getProperty("WS_MAX_CONNECTIONS_PER_IP", String.valueOf(DEFAULT_MAX_CONNECTIONS_PER_IP)));
+    private final java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicInteger> ipConnections = new java.util.concurrent.ConcurrentHashMap<>();
+
     private void handleClient(Socket socket) {
+        boolean hasClientSlot = false;
+        java.util.concurrent.atomic.AtomicInteger ipCounter = null;
         try {
             InputStream in = socket.getInputStream();
             OutputStream out = socket.getOutputStream();
+
+            String clientIp = socket.getInetAddress() != null ? socket.getInetAddress().getHostAddress() : "unknown";
+            boolean isLoopback = "127.0.0.1".equals(clientIp) || "0:0:0:0:0:0:0:1".equals(clientIp);
+            int allowedForIp = isLoopback ? MAX_CLIENTS : maxConnectionsPerIp;
+            ipCounter = ipConnections.computeIfAbsent(clientIp, k -> new java.util.concurrent.atomic.AtomicInteger(0));
+            if (ipCounter.incrementAndGet() > allowedForIp) {
+                out.write("HTTP/1.1 429 Too Many Requests\r\n\r\n".getBytes());
+                socket.close();
+                return;
+            }
 
             byte[] buffer = new byte[2048];
             int read = in.read(buffer);
@@ -71,26 +115,38 @@ public class WebSocketDashboardServer implements Runnable {
 
             String request = new String(buffer, 0, read);
             
-            if (activeClients.size() >= MAX_CLIENTS) {
-                out.write("HTTP/1.1 429 Too Many Requests\r\n\r\n".getBytes());
-                socket.close();
-                return;
-            }
-
             String origin = extractHeaderSafe(request, "Origin:");
-            if (origin == null || !origin.equals(ALLOWED_ORIGIN)) {
+            if (origin != null && !sessions.isAllowedOrigin(origin)) {
                 out.write("HTTP/1.1 403 Forbidden\r\n\r\n".getBytes());
                 socket.close();
                 return;
             }
 
-            String signature = extractHeaderSafe(request, "X-Signature:");
-            String timestamp = extractHeaderSafe(request, "X-Timestamp:");
-            String nonce = extractHeaderSafe(request, "X-Nonce:");
-            // For WebSocket handshake, path is usually "/" or "/ws"
-            String path = extractPath(request);
-            if (!HmacAuth.verify(API_SECRET, signature, "GET", path, timestamp, nonce)) {
+            boolean authorized;
+            if (origin != null) {
+                authorized = sessions.isValidSessionCookie(extractHeaderSafe(request, "Cookie:"));
+            } else {
+                String path = extractPath(request);
+                String uriPath = path;
+                String query = null;
+                if (path != null && path.contains("?")) {
+                    int qIndex = path.indexOf('?');
+                    uriPath = path.substring(0, qIndex);
+                    query = path.substring(qIndex + 1);
+                }
+                authorized = HmacAuth.verify(apiSecret, extractHeaderSafe(request, "X-Signature:"),
+                        "GET", uriPath, query, extractHeaderSafe(request, "X-Timestamp:"),
+                        extractHeaderSafe(request, "X-Nonce:"));
+            }
+            if (!authorized) {
                 out.write("HTTP/1.1 401 Unauthorized\r\n\r\n".getBytes());
+                socket.close();
+                return;
+            }
+
+            hasClientSlot = clientSlots.tryAcquire();
+            if (!hasClientSlot) {
+                out.write("HTTP/1.1 429 Too Many Requests\r\n\r\n".getBytes());
                 socket.close();
                 return;
             }
@@ -108,20 +164,34 @@ public class WebSocketDashboardServer implements Runnable {
                 out.flush();
 
                 activeClients.add(socket);
-                System.out.println("New WebSocket Client connected: " + socket.getRemoteSocketAddress());
+                long now = System.currentTimeMillis();
+                if (now - lastConnectLogTime > 1000) {
+                    System.out.println("New WebSocket Client connected: " + socket.getRemoteSocketAddress() + " (Total: " + activeClients.size() + ")");
+                    lastConnectLogTime = now;
+                }
                 
-                // Read loop to detect client disconnect and enforce idle timeout
-                socket.setSoTimeout(30000); // 30s idle timeout
+                // Read loop to detect client disconnect, close frames, and enforce idle timeout
+                socket.setSoTimeout(60000); // 60s idle timeout
                 byte[] discardBuffer = new byte[1024];
                 while (running && !socket.isClosed()) {
                     int r = in.read(discardBuffer);
                     if (r == -1) break; // Client closed connection
+                    if (r >= 2 && (discardBuffer[0] & 0x0F) == 0x08) {
+                        // Received Close Frame (Opcode 0x8); send Close response and break
+                        try {
+                            out.write(new byte[]{(byte) 0x88, 0x00});
+                            out.flush();
+                        } catch (Exception ignored) {}
+                        break;
+                    }
                 }
             }
         } catch (Exception e) {
             // Idle timeout or error
         } finally {
             activeClients.remove(socket);
+            if (hasClientSlot) clientSlots.release();
+            if (ipCounter != null) ipCounter.decrementAndGet();
             try { socket.close(); } catch (Exception ignored) {}
         }
     }
@@ -147,7 +217,7 @@ public class WebSocketDashboardServer implements Runnable {
                     frameBuffer.putDouble(state.netDelta);
                     frameBuffer.putDouble(state.netGamma);
                     frameBuffer.putDouble(state.netVega);
-                    frameBuffer.putDouble(state.spanMargin);
+                    frameBuffer.putDouble(state.scenarioMargin);
                 } catch (IllegalStateException e) {
                     // State unavailable, skip broadcast for this tick
                     continue;
@@ -175,12 +245,19 @@ public class WebSocketDashboardServer implements Runnable {
     }
 
     private String extractHeaderSafe(String request, String headerName) {
-        int start = request.indexOf(headerName);
-        if (start == -1) return null;
-        start += headerName.length();
-        int end = request.indexOf("\r\n", start);
-        if (end == -1) return null;
-        return request.substring(start, end).trim();
+        if (request == null || headerName == null) return null;
+        int index = 0;
+        while ((index = request.indexOf(headerName, index)) != -1) {
+            if (index == 0 || request.charAt(index - 1) == '\n') {
+                int start = index + headerName.length();
+                int end = request.indexOf("\r\n", start);
+                if (end == -1) end = request.indexOf("\n", start);
+                if (end == -1) end = request.length();
+                return request.substring(start, end).trim();
+            }
+            index += headerName.length();
+        }
+        return null;
     }
 
     private String extractPath(String request) {
@@ -203,5 +280,9 @@ public class WebSocketDashboardServer implements Runnable {
 
     public void stop() {
         this.running = false;
+        ServerSocket socket = listeningSocket;
+        if (socket != null) {
+            try { socket.close(); } catch (Exception ignored) {}
+        }
     }
 }

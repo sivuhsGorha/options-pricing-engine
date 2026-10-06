@@ -74,9 +74,9 @@ public class MmapConcurrencyStressTest {
                         // Validate consistency
                         if (state.netDelta != state.netGamma || 
                             state.netGamma != state.netVega || 
-                            state.netVega != state.spanMargin) {
-                            tornReadError.set(String.format(java.util.Locale.ROOT, "Torn Read Detected! Delta: %f, Gamma: %f, Vega: %f, Margin: %f",
-                                state.netDelta, state.netGamma, state.netVega, state.spanMargin));
+                            state.netVega != state.scenarioMargin) {
+                            tornReadError.set(String.format(java.util.Locale.ROOT, "Torn Read Detected! Delta: %f, Gamma: %f, Vega: %f, scenarioMargin: %f",
+                                state.netDelta, state.netGamma, state.netVega, state.scenarioMargin));
                             break;
                         }
                         readsCompleted.incrementAndGet();

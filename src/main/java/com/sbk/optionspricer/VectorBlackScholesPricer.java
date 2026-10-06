@@ -6,8 +6,8 @@ import jdk.incubator.vector.VectorOperators;
 import jdk.incubator.vector.VectorSpecies;
 
 /**
- * Java 21 Incubator Vector API (SIMD) implementation for European Option Pricing.
- * Prototyping SIMD lane-based pricing.
+ * Java 21 Incubator Vector API (Parallel) implementation for European Option Pricing.
+ * Prototyping Parallel lane-based pricing.
  */
 public final class VectorBlackScholesPricer {
 
@@ -34,7 +34,7 @@ public final class VectorBlackScholesPricer {
         }
     }
 
-    public static double[] priceBatchSimdSingleThread(double spot, double[] strikes, double timeToExpiry,
+    public static double[] priceBatchParallelSingleThread(double spot, double[] strikes, double timeToExpiry,
                                                       double riskFreeRate, double volatility, boolean isCall) {
         double[] out = new double[strikes.length];
         int upperBound = SPECIES.loopBound(strikes.length);

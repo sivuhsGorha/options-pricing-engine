@@ -21,7 +21,7 @@ public class UnifiedQuantEngineTest {
             private boolean initialized = false;
             
             @Override
-            public void publishRiskState(double netDelta, double netGamma, double netVega, double spanMargin) {
+            public void publishRiskState(double netDelta, double netGamma, double netVega, double scenarioMargin) {
                 if (!initialized) {
                     initialized = true;
                     return;
@@ -82,7 +82,7 @@ public class UnifiedQuantEngineTest {
         public static void main(String[] args) {
             MmapStatePublisher throwingPublisher = new MmapStatePublisher() {
                 @Override
-                public void publishRiskState(double netDelta, double netGamma, double netVega, double spanMargin) {
+                public void publishRiskState(double netDelta, double netGamma, double netVega, double scenarioMargin) {
                     throw new RuntimeException("Simulated exception in loop");
                 }
             };

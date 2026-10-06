@@ -25,10 +25,11 @@ public class MmapStatePublisher {
     private final Arena arena;
 
     private String getFilePath() {
-        return System.getProperty("MMAP_STATE_FILE") != null ? 
+        String raw = System.getProperty("MMAP_STATE_FILE") != null ? 
             System.getProperty("MMAP_STATE_FILE") : 
             System.getenv("MMAP_STATE_FILE") != null ? 
-            System.getenv("MMAP_STATE_FILE") : "data/quant_engine_state.dat";
+            System.getenv("MMAP_STATE_FILE") : "data/shm_state.dat";
+        return MmapSecurityUtils.validateMmapPath(raw).toString();
     }
 
     public MmapStatePublisher() {
@@ -62,16 +63,16 @@ public class MmapStatePublisher {
     /**
      * Writes risk metrics directly to off-heap memory using a Seqlock for zero torn reads.
      */
-    public void publishRiskState(double netDelta, double netGamma, double netVega, double spanMargin) {
+    public void publishRiskState(double netDelta, double netGamma, double netVega, double scenarioMargin) {
         long seq = (long) VH_LONG.getOpaque(mappedSegment, 0L);
         seq++; // make it odd to signal write in progress
         VH_LONG.setRelease(mappedSegment, 0L, seq);
 
-        VH_LONG.setRelease(mappedSegment, 16L, System.nanoTime()); // Heartbeat
+        VH_LONG.setRelease(mappedSegment, 16L, System.currentTimeMillis()); // Heartbeat
         VH_DOUBLE.setRelease(mappedSegment, 24L, netDelta);
         VH_DOUBLE.setRelease(mappedSegment, 32L, netGamma);
         VH_DOUBLE.setRelease(mappedSegment, 40L, netVega);
-        VH_DOUBLE.setRelease(mappedSegment, 48L, spanMargin);
+        VH_DOUBLE.setRelease(mappedSegment, 48L, scenarioMargin);
 
         seq++; // make it even to signal write complete
         VH_LONG.setRelease(mappedSegment, 0L, seq);
@@ -83,6 +84,11 @@ public class MmapStatePublisher {
     }
 
     public void close() {
-        arena.close();
+        if (arena != null && arena.scope().isAlive()) {
+            if (mappedSegment != null) {
+                mappedSegment.fill((byte) 0);
+            }
+            arena.close();
+        }
     }
 }

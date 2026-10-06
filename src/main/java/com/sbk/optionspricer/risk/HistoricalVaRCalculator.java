@@ -25,20 +25,26 @@ public class HistoricalVaRCalculator {
      * @return The 99th percentile worst-case positive loss (0.0 if no loss is incurred).
      */
     public static double calculate99PercentVaR(double[] historicalPnL) {
+        return calculateVaR(historicalPnL, 0.99, 1);
+    }
+
+    /**
+     * Calculates Historical VaR scaled to a multi-day holding period.
+     */
+    public static double calculateVaR(double[] historicalPnL, double confidenceLevel, int holdingPeriodDays) {
         if (historicalPnL == null || historicalPnL.length < MIN_SAMPLE_SIZE) {
             throw new IllegalArgumentException("Historical PnL sample must contain at least " + MIN_SAMPLE_SIZE + " entries");
         }
 
-        // Clone to avoid modifying the caller's array
         double[] sortedPnL = historicalPnL.clone();
         Arrays.sort(sortedPnL);
 
-        // 99% VaR corresponds to the 1st percentile of sorted PnL (worst 1% tail loss)
-        int index99 = Math.max(0, (int) Math.floor((sortedPnL.length - 1) * 0.01));
+        double tailPercentile = 1.0 - confidenceLevel;
+        int index = Math.max(0, (int) Math.floor((sortedPnL.length - 1) * tailPercentile));
 
-        double pnlAt99 = sortedPnL[index99];
+        double pnlAtTail = sortedPnL[index];
+        double dailyVarLoss = (pnlAtTail < 0) ? -pnlAtTail : 0.0;
 
-        // Loss = -PnL. If PnL is positive, loss is non-positive (no loss incurred at 99% confidence level).
-        return (pnlAt99 < 0) ? -pnlAt99 : 0.0;
+        return dailyVarLoss * Math.sqrt(holdingPeriodDays);
     }
 }

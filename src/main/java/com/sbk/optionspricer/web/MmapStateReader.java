@@ -24,21 +24,22 @@ public class MmapStateReader {
         public final double netDelta;
         public final double netGamma;
         public final double netVega;
-        public final double spanMargin;
+        public final double scenarioMargin;
 
-        public RiskState(double netDelta, double netGamma, double netVega, double spanMargin) {
+        public RiskState(double netDelta, double netGamma, double netVega, double scenarioMargin) {
             this.netDelta = netDelta;
             this.netGamma = netGamma;
             this.netVega = netVega;
-            this.spanMargin = spanMargin;
+            this.scenarioMargin = scenarioMargin;
         }
     }
 
     private String getFilePath() {
-        return System.getProperty("MMAP_STATE_FILE") != null ? 
+        String raw = System.getProperty("MMAP_STATE_FILE") != null ? 
             System.getProperty("MMAP_STATE_FILE") : 
             System.getenv("MMAP_STATE_FILE") != null ? 
-            System.getenv("MMAP_STATE_FILE") : "data/quant_engine_state.dat";
+            System.getenv("MMAP_STATE_FILE") : "data/shm_state.dat";
+        return MmapSecurityUtils.validateMmapPath(raw).toString();
     }
 
     public MmapStateReader() {
@@ -72,6 +73,7 @@ public class MmapStateReader {
 
             long magic = (long) VH_LONG.getAcquire(mappedSegment, 8L);
             if (magic != MAGIC_VERSION) {
+                System.err.println("MmapStateReader fail: magic mismatch. Expected " + MAGIC_VERSION + " got " + magic);
                 throw new IllegalStateException("UNAVAILABLE");
             }
 
@@ -79,18 +81,20 @@ public class MmapStateReader {
             double delta = (double) VH_DOUBLE.getAcquire(mappedSegment, 24L);
             double gamma = (double) VH_DOUBLE.getAcquire(mappedSegment, 32L);
             double vega = (double) VH_DOUBLE.getAcquire(mappedSegment, 40L);
-            double margin = (double) VH_DOUBLE.getAcquire(mappedSegment, 48L);
+            double scenarioMargin = (double) VH_DOUBLE.getAcquire(mappedSegment, 48L);
 
             long seq2 = (long) VH_LONG.getAcquire(mappedSegment, 0L);
             if (seq1 == seq2) {
                 // Check stale heartbeat (older than 2 seconds)
-                if (System.nanoTime() - heartbeat > 2_000_000_000L) {
+                if (System.currentTimeMillis() - heartbeat > 2000L) {
+                    System.err.println("MmapStateReader fail: stale heartbeat. Now=" + System.currentTimeMillis() + ", heartbeat=" + heartbeat + ", diff=" + (System.currentTimeMillis() - heartbeat));
                     throw new IllegalStateException("UNAVAILABLE");
                 }
-                return new RiskState(delta, gamma, vega, margin);
+                return new RiskState(delta, gamma, vega, scenarioMargin);
             }
             Thread.onSpinWait();
         }
+        System.err.println("MmapStateReader fail: max retries exceeded");
         throw new IllegalStateException("UNAVAILABLE");
     }
 

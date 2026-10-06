@@ -51,6 +51,7 @@ public class SmartOrderRouter {
         // Provide the generated sequence ID alongside (for durability tracing)
         long seqId = orderSequence.getAndIncrement();
         
-        return transport.transmit(networkPayload);
+        ExecutionResult result = transport.transmit(order, "UNKNOWN", order.price(), order.price());
+        return result.executed();
     }
 }

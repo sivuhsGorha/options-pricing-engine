@@ -18,7 +18,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 public class HmacAuthTest {
 
     private static HttpServer server;
-    private static final String SECRET = "default-dev-secret";
+        private static final String SECRET = java.util.UUID.randomUUID().toString()
+            + java.util.UUID.randomUUID().toString();
     private static final int PORT = 8085;
 
     @BeforeAll
@@ -29,7 +30,7 @@ public class HmacAuthTest {
             String timestamp = exchange.getRequestHeaders().getFirst("X-Timestamp");
             String nonce = exchange.getRequestHeaders().getFirst("X-Nonce");
             
-            if (!HmacAuth.verify(SECRET, signature, exchange.getRequestMethod(), exchange.getRequestURI().getPath(), timestamp, nonce)) {
+            if (!HmacAuth.verify(SECRET, signature, exchange.getRequestMethod(), exchange.getRequestURI().getPath(), exchange.getRequestURI().getQuery(), timestamp, nonce)) {
                 exchange.sendResponseHeaders(401, -1);
                 return;
             }
@@ -46,10 +47,11 @@ public class HmacAuthTest {
         if (server != null) server.stop(0);
     }
 
-    private String sign(String secret, String method, String path, String timestamp, String nonce) throws Exception {
+    private String sign(String secret, String method, String path, String query, String timestamp, String nonce) throws Exception {
         if (nonce == null) nonce = "";
         if (timestamp == null) timestamp = "";
-        String payload = method + path + timestamp + nonce;
+        if (query == null) query = "";
+        String payload = method + "\n" + path + "\n" + query + "\n" + timestamp + "\n" + nonce;
         Mac mac = Mac.getInstance("HmacSHA256");
         mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
         return Base64.getEncoder().encodeToString(mac.doFinal(payload.getBytes(StandardCharsets.UTF_8)));
@@ -68,21 +70,21 @@ public class HmacAuthTest {
     @Test
     void testValid() throws Exception {
         String ts = String.valueOf(System.currentTimeMillis() / 1000);
-        String sig = sign(SECRET, "GET", "/api/spot", ts, "nonce1");
+        String sig = sign(SECRET, "GET", "/api/spot", null, ts, "nonce1");
         assertEquals(200, send("/api/spot", ts, "nonce1", sig).getResponseCode());
     }
 
     @Test
     void testWrongKey() throws Exception {
         String ts = String.valueOf(System.currentTimeMillis() / 1000);
-        String sig = sign("wrong-key", "GET", "/api/spot", ts, "nonce2");
+        String sig = sign("wrong-key", "GET", "/api/spot", null, ts, "nonce2");
         assertEquals(401, send("/api/spot", ts, "nonce2", sig).getResponseCode());
     }
 
     @Test
     void testTamperedBody() throws Exception {
         String ts = String.valueOf(System.currentTimeMillis() / 1000);
-        String sig = sign(SECRET, "GET", "/api/spot", ts, "nonce3");
+        String sig = sign(SECRET, "GET", "/api/spot", null, ts, "nonce3");
         // Tampered path
         assertEquals(401, send("/api/spott", ts, "nonce3", sig).getResponseCode());
     }
@@ -90,7 +92,7 @@ public class HmacAuthTest {
     @Test
     void testReplayedNonce() throws Exception {
         String ts = String.valueOf(System.currentTimeMillis() / 1000);
-        String sig = sign(SECRET, "GET", "/api/spot", ts, "nonce4");
+        String sig = sign(SECRET, "GET", "/api/spot", null, ts, "nonce4");
         assertEquals(200, send("/api/spot", ts, "nonce4", sig).getResponseCode());
         assertEquals(401, send("/api/spot", ts, "nonce4", sig).getResponseCode());
     }
@@ -98,32 +100,28 @@ public class HmacAuthTest {
     @Test
     void testExpiredTimestamp() throws Exception {
         String ts = String.valueOf((System.currentTimeMillis() / 1000) - 400);
-        String sig = sign(SECRET, "GET", "/api/spot", ts, "nonce5");
+        String sig = sign(SECRET, "GET", "/api/spot", null, ts, "nonce5");
         assertEquals(401, send("/api/spot", ts, "nonce5", sig).getResponseCode());
     }
 
     @Test
     void testFutureTimestamp() throws Exception {
         String ts = String.valueOf((System.currentTimeMillis() / 1000) + 400);
-        String sig = sign(SECRET, "GET", "/api/spot", ts, "nonce6");
+        String sig = sign(SECRET, "GET", "/api/spot", null, ts, "nonce6");
         assertEquals(401, send("/api/spot", ts, "nonce6", sig).getResponseCode());
     }
 
     @Test
     void testFutureTimestampReplayAfterOldTTL() throws Exception {
-        // A request timestamped 5 minutes in the future
         String ts = String.valueOf((System.currentTimeMillis() / 1000) + 300);
-        String sig = sign(SECRET, "GET", "/api/spot", ts, "nonce-future-replay");
-        // We cannot reliably mock time in this setup for the cache, but we can verify that 
-        // the server rejects future timestamps beyond the 30s skew *immediately*.
-        // If it allows +300s, it's vulnerable to replay after 5m eviction.
+        String sig = sign(SECRET, "GET", "/api/spot", null, ts, "nonce-future-replay");
         assertEquals(401, send("/api/spot", ts, "nonce-future-replay", sig).getResponseCode());
     }
 
     @Test
     void testMissingHeader() throws Exception {
         String ts = String.valueOf(System.currentTimeMillis() / 1000);
-        String sig = sign(SECRET, "GET", "/api/spot", ts, "nonce7");
+        String sig = sign(SECRET, "GET", "/api/spot", null, ts, "nonce7");
         assertEquals(401, send("/api/spot", null, "nonce7", sig).getResponseCode());
         assertEquals(401, send("/api/spot", ts, null, sig).getResponseCode());
         assertEquals(401, send("/api/spot", ts, "nonce7", null).getResponseCode());

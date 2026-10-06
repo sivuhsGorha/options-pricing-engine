@@ -1,120 +1,109 @@
 package com.sbk.optionspricer.web;
 
-import com.sbk.optionspricer.core.MmapStatePublisher;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.io.InputStream;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.net.Socket;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class WebSocketDashboardServerTest {
+    private OptionsDashboardServer server;
+    private Path webRoot;
 
-    private static WebSocketDashboardServer server;
-    private static final int PORT = 8087;
-
-    @BeforeAll
-    static void startServer() {
-        MmapStateReader mockReader = new MmapStateReader() {
+    @BeforeEach
+    void startServer() throws Exception {
+        webRoot = Files.createTempDirectory("ws-dashboard-test-web");
+        MmapStateReader reader = new MmapStateReader() {
             @Override
             public RiskState readState() {
                 throw new IllegalStateException("UNAVAILABLE");
             }
+
+            @Override
+            public void close() {}
         };
-        server = new WebSocketDashboardServer(PORT, mockReader);
-        Thread t = new Thread(server);
-        t.setDaemon(true);
-        t.start();
-        try { Thread.sleep(200); } catch (Exception e) {}
+        server = new OptionsDashboardServer(OptionsDashboardServerTest.TEST_SECRET,
+                OptionsDashboardServerTest.OPERATOR_PASSWORD, OptionsDashboardServerTest.ALLOWED_ORIGIN,
+                "127.0.0.1", 0, 0, reader, webRoot.toString(), null, null, null);
+        server.start();
+        OptionsDashboardServerTest.waitForWebSocketPort(server);
     }
 
-    @AfterAll
-    static void stopServer() {
+    @AfterEach
+    void stopServer() throws Exception {
         if (server != null) server.stop();
+        if (webRoot != null) Files.deleteIfExists(webRoot);
+    }
+
+    private String loginCookie() throws Exception {
+        HttpRequest request = HttpRequest.newBuilder(URI.create(
+                "http://127.0.0.1:" + server.getPort() + "/login"))
+            .header("Origin", OptionsDashboardServerTest.ALLOWED_ORIGIN)
+            .POST(HttpRequest.BodyPublishers.ofString(OptionsDashboardServerTest.OPERATOR_PASSWORD,
+                StandardCharsets.UTF_8))
+            .build();
+        HttpResponse<String> response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
+        assertEquals(200, response.statusCode());
+        return response.headers().firstValue("Set-Cookie").orElseThrow().split(";", 2)[0];
+    }
+
+    private Socket connect(String origin, String cookie) throws Exception {
+        Socket socket = new Socket("127.0.0.1", server.getWebSocketPort());
+        socket.setSoTimeout(5000);
+        OutputStream output = socket.getOutputStream();
+        String request = "GET /ws HTTP/1.1\r\n" +
+                "Host: 127.0.0.1:" + server.getWebSocketPort() + "\r\n" +
+                "Upgrade: websocket\r\n" +
+                "Connection: Upgrade\r\n" +
+                "Origin: " + origin + "\r\n" +
+                (cookie == null ? "" : "Cookie: " + cookie + "\r\n") +
+                "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" +
+                "Sec-WebSocket-Version: 13\r\n\r\n";
+        output.write(request.getBytes(StandardCharsets.US_ASCII));
+        output.flush();
+        return socket;
+    }
+
+    private String readStatus(Socket socket) throws Exception {
+        return new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.US_ASCII)).readLine();
     }
 
     @Test
-    void testUnauthenticatedUpgradeRejected() throws Exception {
-        try (Socket socket = new Socket("localhost", PORT)) {
-            OutputStream out = socket.getOutputStream();
-            String req = "GET /ws HTTP/1.1\r\n" +
-                         "Host: localhost:" + PORT + "\r\n" +
-                         "Upgrade: websocket\r\n" +
-                         "Connection: Upgrade\r\n" +
-                         "Origin: http://localhost:3000\r\n" +
-                         "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" +
-                         "Sec-WebSocket-Version: 13\r\n\r\n";
-            out.write(req.getBytes());
-            out.flush();
-
-            InputStream in = socket.getInputStream();
-            byte[] buf = new byte[1024];
-            int read = in.read(buf);
-            String response = new String(buf, 0, read);
-            assertTrue(response.contains("401 Unauthorized"), "Expected 401 Unauthorized, got: " + response);
+    void wrongOriginIsRejectedEvenWithAValidSession() throws Exception {
+        try (Socket socket = connect("http://attacker.test", loginCookie())) {
+            assertEquals("HTTP/1.1 403 Forbidden", readStatus(socket));
         }
     }
 
     @Test
-    void testMaxClientsEnforced() throws Exception {
-        // We will attempt to connect 101 clients. The 101st should get 429 Too Many Requests.
-        // Wait, creating 101 sockets might take a bit.
-        // Let's just create 105 sockets, read responses. At least one should be 429.
+    void oneHundredFirstConcurrentConnectionGets429() throws Exception {
+        String cookie = loginCookie();
         List<Socket> sockets = new ArrayList<>();
-        boolean got429 = false;
         try {
-            for (int i = 0; i < 105; i++) {
-                Socket socket = new Socket("localhost", PORT);
+            for (int index = 0; index < 100; index++) {
+                Socket socket = connect(OptionsDashboardServerTest.ALLOWED_ORIGIN, cookie);
                 sockets.add(socket);
-                OutputStream out = socket.getOutputStream();
-                
-                // Valid auth for this test
-                String ts = String.valueOf(System.currentTimeMillis() / 1000);
-                String nonce = "n" + i;
-                String method = "GET";
-                String path = "/ws";
-                String secret = "default-dev-secret";
-                
-                String payload = method + path + ts + nonce;
-                javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256");
-                mac.init(new javax.crypto.spec.SecretKeySpec(secret.getBytes(java.nio.charset.StandardCharsets.UTF_8), "HmacSHA256"));
-                String sig = java.util.Base64.getEncoder().encodeToString(mac.doFinal(payload.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
-
-                String req = "GET /ws HTTP/1.1\r\n" +
-                             "Host: localhost:" + PORT + "\r\n" +
-                             "Upgrade: websocket\r\n" +
-                             "Connection: Upgrade\r\n" +
-                             "Origin: http://localhost:3000\r\n" +
-                             "X-Timestamp: " + ts + "\r\n" +
-                             "X-Nonce: " + nonce + "\r\n" +
-                             "X-Signature: " + sig + "\r\n" +
-                             "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" +
-                             "Sec-WebSocket-Version: 13\r\n\r\n";
-                out.write(req.getBytes());
-                out.flush();
-
-                InputStream in = socket.getInputStream();
-                byte[] buf = new byte[1024];
-                int read = in.read(buf);
-                if (read > 0) {
-                    String response = new String(buf, 0, read);
-                    if (response.contains("429 Too Many Requests")) {
-                        got429 = true;
-                        break;
-                    }
-                }
+                assertEquals("HTTP/1.1 101 Switching Protocols", readStatus(socket), "connection " + (index + 1));
             }
-            assertTrue(got429, "Expected at least one connection to be rejected with 429 Too Many Requests");
+            try (Socket excess = connect(OptionsDashboardServerTest.ALLOWED_ORIGIN, cookie)) {
+                assertEquals("HTTP/1.1 429 Too Many Requests", readStatus(excess));
+            }
         } finally {
-            for (Socket s : sockets) {
-                try { s.close(); } catch (Exception e) {}
-            }
+            for (Socket socket : sockets) socket.close();
         }
     }
 }

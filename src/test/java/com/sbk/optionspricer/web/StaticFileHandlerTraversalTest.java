@@ -5,12 +5,12 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
-import java.io.File;
-import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
 import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -18,30 +18,30 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public class StaticFileHandlerTraversalTest {
 
     private static HttpServer server;
-    private static final int PORT = 8086;
+    private static int port;
+    private static Path tempDir;
 
     @BeforeAll
     static void startServer() throws Exception {
-        // Create a dummy web dir with index.html to ensure server serves files
-        new File("web").mkdirs();
-        try (FileOutputStream out = new FileOutputStream("web/index.html")) {
-            out.write("hello".getBytes());
-        }
+        // Create a temp web dir to ensure server serves files
+        tempDir = Files.createTempDirectory("aura-test-web");
+        Files.writeString(tempDir.resolve("test-index.html"), "hello");
 
-        server = HttpServer.create(new InetSocketAddress(PORT), 0);
-        server.createContext("/", new OptionsDashboardServer.StaticFileHandler());
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/", new OptionsDashboardServer.StaticFileHandler(tempDir.toString()));
         server.start();
+        port = server.getAddress().getPort();
     }
 
     @AfterAll
-    static void stopServer() {
+    static void stopServer() throws Exception {
         if (server != null) server.stop(0);
-        new File("web/index.html").delete();
-        new File("web").delete();
+        Files.deleteIfExists(tempDir.resolve("test-index.html"));
+        Files.deleteIfExists(tempDir);
     }
 
     private void assertTraversalBlocked(String path) throws Exception {
-        HttpURLConnection conn = (HttpURLConnection) new URL("http://localhost:" + PORT + path).openConnection();
+        HttpURLConnection conn = (HttpURLConnection) new URL("http://127.0.0.1:" + port + path).openConnection();
         conn.setRequestMethod("GET");
         conn.connect();
         
@@ -61,7 +61,7 @@ public class StaticFileHandlerTraversalTest {
 
     @Test
     void testValidPath() throws Exception {
-        HttpURLConnection conn = (HttpURLConnection) new URL("http://localhost:" + PORT + "/index.html").openConnection();
+        HttpURLConnection conn = (HttpURLConnection) new URL("http://127.0.0.1:" + port + "/test-index.html").openConnection();
         conn.setRequestMethod("GET");
         assertEquals(200, conn.getResponseCode());
     }

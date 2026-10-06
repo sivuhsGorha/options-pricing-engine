@@ -23,8 +23,8 @@ public class RealtimePricingIntegration {
         // 3. Initialize the Simulated Replay Engine using our CSV data
         HistoricalReplayEngine replay = new HistoricalReplayEngine(decoder, "market_data.csv");
         
-        // Hardcoded assumptions for the synthetic SPY data environment
-        double spot = 500.0;
+        // Realistic spot level aligned with strikes (712-812) in market_data.csv
+        double spot = 762.0;
         double riskFreeRate = 0.05;
         double timeToExpiry = 30.0 / 365.0;
         

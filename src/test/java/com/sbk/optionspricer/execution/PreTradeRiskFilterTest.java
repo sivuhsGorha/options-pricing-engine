@@ -1,6 +1,10 @@
 package com.sbk.optionspricer.execution;
 
+import com.sbk.optionspricer.risk.ConcentrationLimitManager;
+import com.sbk.optionspricer.risk.LiquidityRiskMonitor;
 import org.junit.jupiter.api.Test;
+
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -27,5 +31,22 @@ public class PreTradeRiskFilterTest {
     void testValidOrderAccepted() {
         PreTradeRiskFilter filter = new PreTradeRiskFilter(100, 100000.0, 100);
         assertTrue(filter.checkRisk(new Order(1, true, 10, 100.0)), "Valid order should be accepted");
+    }
+
+    @Test
+    void testConcentrationAndLiquidityChecksAreEnforced() {
+        ConcentrationLimitManager concentrationLimitManager = new ConcentrationLimitManager(Map.of("SPY", 1_000.0));
+        LiquidityRiskMonitor liquidityRiskMonitor = new LiquidityRiskMonitor(25.0, 1000L);
+        PreTradeRiskFilter filter = new PreTradeRiskFilter(
+                1000,
+                10_000_000.0,
+                100,
+                Map.of(1, "SPY"),
+                concentrationLimitManager,
+                liquidityRiskMonitor
+        );
+
+        assertFalse(filter.checkRisk(new Order(1, true, 100, 100.0), "SPY", 100.0, 100.10, 2000L));
+        assertTrue(filter.checkRisk(new Order(1, true, 5, 100.0), "SPY", 100.0, 100.10, 2000L));
     }
 }

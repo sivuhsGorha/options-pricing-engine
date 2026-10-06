@@ -70,8 +70,8 @@ public class BlackScholesPricer {
             out[0] = isItm ? ((type == OptionType.CALL) ? discQ : -discQ) : 0.0;
             out[1] = 0.0;
             out[2] = 0.0;
-            out[3] = isItm ? ((type == OptionType.CALL) ? (-dividendYield * discountedSpot + riskFreeRate * discountedStrike)
-                                                        : (dividendYield * discountedSpot - riskFreeRate * discountedStrike)) : 0.0;
+            out[3] = isItm ? ((type == OptionType.CALL) ? (dividendYield * discountedSpot - riskFreeRate * discountedStrike)
+                                                        : (-dividendYield * discountedSpot + riskFreeRate * discountedStrike)) : 0.0;
             out[4] = isItm ? ((type == OptionType.CALL) ? strike * timeToExpiry * discR : -strike * timeToExpiry * discR) : 0.0;
             return;
         }

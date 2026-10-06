@@ -34,7 +34,7 @@ public class OrderBookTick {
 
     /**
      * Binds this flyweight instance to a specific memory segment.
-     * In a Disruptor ring buffer, this is called once during startup to pre-link objects.
+     * In a SPSC ring buffer, this is called once during startup to pre-link objects.
      */
     public void wrap(MemorySegment segment) {
         if (segment.byteSize() < SIZE_BYTES) {

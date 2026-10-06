@@ -37,4 +37,14 @@ public class MmapSecurityUtils {
             }
         }
     }
+
+    public static Path validateMmapPath(String pathStr) {
+        if (pathStr == null || pathStr.isBlank()) {
+            return Path.of("data/shm_state.dat");
+        }
+        if (pathStr.indexOf('\0') >= 0) {
+            throw new IllegalArgumentException("Mmap state file path contains null byte");
+        }
+        return Path.of(pathStr).normalize();
+    }
 }

@@ -158,6 +158,33 @@ public class OptionsPropertyTest {
         assertEquals(0.8097, g.delta(), 0.0001, "Delta must match expected value");
     }
 
+    @Test
+    void testZeroVolThetaSign() {
+        // In the money call: S=120, K=100, T=1, r=0.05, q=0.02
+        // Deterministic payoff: S e^-qT - K e^-rT.
+        // Theta = -dPayoff/dT = q S e^-qT - r K e^-rT
+        double spot = 120.0;
+        double strike = 100.0;
+        double t = 1.0;
+        double r = 0.05;
+        double q = 0.02;
+
+        double[] zeroVolGreeks = new double[5];
+        BlackScholesPricer.greeks(OptionType.CALL, spot, strike, t, r, 0.0, q, zeroVolGreeks);
+        double expectedZeroVolTheta = q * spot * Math.exp(-q * t) - r * strike * Math.exp(-r * t);
+        assertEquals(expectedZeroVolTheta, zeroVolGreeks[3], 1e-9, "Zero-vol call theta must match q S e^-qT - r K e^-rT");
+
+        // Verify continuity with very small positive vol (1e-5)
+        double[] smallVolGreeks = new double[5];
+        BlackScholesPricer.greeks(OptionType.CALL, spot, strike, t, r, 1e-4, q, smallVolGreeks);
+        assertEquals(zeroVolGreeks[3], smallVolGreeks[3], 1e-3, "Zero-vol theta must be continuous with small vol theta");
+
+        // For put: strike=120, spot=100
+        BlackScholesPricer.greeks(OptionType.PUT, 100.0, 120.0, t, r, 0.0, q, zeroVolGreeks);
+        double expectedPutZeroVolTheta = -q * 100.0 * Math.exp(-q * t) + r * 120.0 * Math.exp(-r * t);
+        assertEquals(expectedPutZeroVolTheta, zeroVolGreeks[3], 1e-9, "Zero-vol put theta must match r K e^-rT - q S e^-qT");
+    }
+
     /** Reference high-precision Abramowitz & Stegun 26.2.17 CDF approximation. */
     private static double referenceNormalCdf(double x) {
         if (x < -8.0) return 0.0;

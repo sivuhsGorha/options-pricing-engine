@@ -12,6 +12,11 @@ public class PortfolioPosition {
     private double delta;
     private double gamma;
     private double vega;
+    private double vanna;
+    private double volga;
+    private double charm;
+    private double speed;
+    private double color;
     
     // Contract multiplier (e.g., 100 shares per option contract)
     private final int multiplier;
@@ -35,6 +40,18 @@ public class PortfolioPosition {
         this.gamma = newGamma;
         this.vega = newVega;
     }
+
+    public void updateHigherOrderGreeks(double newVanna, double newVolga, double newCharm, double newSpeed, double newColor) {
+        if (!Double.isFinite(newVanna) || !Double.isFinite(newVolga)
+                || !Double.isFinite(newCharm) || !Double.isFinite(newSpeed) || !Double.isFinite(newColor)) {
+            throw new IllegalArgumentException("Higher-order Greeks must be finite");
+        }
+        this.vanna = newVanna;
+        this.volga = newVolga;
+        this.charm = newCharm;
+        this.speed = newSpeed;
+        this.color = newColor;
+    }
     
     public void addQuantity(int executedQty) {
         this.quantity = Math.addExact(this.quantity, executedQty);
@@ -55,8 +72,44 @@ public class PortfolioPosition {
         return (double) Math.multiplyExact(quantity, multiplier) * vega;
     }
 
+    public double getDelta() {
+        return delta;
+    }
+
+    public double getGamma() {
+        return gamma;
+    }
+
+    public double getVega() {
+        return vega;
+    }
+
+    public double getVanna() {
+        return vanna;
+    }
+
+    public double getVolga() {
+        return volga;
+    }
+
+    public double getCharm() {
+        return charm;
+    }
+
+    public double getSpeed() {
+        return speed;
+    }
+
+    public double getColor() {
+        return color;
+    }
+
     public String getSymbol() {
         return symbol;
+    }
+
+    public int getMultiplier() {
+        return multiplier;
     }
 
     public int getQuantity() {

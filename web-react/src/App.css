@@ -29,6 +29,68 @@
   font-family: var(--font-mono);
 }
 
+.login-screen {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+  background-color: var(--bg-dark);
+  background-image: linear-gradient(90deg, transparent 49px, #14191f 50px, transparent 51px),
+    linear-gradient(0deg, transparent 49px, #14191f 50px, transparent 51px);
+  background-size: 50px 50px;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+}
+
+.login-form {
+  display: grid;
+  width: min(100%, 380px);
+  gap: 12px;
+  padding: 28px;
+  border: 1px solid var(--border-amber);
+  background: #080A0E;
+}
+
+.login-kicker {
+  color: var(--text-amber);
+  font-size: 12px;
+}
+
+.login-form h1 {
+  margin: 0 0 8px;
+  font-family: var(--font-ui);
+  font-size: 24px;
+}
+
+.login-form label {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.login-form input {
+  min-height: 42px;
+  padding: 8px 10px;
+  border: 1px solid var(--panel-border);
+  background: #000;
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.login-form button {
+  min-height: 42px;
+  border: 1px solid var(--text-amber);
+  background: var(--text-amber);
+  color: #080A0E;
+  font: 700 13px var(--font-mono);
+  cursor: pointer;
+}
+
+.login-error {
+  margin: 0;
+  color: var(--semantic-down);
+  font-size: 12px;
+}
+
 /* Bloomberg Command Header Bar */
 .sys-header {
   display: flex;
@@ -49,7 +111,7 @@
   border: 1px solid var(--text-amber);
   padding: 4px 12px;
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: 17px;
 }
 
 .cmd-prompt {
@@ -63,7 +125,7 @@
   border: none;
   color: var(--text-cyan);
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: 17px;
   font-weight: 600;
   width: 100%;
   outline: none;
@@ -86,7 +148,7 @@
   border: 1px solid #283342;
   color: var(--text-amber);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 700;
   padding: 3px 8px;
   cursor: pointer;
@@ -103,7 +165,7 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  font-size: 12px;
+  font-size: 16px;
   color: var(--text-muted);
   white-space: nowrap;
 }
@@ -145,7 +207,7 @@
 
 .panel-header {
   padding: 8px 12px;
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 700;
   letter-spacing: 1px;
   color: var(--text-amber);
@@ -158,7 +220,7 @@
 
 .panel-header .tag {
   color: var(--text-cyan);
-  font-size: 10px;
+  font-size: 14px;
 }
 
 .panel-content {
@@ -185,7 +247,7 @@
   padding: 6px 8px;
   color: var(--text-cyan);
   font-weight: 700;
-  font-size: 11px;
+  font-size: 15px;
   border-bottom: 1px solid #1C232D;
   background: #080A0E;
 }
@@ -193,7 +255,7 @@
 .data-table td {
   padding: 8px;
   border-bottom: 1px solid rgba(28, 35, 45, 0.6);
-  font-size: 13px;
+  font-size: 17px;
 }
 
 .align-right { text-align: right !important; }
@@ -210,14 +272,14 @@
 }
 
 .margin-label {
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 700;
   color: var(--semantic-down);
   letter-spacing: 0.5px;
 }
 
 .margin-value {
-  font-size: 28px;
+  font-size: 36px;
   font-weight: 700;
   color: #FFFFFF;
   margin-top: 4px;
@@ -228,7 +290,7 @@
   background: #000000;
   border: 1px solid #1C232D;
   padding: 8px;
-  font-size: 11px;
+  font-size: 15px;
   color: var(--text-muted);
   flex-grow: 1;
   max-height: 140px;
@@ -241,7 +303,7 @@
 /* Ticker Tape */
 .tape-table td {
   padding: 6px 8px;
-  font-size: 12px;
+  font-size: 16px;
 }
 
 .row-up td { color: var(--semantic-up); }
@@ -293,7 +355,7 @@
   border: 1px solid #283342;
   color: var(--text-cyan);
   padding: 2px 8px;
-  font-size: 10px;
+  font-size: 14px;
   font-weight: 700;
   font-family: var(--font-mono);
   cursor: pointer;
@@ -320,7 +382,7 @@
   background: #080A0E;
   border-top: 1px solid #1C232D;
   padding: 4px 16px;
-  font-size: 11px;
+  font-size: 15px;
   color: var(--text-muted);
   gap: 20px;
   overflow: hidden;

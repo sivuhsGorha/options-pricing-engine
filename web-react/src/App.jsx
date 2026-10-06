@@ -1,40 +1,33 @@
 import { useEffect, useState, useRef } from 'react';
 import './App.css';
 
-const API_BASE = "http://localhost:8080/api";
 const strikes = [490, 495, 500, 505, 510];
-const API_SECRET = "default-dev-secret";
 
-async function generateHmacSignature(method, path, timestamp) {
-    const encoder = new TextEncoder();
-    const keyData = encoder.encode(API_SECRET);
-    const msgData = encoder.encode(method + path + timestamp);
-    const cryptoKey = await crypto.subtle.importKey(
-        "raw", keyData, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
-    );
-    const signatureBuffer = await crypto.subtle.sign("HMAC", cryptoKey, msgData);
-    const signatureArray = Array.from(new Uint8Array(signatureBuffer));
-    return signatureArray.map(b => b.toString(16).padStart(2, '0')).join('');
+function canonicalApiPath(rawPath) {
+    const path = rawPath.startsWith('/') ? rawPath : `/${rawPath}`;
+    return path.startsWith('/api/') || path === '/api' ? path : `/api${path}`;
 }
 
-async function secureFetch(path) {
-    const timestamp = Date.now().toString();
-    const signature = await generateHmacSignature("GET", path, timestamp);
-    return fetch(`${API_BASE}${path}`, {
-        headers: {
-            "X-Timestamp": timestamp,
-            "X-Signature": signature
-        }
-    });
+async function secureFetch(pathWithQuery) {
+    return fetch(canonicalApiPath(pathWithQuery), { credentials: 'same-origin' });
 }
 
 function formatNumber(num) {
-    return new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(num);
+    return Number.isFinite(num)
+        ? new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(num)
+        : '--';
+}
+
+function formatCurrency(num) {
+    return Number.isFinite(num)
+        ? '$' + new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(num)
+        : '--';
 }
 
 function App() {
   const [metrics, setMetrics] = useState({ 
-    netDelta: null, netGamma: null, netVega: null, spanMargin: null,
+    netDelta: null, netGamma: null, netVega: null, scenarioMargin: null,
+    trackedNetDelta: null, trackedNetGamma: null, trackedNetVega: null, trackedNotional: null,
     recommendedHedge: null, optimizedMargin: null, marginReductionPct: null,
     l3FillProb: null, sorAllocations: null
   });
@@ -50,6 +43,74 @@ function App() {
   const chartRefTerm = useRef(null);
 
   const [spotInfo, setSpotInfo] = useState({ symbol: 'SPY', spotPrice: null, source: '', status: 'UNAVAILABLE', timestamp: 0 });
+  const [healthInfo, setHealthInfo] = useState({ symbol: 'SPY', providers: {} });
+  const [authenticated, setAuthenticated] = useState(false);
+  const [operatorPassword, setOperatorPassword] = useState('');
+  const [loginError, setLoginError] = useState('');
+
+  const marketRibbon = [
+      {
+          name: 'SPY',
+          value: spotInfo.spotPrice !== null && Number.isFinite(spotInfo.spotPrice) ? formatNumber(spotInfo.spotPrice) : '--',
+          change: spotInfo.status === 'LIVE' ? '+LIVE' : spotInfo.status === 'DELAYED' ? '+DELAYED' : 'UNAVAILABLE',
+          tone: spotInfo.status === 'LIVE' ? 'ticker-up' : spotInfo.status === 'DELAYED' ? 'ticker-up' : 'ticker-down'
+      },
+      {
+          name: 'SOURCE',
+          value: spotInfo.source || 'N/A',
+          change: spotInfo.status || 'UNAVAILABLE',
+          tone: spotInfo.status === 'LIVE' ? 'ticker-up' : spotInfo.status === 'DELAYED' ? 'ticker-up' : 'ticker-down'
+      },
+      {
+          name: 'GATEWAY',
+          value: 'LIVE',
+          change: healthInfo.providers && Object.keys(healthInfo.providers).length > 0 ? 'STATUS OK' : 'WAITING',
+          tone: 'ticker-up'
+      }
+  ];
+
+  const displayedRisk = {
+      netDelta: Number.isFinite(metrics.trackedNetDelta) ? metrics.trackedNetDelta : metrics.netDelta,
+      netGamma: Number.isFinite(metrics.trackedNetGamma) ? metrics.trackedNetGamma : metrics.netGamma,
+      netVega: Number.isFinite(metrics.trackedNetVega) ? metrics.trackedNetVega : metrics.netVega,
+      trackedNotional: Number.isFinite(metrics.trackedNotional) ? metrics.trackedNotional : null,
+  };
+
+  const handleLogin = async (event) => {
+      event.preventDefault();
+      setLoginError('');
+      const pwd = operatorPassword;
+      setOperatorPassword('');
+      try {
+          const response = await fetch('/login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+              credentials: 'same-origin',
+              body: pwd
+          });
+          if (response.ok) {
+              setAuthenticated(true);
+          } else {
+              setLoginError(response.status === 429 ? 'Too many attempts. Wait before retrying.' : 'Authentication failed.');
+          }
+      } catch (err) {
+          setLoginError('Connection error during authentication.');
+      }
+  };
+
+  const handleLogout = async () => {
+      try {
+          await fetch('/logout', {
+              method: 'POST',
+              credentials: 'same-origin'
+          });
+      } catch (err) {
+          // Ignore network errors on logout
+      }
+      setAuthenticated(false);
+      setOperatorPassword('');
+      setLoginError('');
+  };
 
   const addLog = (msg) => {
       setLogs(prev => {
@@ -66,7 +127,7 @@ function App() {
       addLog(`COMMAND: ${cleanCmd}`);
 
       if (cleanCmd.includes('HELP') || cleanCmd.includes('F1')) {
-          addLog("HELP: Shortcuts -> F1:HELP F2:TICK F3:VOLS F4:RISK F5:SPAN");
+          addLog("HELP: Shortcuts -> F1:HELP F2:TICK F3:VOLS F4:RISK F5:MARGIN");
       } else if (cleanCmd.includes('VOLS') || cleanCmd.includes('F3')) {
           setExpandedChart(null);
           addLog("VOLS: Focused Volatility Surface & Smile curves.");
@@ -79,8 +140,8 @@ function App() {
       } else if (cleanCmd.includes('FREE')) {
           setSurfaceModel('FREE_SABR');
           addLog("MODEL SWITCH: Free-Boundary SABR Density Solver.");
-      } else if (cleanCmd.includes('RISK') || cleanCmd.includes('F4') || cleanCmd.includes('F5') || cleanCmd.includes('SPAN')) {
-          addLog("RISK: Live portfolio Greeks & SPAN margin optimizer active.");
+      } else if (cleanCmd.includes('RISK') || cleanCmd.includes('F4') || cleanCmd.includes('F5') || cleanCmd.includes('MARGIN')) {
+          addLog("RISK: Live portfolio Greeks & scenario margin optimizer active.");
       } else if (cleanCmd.includes('TICK') || cleanCmd.includes('F2')) {
           addLog("TICK: High-frequency market tape & SOR routing replay.");
       } else {
@@ -95,6 +156,7 @@ function App() {
   };
 
   useEffect(() => {
+      if (!authenticated) return;
       const updateRiskMetrics = async () => {
           try {
               const response = await secureFetch(`/risk`);
@@ -126,20 +188,33 @@ function App() {
           }
       };
 
+      const fetchHealthData = async () => {
+          try {
+              const response = await secureFetch('/health');
+              const data = await response.json();
+              setHealthInfo(data);
+          } catch (error) {
+              setHealthInfo({ symbol: 'SPY', providers: {} });
+          }
+      };
+
       updateRiskMetrics();
       fetchSpotData();
       fetchSurfaceData();
+      fetchHealthData();
 
       const metricsInterval = setInterval(updateRiskMetrics, 1000);
       const spotInterval = setInterval(fetchSpotData, 2000);
       const surfaceInterval = setInterval(fetchSurfaceData, 5000);
+      const healthInterval = setInterval(fetchHealthData, 5000);
 
       return () => {
           clearInterval(metricsInterval);
           clearInterval(spotInterval);
           clearInterval(surfaceInterval);
+          clearInterval(healthInterval);
       };
-  }, [surfaceModel]);
+    }, [authenticated, surfaceModel]);
 
   useEffect(() => {
       if (!surfaceData || !chartRef3D.current || !chartRefSmile.current || !chartRefTerm.current || !window.Plotly) return;
@@ -241,11 +316,41 @@ function App() {
       // Tape and trade logic removed (AUD-17)
   }, []);
 
+  if (!authenticated) {
+      return (
+          <main className="login-screen">
+              <form className="login-form" onSubmit={handleLogin}>
+                  <div className="login-kicker">AURA-OPT / OPERATOR ACCESS</div>
+                  <h1>Sign in</h1>
+                  <label htmlFor="operator-password">Operator password</label>
+                  <input id="operator-password" type="password" autoComplete="current-password" value={operatorPassword}
+                      onChange={(event) => setOperatorPassword(event.target.value)} required />
+                  {loginError && <p className="login-error" role="alert">{loginError}</p>}
+                  <button type="submit">Open dashboard</button>
+              </form>
+          </main>
+      );
+  }
+
   return (
     <div className="app-container">
-        <div className="banner" style={{ background: '#FF3D00', color: 'white', textAlign: 'center', fontWeight: 'bold', padding: '5px' }}>
-            SIMULATED DATA - FOR DEMONSTRATION ONLY
-        </div>
+        {spotInfo.status === 'LIVE' || spotInfo.status === 'DELAYED' ? (
+            <div className="banner" style={{ background: '#0A3D2A', color: '#00E676', textAlign: 'center', fontWeight: 'bold', padding: '5px' }}>
+                LIVE MARKET DATA — {spotInfo.source}{spotInfo.status === 'DELAYED' ? ' (DELAYED/EOD)' : ''}
+            </div>
+        ) : spotInfo.status === 'STALE' ? (
+            <div className="banner" style={{ background: '#3D2A00', color: '#FF9900', textAlign: 'center', fontWeight: 'bold', padding: '5px' }}>
+                STALE MARKET DATA — last quote from {spotInfo.source || 'API'}
+            </div>
+        ) : spotInfo.status === 'UNAVAILABLE' ? (
+            <div className="banner" style={{ background: '#3D0A0A', color: '#FF3D00', textAlign: 'center', fontWeight: 'bold', padding: '5px' }}>
+                MARKET DATA FEED UNAVAILABLE — check FINNHUB_KEY / POLYGON_API_KEY / ALPHA_VANTAGE_KEY
+            </div>
+        ) : (
+            <div className="banner" style={{ background: '#FF3D00', color: 'white', textAlign: 'center', fontWeight: 'bold', padding: '5px' }}>
+                SIMULATED DATA — set a market-data API key
+            </div>
+        )}
         {/* Bloomberg Terminal Top Command Header */}
         <header className="sys-header">
             <form onSubmit={handleCmdSubmit} className="cmd-bar">
@@ -264,7 +369,8 @@ function App() {
                 <button type="button" className="fkey" onClick={() => triggerHotkey('TICK')}>F2 TICK</button>
                 <button type="button" className="fkey" onClick={() => triggerHotkey('VOLS')}>F3 VOLS</button>
                 <button type="button" className="fkey" onClick={() => triggerHotkey('RISK')}>F4 RISK</button>
-                <button type="button" className="fkey" onClick={() => triggerHotkey('SPAN')}>F5 SPAN</button>
+                <button type="button" className="fkey" onClick={() => triggerHotkey('MARGIN')}>F5 MARGIN</button>
+                <button type="button" className="fkey" onClick={handleLogout} style={{ borderColor: '#FF3D00', color: '#FF3D00' }}>SIGN OUT</button>
             </div>
 
             <div className="sys-status">
@@ -273,7 +379,8 @@ function App() {
                     [{spotInfo.source ? spotInfo.source : 'N/A'}]
                 </span>
                 <span className="status-badge" style={{
-                    color: spotInfo.status === 'SIMULATED' ? '#00E676' : spotInfo.status === 'STALE' ? '#FF9900' : '#FF3D00'
+                    color: (spotInfo.status === 'LIVE' || spotInfo.status === 'DELAYED') ? '#00E676'
+                        : spotInfo.status === 'STALE' ? '#FF9900' : '#FF3D00'
                 }}>
                     {spotInfo.status}
                 </span>
@@ -281,11 +388,30 @@ function App() {
                     {spotInfo.timestamp ? new Date(spotInfo.timestamp).toLocaleTimeString() : '--:--:--'}
                 </span>
             </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '10px', justifyContent: 'flex-end' }}>
+                {Object.entries(healthInfo.providers || {}).map(([provider, status]) => (
+                    <span
+                        key={provider}
+                        className="status-badge"
+                        style={{
+                            color: status === 'LIVE' ? '#00E676' : status === 'DELAYED' || status === 'STALE' ? '#FF9900' : '#FF3D00',
+                            borderColor: status === 'LIVE' ? '#00E676' : status === 'DELAYED' || status === 'STALE' ? '#FF9900' : '#FF3D00'
+                        }}
+                    >
+                        {provider}: {status}
+                    </span>
+                ))}
+                {Object.keys(healthInfo.providers || {}).length === 0 && (
+                    <span className="status-badge" style={{ color: '#FF3D00', borderColor: '#FF3D00' }}>
+                        FEEDS: UNAVAILABLE
+                    </span>
+                )}
+            </div>
         </header>
 
         {/* Main 4-Quadrant Terminal Grid */}
         <div className="layout-grid">
-            {/* Left Quadrant: Risk Matrix & SPAN Optimizer */}
+            {/* Left Quadrant: Risk Matrix & MARGIN Optimizer */}
             <div className="panel risk-panel">
                 <div className="panel-header">
                     <span>PORTFOLIO RISK MATRIX</span>
@@ -302,32 +428,35 @@ function App() {
                         <tbody>
                             <tr id="row-delta">
                                 <td className="val-amber">NET DELTA</td>
-                                <td className="align-right mono val-white" id="val-delta">{metrics.netDelta !== null ? formatNumber(metrics.netDelta) : '--'}</td>
+                                <td className="align-right mono val-white" id="val-delta">{Number.isFinite(displayedRisk.netDelta) ? formatNumber(displayedRisk.netDelta) : '--'}</td>
                             </tr>
                             <tr id="row-gamma">
                                 <td className="val-amber">NET GAMMA</td>
-                                <td className="align-right mono val-white" id="val-gamma">{metrics.netGamma !== null ? formatNumber(metrics.netGamma) : '--'}</td>
+                                <td className="align-right mono val-white" id="val-gamma">{Number.isFinite(displayedRisk.netGamma) ? formatNumber(displayedRisk.netGamma) : '--'}</td>
                             </tr>
                             <tr id="row-vega">
                                 <td className="val-amber">NET VEGA</td>
-                                <td className="align-right mono val-white" id="val-vega">{metrics.netVega !== null ? formatNumber(metrics.netVega) : '--'}</td>
+                                <td className="align-right mono val-white" id="val-vega">{Number.isFinite(displayedRisk.netVega) ? formatNumber(displayedRisk.netVega) : '--'}</td>
                             </tr>
                         </tbody>
                     </table>
 
                     <div className="margin-block" id="margin-block">
-                        <div className="margin-label">EUREX PRISMA / SPAN MARGIN</div>
-                        <div className="margin-value mono" id="val-margin">{metrics.spanMargin !== null ? '$' + formatNumber(metrics.spanMargin) : '--'}</div>
+                        <div className="margin-label">SCENARIO MARGIN</div>
+                        <div className="margin-value mono" id="val-margin">{Number.isFinite(metrics.scenarioMargin) ? '$' + formatNumber(metrics.scenarioMargin) : '--'}</div>
+                        <div style={{ color: '#9EC1FF', fontSize: '11px', marginTop: '6px' }}>
+                          EXECUTION BOOK NOTIONAL: <span style={{ color: '#00E5FF', fontWeight: 'bold' }}>{Number.isFinite(displayedRisk.trackedNotional) ? formatCurrency(displayedRisk.trackedNotional) : '--'}</span>
+                        </div>
                     </div>
 
-                    {/* SPAN Margin Optimization Card */}
+                    {/* Scenario Margin Optimization */}
                     <div style={{marginTop: '10px', background: '#080C10', border: '1px solid #FF9900', padding: '10px'}}>
-                        <div style={{color: '#FF9900', fontSize: '15px', fontWeight: 'bold'}}>SPAN MARGIN OPTIMIZER [F5]</div>
+                        <div style={{color: '#FF9900', fontSize: '15px', fontWeight: 'bold'}}>SCENARIO MARGIN OPTIMIZER [F5]</div>
                         <div style={{color: '#FFFFFF', fontSize: '16px', marginTop: '4px'}}>
-                          OPTIMIZED MARGIN: <span style={{color: '#00E676', fontWeight: 'bold'}}>${metrics.optimizedMargin !== null ? formatNumber(metrics.optimizedMargin) : '--'}</span>
+                          OPTIMIZED MARGIN: <span style={{color: '#00E676', fontWeight: 'bold'}}>{Number.isFinite(metrics.optimizedMargin) ? '$' + formatNumber(metrics.optimizedMargin) : '--'}</span>
                         </div>
                         <div style={{color: '#00E5FF', fontSize: '15px', marginTop: '2px'}}>
-                          REDUCTION: <span style={{fontWeight: 'bold'}}>-{metrics.marginReductionPct !== null ? metrics.marginReductionPct : '--'}%</span> | HEDGE: <span style={{color: '#FF9900'}}>{metrics.recommendedHedge !== null ? '+' + metrics.recommendedHedge : '--'} SH</span>
+                          REDUCTION: <span style={{fontWeight: 'bold'}}>{Number.isFinite(metrics.marginReductionPct) ? '-' + metrics.marginReductionPct + '%' : '--%'}</span> | HEDGE: <span style={{color: '#FF9900'}}>{Number.isFinite(metrics.recommendedHedge) ? '+' + metrics.recommendedHedge + ' SH' : '-- SH'}</span>
                         </div>
                     </div>
 
@@ -416,37 +545,15 @@ function App() {
             </div>
         </div>
 
-        {/* Bottom Terminal Index Ticker Ribbon */}
+        {/* Bottom Terminal Market Status Ribbon */}
         <footer className="sys-footer">
-            <div className="ticker-item">
-                <span className="ticker-name">FDAX</span>
-                <span className="ticker-val">18,420.50</span>
-                <span className="ticker-up">+0.45%</span>
-            </div>
-            <div className="ticker-item">
-                <span className="ticker-name">FSTX50</span>
-                <span className="ticker-val">4,980.10</span>
-                <span className="ticker-up">+0.22%</span>
-            </div>
-            <div className="ticker-item">
-                <span className="ticker-name">CAC40</span>
-                <span className="ticker-val">7,920.30</span>
-                <span className="ticker-down">-0.15%</span>
-            </div>
-            <div className="ticker-item">
-                <span className="ticker-name">SMI</span>
-                <span className="ticker-val">12,150.80</span>
-                <span className="ticker-up">+0.30%</span>
-            </div>
-            <div className="ticker-item">
-                <span className="ticker-name">FTSE100</span>
-                <span className="ticker-val">8,240.60</span>
-                <span className="ticker-up">+0.10%</span>
-            </div>
-            <div className="ticker-item" style={{marginLeft: 'auto'}}>
-                <span className="ticker-name">GATEWAY:</span>
-                <span className="ticker-val" style={{color: '#00E676'}}>SOLARFLARE EF_VI ONLOAD</span>
-            </div>
+            {marketRibbon.map((item) => (
+                <div key={item.name} className="ticker-item">
+                    <span className="ticker-name">{item.name}</span>
+                    <span className="ticker-val">{item.value}</span>
+                    <span className={item.tone}>{item.change}</span>
+                </div>
+            ))}
         </footer>
     </div>
   );

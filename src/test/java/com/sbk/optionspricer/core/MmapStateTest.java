@@ -39,7 +39,7 @@ public class MmapStateTest {
         assertEquals(1.5, state.netDelta);
         assertEquals(2.5, state.netGamma);
         assertEquals(3.5, state.netVega);
-        assertEquals(4.5, state.spanMargin);
+        assertEquals(4.5, state.scenarioMargin);
 
         // Check if secure
         File f = new File(TEST_FILE);

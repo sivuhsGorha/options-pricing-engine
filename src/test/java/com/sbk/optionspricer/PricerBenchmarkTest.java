@@ -41,11 +41,11 @@ public class PricerBenchmarkTest {
         for (int i = 0; i < batch1024.length; i++) {
             outScalar[i] = BlackScholesPricer.price(OptionType.CALL, 100.0, batch1024[i], 1.0, 0.05, 0.20, 0.0);
         }
-        double[] outVector = VectorBlackScholesPricer.priceBatchSimdSingleThread(100.0, batch1024, 1.0, 0.05, 0.20, true);
+        double[] outVector = VectorBlackScholesPricer.priceBatchParallelSingleThread(100.0, batch1024, 1.0, 0.05, 0.20, true);
         
         for (int i = 0; i < 1024; i++) {
             if (Math.abs(outScalar[i] - outVector[i]) > 1e-9) {
-                throw new AssertionError("Vector results do not match scalar results!");
+                throw new AssertionError("Parallel results do not match scalar results!");
             }
         }
 
@@ -109,10 +109,10 @@ public class PricerBenchmarkTest {
         bh.consume(outPrices);
     }
 
-    // 1 op = 1024 options priced via VectorBlackScholesPricer (SIMD vector prototype)
+    // 1 op = 1024 options priced via VectorBlackScholesPricer (Parallel prototype)
     @Benchmark
-    public void benchmarkBlackScholesBatch1024SimdPrototype(Blackhole bh) {
-        double[] outPrices = VectorBlackScholesPricer.priceBatchSimdSingleThread(100.0, batch1024, 1.0, 0.05, 0.20, true);
+    public void benchmarkBlackScholesBatch1024ParallelPrototype(Blackhole bh) {
+        double[] outPrices = VectorBlackScholesPricer.priceBatchParallelSingleThread(100.0, batch1024, 1.0, 0.05, 0.20, true);
         bh.consume(outPrices);
     }
 
