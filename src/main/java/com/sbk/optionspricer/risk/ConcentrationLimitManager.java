@@ -40,8 +40,12 @@ public class ConcentrationLimitManager {
         if (!Double.isFinite(exposure)) {
             throw new IllegalArgumentException("exposure must be finite");
         }
-        double current = exposuresByUnderlying.getOrDefault(underlying, 0.0);
-        exposuresByUnderlying.put(underlying, current + Math.max(0.0, exposure));
+        // Signed: buys add notional, sells subtract it, so exposure can shrink and go net short.
+        exposuresByUnderlying.merge(underlying, exposure, Double::sum);
+    }
+
+    public boolean hasLimit(String underlying) {
+        return underlying != null && limitsByUnderlying.containsKey(underlying);
     }
 
     public boolean isWithinLimit(String underlying, double exposure) {

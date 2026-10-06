@@ -13,6 +13,9 @@ public class PortfolioRiskAdmission {
     private final double maxVega;
     private final double maxPositionAbs;
 
+    /** Multiplier for a symbol with no position yet; matches the multiplier OrderManager books fills with. */
+    static final int DEFAULT_MULTIPLIER = 1;
+
     public PortfolioRiskAdmission(double maxNotional, double maxDelta, double maxGamma, double maxVega, double maxPositionAbs) {
         if (maxNotional <= 0.0 || maxDelta <= 0.0 || maxGamma <= 0.0 || maxVega <= 0.0 || maxPositionAbs <= 0.0) {
             throw new IllegalArgumentException("all limits must be positive");
@@ -40,7 +43,8 @@ public class PortfolioRiskAdmission {
 
         PortfolioPosition existing = tracker.getPosition(symbol);
         int proposedNet = (existing == null ? 0 : existing.getQuantity()) + quantity;
-        double notional = Math.abs((double) proposedNet * 100.0 * price);
+        int multiplier = existing == null ? DEFAULT_MULTIPLIER : existing.getMultiplier();
+        double notional = Math.abs((double) proposedNet * multiplier * price);
 
         if (notional > maxNotional) {
             return false;
@@ -51,7 +55,6 @@ public class PortfolioRiskAdmission {
 
         // Post-trade Greek exposure of the whole book. A new symbol is linear underlying exposure
         // (delta 1, no gamma/vega), matching PositionTracker.
-        int multiplier = existing == null ? 100 : existing.getMultiplier();
         double unitDelta = existing == null ? 1.0 : existing.getDelta();
         double unitGamma = existing == null ? 0.0 : existing.getGamma();
         double unitVega = existing == null ? 0.0 : existing.getVega();

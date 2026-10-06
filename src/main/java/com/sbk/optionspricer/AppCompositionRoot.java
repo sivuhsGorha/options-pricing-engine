@@ -46,7 +46,11 @@ public class AppCompositionRoot {
         this.positionTracker = new PositionTracker();
         this.spotProvider = new LiveSpotProvider();
         this.marketAdapter = new LiveMarketSnapshotAdapter(spotProvider);
-        this.preTradeFilter = new PreTradeRiskFilter((int) maxPositionAbs, maxNotional, 100);
+        double maxConcentration = config.getDouble("risk.max_concentration", maxNotional);
+        this.preTradeFilter = new PreTradeRiskFilter((int) maxPositionAbs, maxNotional, 100, java.util.Map.of(),
+                new com.sbk.optionspricer.risk.ConcentrationLimitManager(
+                        java.util.Map.of(symbol.trim().toUpperCase(java.util.Locale.ROOT), maxConcentration)),
+                null);
         this.riskAdmission = new PortfolioRiskAdmission(maxNotional, maxDelta, maxGamma, maxVega, maxPositionAbs);
         this.executionTransport = new PaperTradingExecutionAdapter(positionTracker, slippageBps);
         boolean allowSimulated = Boolean.parseBoolean(
@@ -56,7 +60,7 @@ public class AppCompositionRoot {
                 : OrderManager.MarketDataPolicy.strict();
         com.sbk.optionspricer.execution.TradingHalt tradingHalt = new com.sbk.optionspricer.execution.TradingHalt();
         tradingHalt.haltOnCriticalAlerts(engine.getGreekAlertManager());
-        this.orderManager = new OrderManager(preTradeFilter, executionTransport, positionTracker, dataPolicy, tradingHalt);
+        this.orderManager = new OrderManager(preTradeFilter, executionTransport, positionTracker, dataPolicy, tradingHalt, riskAdmission);
         this.strategyLoop = new StrategyExecutionLoop(symbol, orderManager, riskAdmission, positionTracker, baseQuantity, triggerPct, marketAdapter);
         
         this.harness = new QuantSimulationHarness(engine, spotProvider, positionTracker, orderManager, riskAdmission, strategyLoop);

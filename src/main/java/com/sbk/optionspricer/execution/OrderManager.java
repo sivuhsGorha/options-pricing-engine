@@ -52,6 +52,7 @@ public class OrderManager {
     private final ExchangeTransport transport;
     private final MarketDataPolicy marketDataPolicy;
     private final TradingHalt tradingHalt;
+    private final PortfolioRiskAdmission portfolioAdmission;
     private final PositionTracker positionTracker;
     private final AtomicLong sequence = new AtomicLong(1L);
     private final Map<Long, Order> openOrders = new LinkedHashMap<>();
@@ -69,6 +70,13 @@ public class OrderManager {
 
     public OrderManager(PreTradeRiskFilter riskFilter, ExchangeTransport transport, PositionTracker positionTracker,
                         MarketDataPolicy marketDataPolicy, TradingHalt tradingHalt) {
+        this(riskFilter, transport, positionTracker, marketDataPolicy, tradingHalt, null);
+    }
+
+    /** {@code portfolioAdmission} may be null to skip the portfolio Greek/notional admission check. */
+    public OrderManager(PreTradeRiskFilter riskFilter, ExchangeTransport transport, PositionTracker positionTracker,
+                        MarketDataPolicy marketDataPolicy, TradingHalt tradingHalt, PortfolioRiskAdmission portfolioAdmission) {
+        this.portfolioAdmission = portfolioAdmission;
         if (marketDataPolicy == null) {
             throw new IllegalArgumentException("marketDataPolicy must not be null");
         }
@@ -114,6 +122,14 @@ public class OrderManager {
             return new OrderDecision(false, OrderStatus.REJECTED, reason, orderId);
         }
 
+        if (portfolioAdmission != null && positionTracker != null) {
+            int signedRequest = order.isBuy() ? order.quantity() : -order.quantity();
+            if (!portfolioAdmission.canAdmitOrder(snapshot.symbol(), signedRequest, order.price(), positionTracker)) {
+                recordAudit(orderId, false, mds, "failed portfolio risk admission", 0.0, 0);
+                return new OrderDecision(false, OrderStatus.REJECTED, "order failed portfolio risk admission", orderId);
+            }
+        }
+
         if (!riskFilter.checkRisk(order, snapshot.symbol(), snapshot.bid(), snapshot.ask(), snapshot.volume())) {
             recordAudit(orderId, false, mds, "failed pre-trade risk validation", 0.0, 0);
             return new OrderDecision(false, OrderStatus.REJECTED, "order failed pre-trade risk validation", orderId);
@@ -129,6 +145,8 @@ public class OrderManager {
             int signedQuantity = order.isBuy() ? result.filledQuantity() : -result.filledQuantity();
             positionTracker.applyFill(new PositionTracker.ExecutionFill(result.symbol(), signedQuantity, 1, result.executionPrice()));
         }
+        double filledNotional = (double) result.filledQuantity() * result.executionPrice();
+        riskFilter.recordFill(result.symbol(), order.isBuy() ? filledNotional : -filledNotional);
 
         recordAudit(orderId, true, mds, "EXECUTED", result.executionPrice(), result.filledQuantity());
         openOrders.put(orderId, order);

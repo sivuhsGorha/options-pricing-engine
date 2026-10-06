@@ -80,6 +80,42 @@ class OrderManagerTest {
         assertEquals(1, transmitted.get());
     }
 
+    private static com.sbk.optionspricer.market.MarketSnapshot liveSpy() {
+        return snapshot(com.sbk.optionspricer.market.MarketDataStatus.LIVE, 0L);
+    }
+
+    @Test
+    void fillsFeedConcentrationLimitsSoRepeatedBuysEventuallyBreach() {
+        PreTradeRiskFilter filter = new PreTradeRiskFilter(1000, 10_000_000.0, 100, Map.of(1, "SPY"),
+                new ConcentrationLimitManager(Map.of("SPY", 2_500.0)), null);
+        OrderManager manager = new OrderManager(filter,
+                (order, sym, bid, ask) -> new ExecutionResult(sym, order.quantity(), order.price(), true, "Executed"),
+                new PositionTracker());
+
+        assertTrue(manager.submit(new Order(1, true, 10, 100.0), liveSpy()).accepted());   // 1000
+        assertTrue(manager.submit(new Order(1, true, 10, 100.0), liveSpy()).accepted());   // 2000
+        assertFalse(manager.submit(new Order(1, true, 10, 100.0), liveSpy()).accepted(),   // 3000 > 2500
+                "executed fills must accumulate toward the concentration limit");
+        assertTrue(manager.submit(new Order(1, false, 10, 100.0), liveSpy()).accepted(),   // back to 1000
+                "a sell reduces exposure and must still be allowed");
+    }
+
+    @Test
+    void portfolioAdmissionIsEnforcedByTheOrderManagerItself() {
+        PositionTracker tracker = new PositionTracker();
+        PortfolioRiskAdmission admission = new PortfolioRiskAdmission(100_000_000.0, 10.0, 1_000_000.0, 1_000_000.0, 1_000_000.0);
+        OrderManager manager = new OrderManager(new PreTradeRiskFilter(1000, 10_000_000.0, 100),
+                (order, sym, bid, ask) -> new ExecutionResult(sym, order.quantity(), order.price(), true, "Executed"),
+                tracker, OrderManager.MarketDataPolicy.strict(), new TradingHalt(), admission);
+
+        // A new SPY position is linear underlying exposure with multiplier 1: 5 shares = 5 delta <= 10.
+        assertTrue(manager.submit(new Order(1, true, 5, 100.0), liveSpy()).accepted());
+        // 5 more would take post-trade delta to 10 (allowed); 6 more takes it to 11 (> 10).
+        OrderManager.OrderDecision breach = manager.submit(new Order(1, true, 6, 100.0), liveSpy());
+        assertFalse(breach.accepted());
+        assertTrue(breach.message().contains("portfolio"), breach.message());
+    }
+
     @Test
     void rejectsInvalidOrderBeforeRouting() {
         PreTradeRiskFilter filter = new PreTradeRiskFilter(100, 100000.0, 100);

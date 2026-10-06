@@ -44,6 +44,13 @@ public class PreTradeRiskFilter {
         this.ordersInCurrentSecond = 0;
     }
 
+    /** Records an executed fill (signed notional: buys positive, sells negative) toward concentration exposure. */
+    public void recordFill(String underlying, double signedNotional) {
+        if (concentrationLimitManager != null && underlying != null && concentrationLimitManager.hasLimit(underlying)) {
+            concentrationLimitManager.addExposure(underlying, signedNotional);
+        }
+    }
+
     /**
      * Checks if the order is safe to send to the exchange.
      * @return true if safe, false if blocked
@@ -86,8 +93,16 @@ public class PreTradeRiskFilter {
                 configuredUnderlying = instrumentToUnderlying.get(order.instrumentId());
             }
             if (configuredUnderlying != null && !configuredUnderlying.isBlank()) {
-                double projectedExposure = concentrationLimitManager.getExposure(configuredUnderlying) + notional;
-                if (projectedExposure > concentrationLimitManager.getLimit(configuredUnderlying)) {
+                if (!concentrationLimitManager.hasLimit(configuredUnderlying)) {
+                    System.err.printf(java.util.Locale.ROOT, "[RISK BLOCK] No concentration limit configured for %s%n", configuredUnderlying);
+                    return false;
+                }
+                double signedNotional = order.isBuy() ? notional : -notional;
+                double currentExposure = concentrationLimitManager.getExposure(configuredUnderlying);
+                double projectedExposure = Math.abs(currentExposure + signedNotional);
+                // Orders that reduce an existing exposure are never blocked by the concentration limit.
+                if (projectedExposure > concentrationLimitManager.getLimit(configuredUnderlying)
+                        && projectedExposure > Math.abs(currentExposure)) {
                     System.err.printf(java.util.Locale.ROOT, "[RISK BLOCK] Concentration limit exceeded for %s: projected=%.2f limit=%.2f%n",
                             configuredUnderlying, projectedExposure, concentrationLimitManager.getLimit(configuredUnderlying));
                     return false;
