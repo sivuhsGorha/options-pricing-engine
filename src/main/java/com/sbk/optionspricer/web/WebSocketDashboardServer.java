@@ -1,42 +1,60 @@
 package com.sbk.optionspricer.web;
 
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.net.ServerSocket;
-import java.net.Socket;
-import java.net.InetAddress;
+import org.eclipse.jetty.server.Response;
+import org.eclipse.jetty.server.Server;
+import org.eclipse.jetty.server.ServerConnector;
+import org.eclipse.jetty.server.handler.ContextHandler;
+import org.eclipse.jetty.util.Callback;
+import org.eclipse.jetty.util.thread.QueuedThreadPool;
+import org.eclipse.jetty.websocket.api.Session;
+import org.eclipse.jetty.websocket.server.ServerUpgradeRequest;
+import org.eclipse.jetty.websocket.server.ServerUpgradeResponse;
+import org.eclipse.jetty.websocket.server.WebSocketUpgradeHandler;
+
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.security.MessageDigest;
-import java.util.Base64;
+import java.time.Duration;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Zero-Allocation Binary WebSocket Server for ultra-low-latency market & risk telemetry.
- * Conforms to RFC 6455. Streams binary state updates (4 x 64-bit IEEE 754 doubles)
- * directly from memory-mapped files without JSON serialization garbage.
+ * Binary WebSocket feed of risk telemetry: each frame is four big-endian 64-bit doubles
+ * (net delta, gamma, vega, scenario margin) read from the memory-mapped state at 20 Hz.
+ *
+ * <p>Built on Jetty's WebSocket implementation. Handshake authentication, origin checks and
+ * connection limits run before the upgrade completes; each client has at most one frame in flight,
+ * so a slow client drops frames instead of delaying the others; and browser sessions are
+ * re-validated on every tick, so logging out or session expiry ends the stream.
  */
 public class WebSocketDashboardServer implements Runnable {
 
-    private static final String WS_MAGIC_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+    public static final int DEFAULT_MAX_CONNECTIONS_PER_IP = 5;
+    private static final int MAX_CLIENTS = 100;
+    private static final long BROADCAST_INTERVAL_MS = 50; // 20 Hz
+    private static final int CLOSE_POLICY_VIOLATION = 1008;
+
+    private final String bindAddress;
     private final int port;
     private final MmapStateReader mmapReader;
     private final String apiSecret;
     private final BrowserSessionManager sessions;
-    private final CopyOnWriteArrayList<Socket> activeClients = new CopyOnWriteArrayList<>();
-    private volatile boolean running = true;
-    private static final int MAX_CLIENTS = 100;
-    private final ExecutorService clientExecutor = Executors.newCachedThreadPool();
-    private final Semaphore clientSlots = new Semaphore(MAX_CLIENTS);
-    private volatile int boundPort;
-    private volatile ServerSocket listeningSocket;
-    private long lastConnectLogTime = 0;
+    private final Set<String> trustedProxies;
+    private final int maxConnectionsPerIp = Integer.parseInt(
+            System.getProperty("WS_MAX_CONNECTIONS_PER_IP", String.valueOf(DEFAULT_MAX_CONNECTIONS_PER_IP)));
 
-    private final String bindAddress;
+    private final CopyOnWriteArrayList<FeedClient> clients = new CopyOnWriteArrayList<>();
+    private final Semaphore clientSlots = new Semaphore(MAX_CLIENTS);
+    private final ConcurrentHashMap<String, AtomicInteger> connectionsByIp = new ConcurrentHashMap<>();
+
+    private volatile boolean running = true;
+    private volatile int boundPort;
+    private volatile Server jetty;
+    private long lastConnectLogTime = 0;
 
     public WebSocketDashboardServer(String bindAddress, int port, MmapStateReader mmapReader, String apiSecret,
                                     BrowserSessionManager sessions) {
@@ -46,6 +64,8 @@ public class WebSocketDashboardServer implements Runnable {
         this.mmapReader = mmapReader;
         this.apiSecret = apiSecret;
         this.sessions = sessions;
+        this.trustedProxies = ClientAddressResolver.parseTrustedProxies(
+                com.sbk.optionspricer.config.EnvironmentConfigLoader.getOrDefault("TRUSTED_PROXIES", ""));
     }
 
     public WebSocketDashboardServer(int port, MmapStateReader mmapReader, String apiSecret,
@@ -57,232 +77,195 @@ public class WebSocketDashboardServer implements Runnable {
         return boundPort;
     }
 
+    /** Starts the server, then runs the broadcast loop on the calling thread until {@link #stop()}. */
     @Override
     public void run() {
-        try (ServerSocket serverSocket = new ServerSocket()) {
-            listeningSocket = serverSocket;
-            serverSocket.bind(new InetSocketAddress(InetAddress.getByName(bindAddress), port));
-            boundPort = serverSocket.getLocalPort();
+        Server server = new Server(new QueuedThreadPool(32, 4));
+        try {
+            ServerConnector connector = new ServerConnector(server);
+            connector.setHost(bindAddress);
+            connector.setPort(port);
+            connector.setIdleTimeout(5_000); // bounds a stalled or trickling handshake
+            server.addConnector(connector);
+
+            ContextHandler context = new ContextHandler("/");
+            context.setHandler(WebSocketUpgradeHandler.from(server, context, container -> {
+                container.setIdleTimeout(Duration.ofSeconds(60));
+                container.setMaxBinaryMessageSize(1024);
+                container.setMaxTextMessageSize(1024);
+                container.addMapping("/*", this::createEndpoint);
+            }));
+            server.setHandler(context);
+            server.start();
+            jetty = server;
+            boundPort = connector.getLocalPort();
             System.out.println("WebSocket Live Feed Server listening on ws://" + bindAddress + ":" + boundPort);
 
-            // Background broadcaster thread
-            Thread broadcastThread = new Thread(this::broadcastLoop, "ws-broadcaster");
-            broadcastThread.setDaemon(true);
-            broadcastThread.start();
-
-            while (running) {
-                Socket clientSocket = serverSocket.accept();
-                try {
-                    clientSocket.setSoTimeout(5000); // Handshake timeout
-                    clientExecutor.submit(() -> handleClient(clientSocket));
-                } catch (Exception e) {
-                    try { clientSocket.close(); } catch (Exception ignored) {}
-                }
-            }
+            broadcastLoop();
         } catch (Exception e) {
             System.err.println("WebSocket Server stopped: " + e.getMessage());
         } finally {
-            listeningSocket = null;
-            clientExecutor.shutdownNow();
-        }
-    }
-
-    public static final int DEFAULT_MAX_CONNECTIONS_PER_IP = 5;
-    private final int maxConnectionsPerIp = Integer.parseInt(
-            System.getProperty("WS_MAX_CONNECTIONS_PER_IP", String.valueOf(DEFAULT_MAX_CONNECTIONS_PER_IP)));
-    private final java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicInteger> ipConnections = new java.util.concurrent.ConcurrentHashMap<>();
-
-    private void handleClient(Socket socket) {
-        boolean hasClientSlot = false;
-        java.util.concurrent.atomic.AtomicInteger ipCounter = null;
-        try {
-            InputStream in = socket.getInputStream();
-            OutputStream out = socket.getOutputStream();
-
-            String clientIp = socket.getInetAddress() != null ? socket.getInetAddress().getHostAddress() : "unknown";
-            boolean isLoopback = "127.0.0.1".equals(clientIp) || "0:0:0:0:0:0:0:1".equals(clientIp);
-            int allowedForIp = isLoopback ? MAX_CLIENTS : maxConnectionsPerIp;
-            ipCounter = ipConnections.computeIfAbsent(clientIp, k -> new java.util.concurrent.atomic.AtomicInteger(0));
-            if (ipCounter.incrementAndGet() > allowedForIp) {
-                out.write("HTTP/1.1 429 Too Many Requests\r\n\r\n".getBytes());
-                socket.close();
-                return;
-            }
-
-            byte[] buffer = new byte[2048];
-            int read = in.read(buffer);
-            if (read <= 0) return;
-
-            String request = new String(buffer, 0, read);
-            
-            String origin = extractHeaderSafe(request, "Origin:");
-            if (origin != null && !sessions.isAllowedOrigin(origin)) {
-                out.write("HTTP/1.1 403 Forbidden\r\n\r\n".getBytes());
-                socket.close();
-                return;
-            }
-
-            boolean authorized;
-            if (origin != null) {
-                authorized = sessions.isValidSessionCookie(extractHeaderSafe(request, "Cookie:"));
-            } else {
-                String path = extractPath(request);
-                String uriPath = path;
-                String query = null;
-                if (path != null && path.contains("?")) {
-                    int qIndex = path.indexOf('?');
-                    uriPath = path.substring(0, qIndex);
-                    query = path.substring(qIndex + 1);
-                }
-                authorized = HmacAuth.verify(apiSecret, extractHeaderSafe(request, "X-Signature:"),
-                        "GET", uriPath, query, extractHeaderSafe(request, "X-Timestamp:"),
-                        extractHeaderSafe(request, "X-Nonce:"));
-            }
-            if (!authorized) {
-                out.write("HTTP/1.1 401 Unauthorized\r\n\r\n".getBytes());
-                socket.close();
-                return;
-            }
-
-            hasClientSlot = clientSlots.tryAcquire();
-            if (!hasClientSlot) {
-                out.write("HTTP/1.1 429 Too Many Requests\r\n\r\n".getBytes());
-                socket.close();
-                return;
-            }
-
-            if (request.contains("Sec-WebSocket-Key")) {
-                String key = extractHeader(request, "Sec-WebSocket-Key:");
-                String acceptKey = generateAcceptKey(key);
-
-                String response = "HTTP/1.1 101 Switching Protocols\r\n" +
-                        "Upgrade: websocket\r\n" +
-                        "Connection: Upgrade\r\n" +
-                        "Sec-WebSocket-Accept: " + acceptKey + "\r\n\r\n";
-
-                out.write(response.getBytes());
-                out.flush();
-
-                activeClients.add(socket);
-                long now = System.currentTimeMillis();
-                if (now - lastConnectLogTime > 1000) {
-                    System.out.println("New WebSocket Client connected: " + socket.getRemoteSocketAddress() + " (Total: " + activeClients.size() + ")");
-                    lastConnectLogTime = now;
-                }
-                
-                // Read loop to detect client disconnect, close frames, and enforce idle timeout
-                socket.setSoTimeout(60000); // 60s idle timeout
-                byte[] discardBuffer = new byte[1024];
-                while (running && !socket.isClosed()) {
-                    int r = in.read(discardBuffer);
-                    if (r == -1) break; // Client closed connection
-                    if (r >= 2 && (discardBuffer[0] & 0x0F) == 0x08) {
-                        // Received Close Frame (Opcode 0x8); send Close response and break
-                        try {
-                            out.write(new byte[]{(byte) 0x88, 0x00});
-                            out.flush();
-                        } catch (Exception ignored) {}
-                        break;
-                    }
-                }
-            }
-        } catch (Exception e) {
-            // Idle timeout or error
-        } finally {
-            activeClients.remove(socket);
-            if (hasClientSlot) clientSlots.release();
-            if (ipCounter != null) ipCounter.decrementAndGet();
-            try { socket.close(); } catch (Exception ignored) {}
-        }
-    }
-
-    private void broadcastLoop() {
-        ByteBuffer frameBuffer = ByteBuffer.allocate(34); // 2 bytes header + 32 bytes data (4 doubles)
-        frameBuffer.order(ByteOrder.BIG_ENDIAN);
-
-        while (running) {
+            jetty = null;
             try {
-                Thread.sleep(50); // 20 Hz update rate
-
-                if (activeClients.isEmpty()) continue;
-
-                // Build Binary WebSocket Frame (Opcode 0x2 - Binary)
-                frameBuffer.clear();
-                frameBuffer.put((byte) 0x82); // FIN + Binary frame
-                frameBuffer.put((byte) 32);   // Payload length = 32 bytes (4 * 8-byte doubles)
-
-                // Write 4 off-heap doubles directly
-                try {
-                    MmapStateReader.RiskState state = mmapReader.readState();
-                    frameBuffer.putDouble(state.netDelta);
-                    frameBuffer.putDouble(state.netGamma);
-                    frameBuffer.putDouble(state.netVega);
-                    frameBuffer.putDouble(state.scenarioMargin);
-                } catch (IllegalStateException e) {
-                    // State unavailable, skip broadcast for this tick
-                    continue;
-                }
-
-                byte[] rawFrame = frameBuffer.array();
-
-                for (Socket socket : activeClients) {
-                    try {
-                        OutputStream out = socket.getOutputStream();
-                        out.write(rawFrame);
-                        out.flush();
-                    } catch (Exception e) {
-                        activeClients.remove(socket);
-                        try { socket.close(); } catch (Exception ignored) {}
-                    }
-                }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
-            } catch (Exception e) {
-                // Ignore transient write errors
+                server.stop();
+            } catch (Exception ignored) {
+                // already stopped
             }
         }
     }
 
-    private String extractHeaderSafe(String request, String headerName) {
-        if (request == null || headerName == null) return null;
-        int index = 0;
-        while ((index = request.indexOf(headerName, index)) != -1) {
-            if (index == 0 || request.charAt(index - 1) == '\n') {
-                int start = index + headerName.length();
-                int end = request.indexOf("\r\n", start);
-                if (end == -1) end = request.indexOf("\n", start);
-                if (end == -1) end = request.length();
-                return request.substring(start, end).trim();
-            }
-            index += headerName.length();
+    /** Runs before the upgrade: returns the endpoint, or writes an HTTP error and returns null. */
+    private Object createEndpoint(ServerUpgradeRequest request, ServerUpgradeResponse response, Callback callback) {
+        String origin = request.getHeaders().get("Origin");
+        if (origin != null && !sessions.isAllowedOrigin(origin)) {
+            return reject(request, response, callback, 403);
         }
+
+        String cookie = null;
+        boolean authorized;
+        if (origin != null) {
+            cookie = request.getHeaders().get("Cookie");
+            authorized = sessions.isValidSessionCookie(cookie);
+        } else {
+            authorized = HmacAuth.verify(apiSecret, request.getHeaders().get("X-Signature"),
+                    "GET", request.getHttpURI().getPath(), request.getHttpURI().getQuery(),
+                    request.getHeaders().get("X-Timestamp"), request.getHeaders().get("X-Nonce"));
+        }
+        if (!authorized) {
+            return reject(request, response, callback, 401);
+        }
+
+        String clientIp = resolveClientIp(request);
+        boolean loopback = "127.0.0.1".equals(clientIp) || "0:0:0:0:0:0:0:1".equals(clientIp) || "::1".equals(clientIp);
+        AtomicInteger perIp = connectionsByIp.computeIfAbsent(clientIp, k -> new AtomicInteger());
+        if (perIp.incrementAndGet() > (loopback ? MAX_CLIENTS : maxConnectionsPerIp)) {
+            releaseIp(clientIp);
+            return reject(request, response, callback, 429);
+        }
+        if (!clientSlots.tryAcquire()) {
+            releaseIp(clientIp);
+            return reject(request, response, callback, 429);
+        }
+        return new FeedClient(clientIp, origin != null ? cookie : null);
+    }
+
+    private static Object reject(ServerUpgradeRequest request, ServerUpgradeResponse response, Callback callback, int status) {
+        Response.writeError(request, response, callback, status);
         return null;
     }
 
-    private String extractPath(String request) {
-        if (request.startsWith("GET ")) {
-            int end = request.indexOf(" HTTP/");
-            if (end != -1) return request.substring(4, end).trim();
+    private String resolveClientIp(ServerUpgradeRequest request) {
+        InetSocketAddress remote = request.getConnectionMetaData().getRemoteSocketAddress() instanceof InetSocketAddress a ? a : null;
+        return ClientAddressResolver.resolve(remote, request.getHeaders().get("X-Forwarded-For"), trustedProxies);
+    }
+
+    private void releaseIp(String clientIp) {
+        connectionsByIp.computeIfPresent(clientIp, (ip, count) -> count.decrementAndGet() <= 0 ? null : count);
+    }
+
+    private void broadcastLoop() {
+        while (running) {
+            try {
+                Thread.sleep(BROADCAST_INTERVAL_MS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+            if (clients.isEmpty()) continue;
+
+            byte[] frame;
+            try {
+                MmapStateReader.RiskState state = mmapReader.readState();
+                frame = ByteBuffer.allocate(32).order(ByteOrder.BIG_ENDIAN)
+                        .putDouble(state.netDelta).putDouble(state.netGamma)
+                        .putDouble(state.netVega).putDouble(state.scenarioMargin).array();
+            } catch (IllegalStateException e) {
+                continue; // state unavailable: skip this tick
+            } catch (RuntimeException e) {
+                continue;
+            }
+
+            for (FeedClient client : clients) {
+                client.push(frame);
+            }
         }
-        return "/";
-    }
-
-    private String extractHeader(String request, String headerName) {
-        return extractHeaderSafe(request, headerName);
-    }
-
-    private String generateAcceptKey(String key) throws Exception {
-        MessageDigest md = MessageDigest.getInstance("SHA-1");
-        byte[] hash = md.digest((key + WS_MAGIC_GUID).getBytes("UTF-8"));
-        return Base64.getEncoder().encodeToString(hash);
     }
 
     public void stop() {
-        this.running = false;
-        ServerSocket socket = listeningSocket;
-        if (socket != null) {
-            try { socket.close(); } catch (Exception ignored) {}
+        running = false;
+        Server server = jetty;
+        if (server != null) {
+            try {
+                server.stop();
+            } catch (Exception ignored) {
+                // best effort; run() also stops the server on exit
+            }
+        }
+    }
+
+    /** One connected client. At most one frame is in flight; frames for a slow client are dropped. */
+    public final class FeedClient implements Session.Listener.AutoDemanding {
+        private final String clientIp;
+        private final String sessionCookie; // null for HMAC (non-browser) clients
+        private final AtomicBoolean sending = new AtomicBoolean(false);
+        private final AtomicBoolean released = new AtomicBoolean(false);
+        private volatile Session session;
+
+        FeedClient(String clientIp, String sessionCookie) {
+            this.clientIp = clientIp;
+            this.sessionCookie = sessionCookie;
+        }
+
+        @Override
+        public void onWebSocketOpen(Session session) {
+            this.session = session;
+            clients.add(this);
+            long now = System.currentTimeMillis();
+            if (now - lastConnectLogTime > 1000) {
+                System.out.println("New WebSocket Client connected: " + session.getRemoteSocketAddress() + " (Total: " + clients.size() + ")");
+                lastConnectLogTime = now;
+            }
+        }
+
+        @Override
+        public void onWebSocketClose(int statusCode, String reason) {
+            release();
+        }
+
+        @Override
+        public void onWebSocketError(Throwable cause) {
+            release();
+        }
+
+        void push(byte[] frame) {
+            Session s = session;
+            if (s == null) return;
+            if (!s.isOpen()) {
+                release();
+                return;
+            }
+            if (sessionCookie != null && !sessions.isSessionActive(sessionCookie)) {
+                s.close(CLOSE_POLICY_VIOLATION, "session ended", org.eclipse.jetty.websocket.api.Callback.NOOP);
+                release();
+                return;
+            }
+            if (!sending.compareAndSet(false, true)) {
+                return; // previous frame still in flight: this client is slow, drop rather than queue
+            }
+            s.sendBinary(ByteBuffer.wrap(frame), org.eclipse.jetty.websocket.api.Callback.from(
+                    () -> sending.set(false),
+                    failure -> {
+                        sending.set(false);
+                        release();
+                    }));
+        }
+
+        private void release() {
+            if (released.compareAndSet(false, true)) {
+                clients.remove(this);
+                clientSlots.release();
+                releaseIp(clientIp);
+            }
         }
     }
 }

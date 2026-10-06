@@ -152,6 +152,14 @@ public final class BrowserSessionManager {
         return true;
     }
 
+    /** True while the session cookie maps to a live session. Unlike {@link #isValidSessionCookie} it does not refresh idle time. */
+    public boolean isSessionActive(String cookieHeader) {
+        String token = getSessionToken(cookieHeader);
+        if (token == null) return false;
+        SessionRecord record = sessions.get(token);
+        return record != null && !isExpired(record, clock.getAsLong());
+    }
+
     public boolean logout(String cookieHeader) {
         String token = getSessionToken(cookieHeader);
         if (token == null) return false;

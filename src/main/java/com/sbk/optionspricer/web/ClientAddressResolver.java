@@ -15,6 +15,15 @@ public final class ClientAddressResolver {
     private ClientAddressResolver() {
     }
 
+    /** Parses a comma-separated list of proxy IPs (blank entries ignored). */
+    public static Set<String> parseTrustedProxies(String csv) {
+        if (csv == null) return Set.of();
+        return java.util.Arrays.stream(csv.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+    }
+
     public static String resolve(InetSocketAddress remote, String xForwardedFor, Set<String> trustedProxies) {
         if (remote == null || remote.getAddress() == null) {
             return "unknown";

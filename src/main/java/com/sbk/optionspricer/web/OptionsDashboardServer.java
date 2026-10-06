@@ -46,7 +46,7 @@ public class OptionsDashboardServer {
         }
         this.apiSecret = apiSecret;
         this.sessions = new BrowserSessionManager(operatorPassword, allowedOrigins);
-        this.trustedProxies = parseTrustedProxies(
+        this.trustedProxies = ClientAddressResolver.parseTrustedProxies(
                 com.sbk.optionspricer.config.EnvironmentConfigLoader.getOrDefault("TRUSTED_PROXIES", ""));
         this.mmapReader = mmapReader;
         this.orderManager = orderManager;
@@ -338,13 +338,6 @@ public class OptionsDashboardServer {
                 netDelta, netGamma, netVega, scenarioMargin, hedgeQty,
                 sanitizeRiskValue(trackedExposure.netDelta(), 0.0), sanitizeRiskValue(trackedExposure.netGamma(), 0.0),
                 sanitizeRiskValue(trackedExposure.netVega(), 0.0), sanitizeRiskValue(trackedExposure.netNotional(), 0.0));
-    }
-
-    private static java.util.Set<String> parseTrustedProxies(String csv) {
-        return java.util.Arrays.stream(csv.split(","))
-                .map(String::trim)
-                .filter(s -> !s.isEmpty())
-                .collect(java.util.stream.Collectors.toUnmodifiableSet());
     }
 
     private boolean authorizeApi(HttpExchange exchange) throws IOException {
