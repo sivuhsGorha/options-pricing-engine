@@ -68,9 +68,9 @@ public class OptionsDashboardServer {
     }
 
     public static String requireEnvironmentVariable(String name) {
-        String value = System.getenv(name);
+        String value = com.sbk.optionspricer.config.EnvironmentConfigLoader.get(name);
         if (value == null || value.isBlank()) {
-            throw new IllegalStateException("FATAL: " + name + " environment variable is missing or empty.");
+            throw new IllegalStateException("FATAL: " + name + " is missing or empty (set it in the environment or .env).");
         }
         return value;
     }

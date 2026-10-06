@@ -10,3 +10,14 @@ run*.txt
 *.diff
 gitleaks.json
 audit/
+
+# Secrets and local runtime state - never commit
+.env
+cookie.txt
+config.yaml
+data/
+*.dat
+.venv/
+web/assets/
+web/index.html
+node_modules/

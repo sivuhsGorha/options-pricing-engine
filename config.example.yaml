@@ -1,0 +1,15 @@
+market_data:
+  sources: [yahoo_finance, td_ameritrade]
+  refresh_interval_seconds: 900
+  live_data_enabled: true
+volatility:
+  ssvi_enabled: true
+  sabr_enabled: true
+  default_volatility: 0.2
+risk:
+  delta_limit: 5000000.0
+  gamma_limit: 250000.0
+  vega_limit: 100000.0
+dashboard:
+  port: 8082
+  update_rate_hz: 20

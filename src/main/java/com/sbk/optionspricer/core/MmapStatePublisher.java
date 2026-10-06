@@ -27,8 +27,7 @@ public class MmapStatePublisher {
     private String getFilePath() {
         String raw = System.getProperty("MMAP_STATE_FILE") != null ? 
             System.getProperty("MMAP_STATE_FILE") : 
-            System.getenv("MMAP_STATE_FILE") != null ? 
-            System.getenv("MMAP_STATE_FILE") : "data/shm_state.dat";
+            com.sbk.optionspricer.config.EnvironmentConfigLoader.getOrDefault("MMAP_STATE_FILE", "data/shm_state.dat");
         return MmapSecurityUtils.validateMmapPath(raw).toString();
     }
 

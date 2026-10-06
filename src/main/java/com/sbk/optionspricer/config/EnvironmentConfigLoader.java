@@ -22,6 +22,11 @@ public final class EnvironmentConfigLoader {
         return get(key, DEFAULT_ENV_PATH);
     }
 
+    public static String getOrDefault(String key, String defaultValue) {
+        String value = get(key);
+        return value == null ? defaultValue : value;
+    }
+
     public static String get(String key, Path envFile) {
         if (key == null || key.isBlank()) {
             return null;

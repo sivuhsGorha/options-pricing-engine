@@ -27,7 +27,7 @@ jobs:
       - name: Docker Container Readiness Test
         run: |
           docker build -t options-engine .
-          docker run -d -p 8080:8080 -e API_SECRET=ci-only-dummy-secret-0123456789abcdef -e BIND_ADDRESS=0.0.0.0 --name options-app options-engine
+          docker run -d -p 8080:8080 -e API_SECRET=ci-only-dummy-secret-0123456789abcdef -e OPERATOR_PASSWORD=ci-only-operator-pass -e BIND_ADDRESS=0.0.0.0 --name options-app options-engine
           sleep 10
           docker logs options-app | tail -n 50
           code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/api/health)

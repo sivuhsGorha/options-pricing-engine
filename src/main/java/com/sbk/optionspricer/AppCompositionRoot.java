@@ -54,14 +54,15 @@ public class AppCompositionRoot {
         
         this.harness = new QuantSimulationHarness(engine, spotProvider, positionTracker, orderManager, riskAdmission, strategyLoop);
 
-        String apiSecret = System.getenv("API_SECRET");
-        if (apiSecret == null || apiSecret.isBlank()) apiSecret = "default-secret-for-local-dev";
-        String operatorPassword = System.getenv("OPERATOR_PASSWORD");
-        if (operatorPassword == null || operatorPassword.isBlank()) operatorPassword = "admin";
-        String bindAddress = System.getenv().getOrDefault("BIND_ADDRESS", "127.0.0.1");
-        String portEnv = System.getProperty("PORT", System.getenv("PORT"));
+        String apiSecret = OptionsDashboardServer.requireEnvironmentVariable("API_SECRET");
+        String operatorPassword = OptionsDashboardServer.requireEnvironmentVariable("OPERATOR_PASSWORD");
+        if (operatorPassword.length() < 12) {
+            throw new IllegalStateException("FATAL: OPERATOR_PASSWORD must be at least 12 characters long.");
+        }
+        String bindAddress = com.sbk.optionspricer.config.EnvironmentConfigLoader.getOrDefault("BIND_ADDRESS", "127.0.0.1");
+        String portEnv = System.getProperty("PORT", com.sbk.optionspricer.config.EnvironmentConfigLoader.get("PORT"));
         int port = portEnv == null ? 8080 : Integer.parseInt(portEnv);
-        String allowedOrigins = System.getenv().getOrDefault("ALLOWED_ORIGIN", "http://127.0.0.1:" + port + ",http://localhost:" + port);
+        String allowedOrigins = com.sbk.optionspricer.config.EnvironmentConfigLoader.getOrDefault("ALLOWED_ORIGIN", "http://127.0.0.1:" + port + ",http://localhost:" + port);
         
         MmapStateReader mmapReader = new MmapStateReader();
         this.dashboard = new OptionsDashboardServer(apiSecret, operatorPassword, allowedOrigins, bindAddress, port, port + 1, mmapReader, "web", orderManager, positionTracker, marketAdapter);
