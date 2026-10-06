@@ -35,11 +35,11 @@ public class AppCompositionRoot {
         
         String symbol = config.getString("execution.symbol", "SPY");
         double slippageBps = config.getDouble("execution.slippage_bps", 25.0);
-        double maxNotional = config.getDouble("risk.max_notional", 1000000.0);
-        double maxDelta = config.getDouble("risk.max_delta", 5000.0);
-        double maxGamma = config.getDouble("risk.max_gamma", 1000.0);
-        double maxVega = config.getDouble("risk.max_vega", 10000.0);
-        double maxPositionAbs = config.getDouble("risk.max_position", 10000.0);
+        double maxNotional = config.getDouble("risk.max_notional", ConfigManager.DEFAULT_MAX_NOTIONAL);
+        double maxDelta = config.getDouble("risk.max_delta", ConfigManager.DEFAULT_MAX_DELTA);
+        double maxGamma = config.getDouble("risk.max_gamma", ConfigManager.DEFAULT_MAX_GAMMA);
+        double maxVega = config.getDouble("risk.max_vega", ConfigManager.DEFAULT_MAX_VEGA);
+        double maxPositionAbs = config.getDouble("risk.max_position", ConfigManager.DEFAULT_MAX_POSITION);
         double baseQuantity = config.getDouble("strategy.base_quantity", 10.0);
         double triggerPct = config.getDouble("strategy.trigger_pct", 0.001);
 

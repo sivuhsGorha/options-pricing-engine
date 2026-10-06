@@ -43,18 +43,24 @@ public final class ConfigValidator {
         }
 
         Map<String, Object> risk = config.getSection("risk");
-        if (!risk.isEmpty()) {
-            double deltaLimit = config.getDouble("risk.delta_limit", 1.0);
-            double gammaLimit = config.getDouble("risk.gamma_limit", 1.0);
-            double vegaLimit = config.getDouble("risk.vega_limit", 1.0);
-            if (deltaLimit <= 0.0 || !Double.isFinite(deltaLimit)) {
-                errors.add("risk.delta_limit must be a finite positive number");
+        String[][] legacyKeys = {{"delta_limit", "max_delta"}, {"gamma_limit", "max_gamma"}, {"vega_limit", "max_vega"}};
+        for (String[] legacy : legacyKeys) {
+            if (risk.containsKey(legacy[0])) {
+                errors.add("risk." + legacy[0] + " is no longer used; rename it to risk." + legacy[1]
+                        + " (the value is not converted, so review it)");
             }
-            if (gammaLimit <= 0.0 || !Double.isFinite(gammaLimit)) {
-                errors.add("risk.gamma_limit must be a finite positive number");
+        }
+        for (String key : new String[]{"max_notional", "max_delta", "max_gamma", "max_vega", "max_position", "max_concentration"}) {
+            if (!risk.containsKey(key)) {
+                continue;
             }
-            if (vegaLimit <= 0.0 || !Double.isFinite(vegaLimit)) {
-                errors.add("risk.vega_limit must be a finite positive number");
+            try {
+                double limit = config.getDouble("risk." + key, Double.NaN);
+                if (!Double.isFinite(limit) || limit <= 0.0) {
+                    errors.add("risk." + key + " must be a finite positive number");
+                }
+            } catch (NumberFormatException e) {
+                errors.add("risk." + key + " must be a number");
             }
         }
         return errors;

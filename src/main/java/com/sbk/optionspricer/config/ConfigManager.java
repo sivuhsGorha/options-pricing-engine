@@ -22,6 +22,21 @@ import java.util.Objects;
 public final class ConfigManager {
     public static final String DEFAULT_CONFIG_PATH = "config.yaml";
 
+    // Default risk limits: the single source of truth for both the generated config and the
+    // application's fallbacks.
+    public static final double DEFAULT_MAX_NOTIONAL = 1_000_000.0;
+    public static final double DEFAULT_MAX_DELTA = 5_000.0;
+    public static final double DEFAULT_MAX_GAMMA = 1_000.0;
+    public static final double DEFAULT_MAX_VEGA = 10_000.0;
+    public static final double DEFAULT_MAX_POSITION = 10_000.0;
+
+    /** Sections that environment variables, .env entries and system properties may override. */
+    private static final String[] OVERRIDE_SECTIONS = {
+            "market_data", "volatility", "risk", "dashboard", "infrastructure", "routing", "margin", "execution", "strategy"};
+    /** Keys that look like credentials are never read into config, whatever section they appear under. */
+    private static final java.util.regex.Pattern SECRET_NAME =
+            java.util.regex.Pattern.compile("secret|password|passwd|token|api_?key|credential");
+
     private final Path configPath;
     private final Map<String, Object> root;
 
@@ -123,9 +138,11 @@ public final class ConfigManager {
         volatility.put("default_volatility", 0.2);
 
         Map<String, Object> risk = new LinkedHashMap<>();
-        risk.put("delta_limit", 5_000_000.0);
-        risk.put("gamma_limit", 250_000.0);
-        risk.put("vega_limit", 100_000.0);
+        risk.put("max_notional", DEFAULT_MAX_NOTIONAL);
+        risk.put("max_delta", DEFAULT_MAX_DELTA);
+        risk.put("max_gamma", DEFAULT_MAX_GAMMA);
+        risk.put("max_vega", DEFAULT_MAX_VEGA);
+        risk.put("max_position", DEFAULT_MAX_POSITION);
 
         Map<String, Object> dashboard = new LinkedHashMap<>();
         dashboard.put("port", 8082);
@@ -159,22 +176,32 @@ public final class ConfigManager {
         }
     }
 
+    /**
+     * Applies an override only to a known section, and never for credential-looking names, so
+     * unrelated environment variables and secrets cannot end up in the config map.
+     */
     private static void applyOverride(Map<String, Object> root, String normalizedKey, Object value) {
-        if (normalizedKey == null || normalizedKey.isBlank() || normalizedKey.equals("_")) return;
-        String[] sectionNames = {"market_data", "volatility", "risk", "dashboard", "infrastructure", "routing", "margin"};
-        for (String sectionName : sectionNames) {
+        if (normalizedKey == null || normalizedKey.isBlank()) return;
+        for (String sectionName : OVERRIDE_SECTIONS) {
             if (normalizedKey.startsWith(sectionName + "_")) {
                 String remainder = normalizedKey.substring(sectionName.length() + 1);
-                Object sectionValue = root.get(sectionName);
-                if (sectionValue instanceof Map<?, ?> nestedMap) {
+                if (remainder.isEmpty() || SECRET_NAME.matcher(remainder).find()) {
+                    return;
+                }
+                Object section = root.get(sectionName);
+                if (section == null) {
+                    section = new LinkedHashMap<String, Object>();
+                    root.put(sectionName, section);
+                }
+                if (section instanceof Map<?, ?> nestedMap) {
                     @SuppressWarnings("unchecked")
                     Map<String, Object> target = (Map<String, Object>) nestedMap;
                     target.put(remainder, value);
-                    return;
                 }
+                return;
             }
         }
-        setNested(root, normalizedKey, value);
+        // Not in an overridable section: ignore.
     }
 
     private static Object get(Map<String, Object> map, String key) {
@@ -190,30 +217,6 @@ public final class ConfigManager {
             if (current == null) return null;
         }
         return current;
-    }
-
-    private static void setNested(Map<String, Object> root, String flattenedKey, Object value) {
-        if (flattenedKey == null || flattenedKey.isBlank() || flattenedKey.equals("_")) return;
-        String[] parts = flattenedKey.split("_");
-        if (parts.length == 0) return;
-        Map<String, Object> current = root;
-        for (int i = 0; i < parts.length - 1; i++) {
-            String part = parts[i];
-            if (part == null || part.isBlank()) continue;
-            Object child = current.get(part);
-            if (!(child instanceof Map<?, ?> nextMap)) {
-                Map<String, Object> newMap = new LinkedHashMap<>();
-                current.put(part, newMap);
-                child = newMap;
-            }
-            @SuppressWarnings("unchecked")
-            Map<String, Object> cast = (Map<String, Object>) child;
-            current = cast;
-        }
-        String lastPart = parts[parts.length - 1];
-        if (lastPart != null && !lastPart.isBlank()) {
-            current.put(lastPart, value);
-        }
     }
 
     private static Object coerceScalar(String raw) {
