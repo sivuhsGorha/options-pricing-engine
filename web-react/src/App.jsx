@@ -517,10 +517,10 @@ function App() {
             <div className="panel tape-panel">
                 <div className="panel-header">
                     <span>LIVE TAPE &amp; SOR ROUTER</span>
-                    <span className="tag" style={{color: '#00E676'}}>L3 FILL {metrics.l3FillProb}%</span>
+                    <span className="tag" style={{color: '#00E676'}}>L3 FILL {Number.isFinite(metrics.l3FillProb) ? metrics.l3FillProb + '%' : 'N/A'}</span>
                 </div>
                 <div style={{background: '#080A0E', borderBottom: '1px solid #1C232D', padding: '6px 8px', fontSize: '14px', color: '#00E5FF'}}>
-                  SOR: {metrics.sorAllocations !== null ? metrics.sorAllocations : 'EUREX / OPTIQ / SOLA'}
+                  SOR: {metrics.sorAllocations != null ? metrics.sorAllocations : 'N/A (no venue connectivity)'}
                 </div>
                 <div className="panel-content no-padding">
                     <table className="data-table tape-table">

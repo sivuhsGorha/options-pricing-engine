@@ -94,23 +94,20 @@ public class QuantSimulationHarness {
     private void tick() {
         try {
             double spot = currentSpot;
-            double deltaChange = 0.0;
 
             if (spotProvider.hasMarketDataKeys()) {
                 LiveSpotProvider.Quote quote = spotProvider.getQuote("SPY");
                 if (quote != null && !Double.isNaN(quote.last())
                         && com.sbk.optionspricer.market.MarketDataStatus.UNAVAILABLE != quote.status()) {
                     spot = quote.last();
-                    deltaChange = (Math.random() - 0.5) * 100.0;
                 }
             } else {
                 spot = 100.0;
-                deltaChange = 0.0;
             }
             
             currentSpot = spot;
 
-            engine.processTick(spot, deltaChange);
+            engine.processTick(spot);
             if (strategyLoop != null) {
                 runStrategyStep(spot);
             }

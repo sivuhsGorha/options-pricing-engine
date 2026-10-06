@@ -22,10 +22,12 @@ public class MarginApproximation {
      * @return The required cash collateral (Initial Margin)
      */
     public static double calculateInitialMargin(GreekAggregator aggregator, double underlyingSpot) {
-        double netDelta = aggregator.calculateNetDelta();
-        double netGamma = aggregator.calculateNetGamma();
-        double netVega = aggregator.calculateNetVega();
-        
+        return calculateInitialMargin(aggregator.calculateNetDelta(), aggregator.calculateNetGamma(),
+                aggregator.calculateNetVega(), underlyingSpot);
+    }
+
+    /** Same stress test from net Greeks directly (delta in shares, gamma per $, vega per 1.0 vol). */
+    public static double calculateInitialMargin(double netDelta, double netGamma, double netVega, double underlyingSpot) {
         double maxLoss = 0.0;
         
         // Define the 4 extreme corners of the Margin stress matrix

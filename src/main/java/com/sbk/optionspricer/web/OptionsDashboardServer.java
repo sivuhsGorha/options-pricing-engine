@@ -171,29 +171,10 @@ public class OptionsDashboardServer {
             exchange.getResponseHeaders().set("Content-Type", "application/json");
             try {
                 MmapStateReader.RiskState state = mmapReader.readState();
-                double netDelta = sanitizeRiskValue(state.netDelta, 0.0);
-                double netGamma = sanitizeRiskValue(state.netGamma, 0.0);
-                double netVega = sanitizeRiskValue(state.netVega, 0.0);
-                double scenarioMargin = sanitizeRiskValue(state.scenarioMargin, 0.0);
                 PositionTracker.PortfolioExposure trackedExposure = positionTracker == null
                         ? new PositionTracker.PortfolioExposure(0.0, 0.0, 0.0, 0.0)
                         : positionTracker.snapshotExposure();
-                double trackedNetDelta = sanitizeRiskValue(trackedExposure.netDelta(), 0.0);
-                double trackedNetGamma = sanitizeRiskValue(trackedExposure.netGamma(), 0.0);
-                double trackedNetVega = sanitizeRiskValue(trackedExposure.netVega(), 0.0);
-                double trackedNotional = sanitizeRiskValue(trackedExposure.netNotional(), 0.0);
-                int hedgeQty = (int) Math.round(-netDelta);
-                double optMargin = scenarioMargin > 0.0 ? Math.max(12500.0, scenarioMargin * 0.086) : 0.0;
-                double reductionPct = scenarioMargin > 0.0 ? ((scenarioMargin - optMargin) / scenarioMargin) * 100.0 : 0.0;
-                String json = String.format(java.util.Locale.US,
-                        "{\"netDelta\":%.2f,\"netGamma\":%.2f,\"netVega\":%.2f," +
-                                "\"scenarioMargin\":%.2f,\"recommendedHedge\":%d," +
-                                "\"optimizedMargin\":%.2f,\"marginReductionPct\":%.1f," +
-                                "\"trackedNetDelta\":%.2f,\"trackedNetGamma\":%.2f,\"trackedNetVega\":%.2f," +
-                                "\"trackedNotional\":%.2f,\"l3FillProb\":75.0,\"sorAllocations\":\"EUREX: 50%% | OPTIQ: 30%% | SOLA: 20%%\"}",
-                        netDelta, netGamma, netVega, scenarioMargin, hedgeQty, optMargin, reductionPct,
-                        trackedNetDelta, trackedNetGamma, trackedNetVega, trackedNotional);
-                System.out.println("Serving risk state: " + json);
+                String json = riskJson(state, trackedExposure);
                 send(exchange, 200, json);
             } catch (IllegalStateException e) {
                 System.out.println("Serving ZERO risk state due to IllegalStateException");
@@ -331,6 +312,27 @@ public class OptionsDashboardServer {
         String cookieHeader = BrowserSessionManager.COOKIE_NAME + "=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict" + (secure ? "; Secure" : "");
         exchange.getResponseHeaders().set("Set-Cookie", cookieHeader);
         send(exchange, 200, "{\"authenticated\":false}");
+    }
+
+    /**
+     * Builds the /api/risk body. Values the platform does not compute (optimizer margin, L3 fill
+     * probability, router allocation) are null rather than invented numbers.
+     */
+    public static String riskJson(MmapStateReader.RiskState state, PositionTracker.PortfolioExposure trackedExposure) {
+        double netDelta = sanitizeRiskValue(state.netDelta, 0.0);
+        double netGamma = sanitizeRiskValue(state.netGamma, 0.0);
+        double netVega = sanitizeRiskValue(state.netVega, 0.0);
+        double scenarioMargin = sanitizeRiskValue(state.scenarioMargin, 0.0);
+        int hedgeQty = (int) Math.round(-netDelta);
+        return String.format(java.util.Locale.US,
+                "{\"netDelta\":%.2f,\"netGamma\":%.2f,\"netVega\":%.2f," +
+                        "\"scenarioMargin\":%.2f,\"recommendedHedge\":%d," +
+                        "\"optimizedMargin\":null,\"marginReductionPct\":null," +
+                        "\"trackedNetDelta\":%.2f,\"trackedNetGamma\":%.2f,\"trackedNetVega\":%.2f," +
+                        "\"trackedNotional\":%.2f,\"l3FillProb\":null,\"sorAllocations\":null}",
+                netDelta, netGamma, netVega, scenarioMargin, hedgeQty,
+                sanitizeRiskValue(trackedExposure.netDelta(), 0.0), sanitizeRiskValue(trackedExposure.netGamma(), 0.0),
+                sanitizeRiskValue(trackedExposure.netVega(), 0.0), sanitizeRiskValue(trackedExposure.netNotional(), 0.0));
     }
 
     private boolean authorizeApi(HttpExchange exchange) throws IOException {

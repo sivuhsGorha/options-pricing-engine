@@ -87,7 +87,7 @@ public class UnifiedQuantEngineTest {
                 }
             };
             UnifiedQuantEngine engine = new UnifiedQuantEngine(throwingPublisher);
-            engine.processTick(100.0, 1.0);
+            engine.processTick(100.0);
         }
     }
 }

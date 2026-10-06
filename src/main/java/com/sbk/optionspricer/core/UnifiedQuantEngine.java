@@ -16,7 +16,6 @@ import com.sbk.optionspricer.data.OptionSnapshot;
 import com.sbk.optionspricer.gateways.QueuePositionEstimator;
 import com.sbk.optionspricer.gateways.SmartOrderRouter;
 import com.sbk.optionspricer.models.pde.ParallelPdeBatchSolver;
-import com.sbk.optionspricer.risk.MarginOptimizer;
 import com.sbk.optionspricer.risk.PortfolioBacktestOrchestrator;
 import com.sbk.optionspricer.volatility.SabrFreeBoundaryModel;
 import com.sbk.optionspricer.volatility.SsviApproximation;
@@ -41,12 +40,31 @@ public final class UnifiedQuantEngine {
     private final HistoricalDataManager historicalDataManager;
 
     private double currentSpot = 100.0;
-    private double netDelta = -62500.0;
-    private double netGamma = -3500.0;
-    private double netVega = -400000.0;
-    private double scenarioMargin = 14611250.0;
+    // Risk comes from the exposure source (the real position tracker); an empty book is flat.
+    private double netDelta = 0.0;
+    private double netGamma = 0.0;
+    private double netVega = 0.0;
+    private double scenarioMargin = 0.0;
+    private volatile java.util.function.Supplier<com.sbk.optionspricer.execution.PositionTracker.PortfolioExposure> exposureSource =
+            () -> new com.sbk.optionspricer.execution.PositionTracker.PortfolioExposure(0.0, 0.0, 0.0, 0.0);
     private final com.sbk.optionspricer.risk.GreekAlertManager greekAlertManager =
             new com.sbk.optionspricer.risk.GreekAlertManager(50000, 100000, 5000, 10000, 300000, 600000);
+
+    /** Supplies the portfolio exposure the engine publishes and monitors (normally {@code PositionTracker::snapshotExposure}). */
+    public void setExposureSource(java.util.function.Supplier<com.sbk.optionspricer.execution.PositionTracker.PortfolioExposure> source) {
+        if (source == null) {
+            throw new IllegalArgumentException("exposure source must not be null");
+        }
+        this.exposureSource = source;
+    }
+
+    private void refreshRisk(double spot) {
+        com.sbk.optionspricer.execution.PositionTracker.PortfolioExposure exposure = exposureSource.get();
+        netDelta = exposure.netDelta();
+        netGamma = exposure.netGamma();
+        netVega = exposure.netVega();
+        scenarioMargin = com.sbk.optionspricer.risk.MarginApproximation.calculateInitialMargin(netDelta, netGamma, netVega, spot);
+    }
 
     public com.sbk.optionspricer.risk.GreekAlertManager getGreekAlertManager() {
         return greekAlertManager;
@@ -121,6 +139,7 @@ public final class UnifiedQuantEngine {
         System.out.println("=========================================================================");
         System.out.println("        STARTING UNIFIED QUANTITATIVE OPTIONS EXECUTION ENGINE           ");
         System.out.println("=========================================================================");
+        refreshRisk(currentSpot);
         publisher.publishRiskState(netDelta, netGamma, netVega, scenarioMargin);
         OptionChain liveChain = getCurrentOptionChain("SPY");
         System.out.println("[LIVE MARKET DATA] SPY spot=" + liveChain.spot() + " | strikes=" + liveChain.quotes().size());
@@ -159,18 +178,18 @@ public final class UnifiedQuantEngine {
     /**
      * Continuous quantitative tick processing cycle, driven by an external environment.
      */
-    public void processTick(double spot, double deltaChange) {
-        processTick(spot, deltaChange, spot - 0.05, spot + 0.05, 500, 500);
+    public void processTick(double spot) {
+        processTick(spot, spot - 0.05, spot + 0.05, 500, 500);
     }
 
     /**
      * Continuous quantitative tick processing cycle with full market data parameters.
      */
-    public void processTick(double spot, double deltaChange, double bidPrice, double askPrice, int bidSize, int askSize) {
+    public void processTick(double spot, double bidPrice, double askPrice, int bidSize, int askSize) {
         if (engineState == EngineState.STOPPED_FATAL) return;
         try (Arena confined = Arena.ofConfined()) {
             currentSpot = spot;
-            netDelta += deltaChange;
+            refreshRisk(spot);
             
             // 1. Off-Heap FFM Ingestion
             MemorySegment tickSegment = MemorySegmentStructs.allocateTick(confined);
@@ -186,23 +205,6 @@ public final class UnifiedQuantEngine {
             double[] strikes = new double[]{90.0, 95.0, 100.0, 105.0, 110.0};
             double[] prices = VectorBlackScholesPricer.priceBatchParallel(currentSpot, strikes, 0.5, 0.05, ssviVol, true);
             ParallelPdeBatchSolver.priceBatchPdeVectorized(true, currentSpot, strikes, 0.5, 0.05, sabrVol, prices);
-
-            // 4. Portfolio Greeks Simulation & Scenario Margin Optimization
-            MarginOptimizer.OptimizationResult optResult = MarginOptimizer.optimizeMargin(
-                netDelta, netGamma, currentSpot, scenarioMargin
-            );
-            scenarioMargin = optResult.optimizedMargin;
-
-            // 5. Microstructure L3 Queue & SOR Execution
-            if (Math.abs(netDelta) > 50000.0) {
-                QueuePositionEstimator.QueueState qState = QueuePositionEstimator.estimateQueuePosition(10, 1200, 250.0, 50.0, 2.0);
-                if (qState.fillProbability > 0.5) {
-                    double[] weights = { 0.5, 0.3, 0.2 };
-                    List<SmartOrderRouter.SubOrder> sorOrders = SmartOrderRouter.routeOrder(optResult.recommendedHedgeShares, weights);
-                    // Rebalance delta toward target limit
-                    netDelta += optResult.recommendedHedgeShares * 0.10;
-                }
-            }
 
             // 6. Real-time Risk Monitoring & Alerts
             com.sbk.optionspricer.risk.GreekRiskMonitor.PortfolioRisk currentRisk = new com.sbk.optionspricer.risk.GreekRiskMonitor.PortfolioRisk(netDelta, netGamma, netVega, 0.0, 0.0, 0.0, 0.0, 0.0);

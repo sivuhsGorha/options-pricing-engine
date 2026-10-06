@@ -44,6 +44,7 @@ public class AppCompositionRoot {
         double triggerPct = config.getDouble("strategy.trigger_pct", 0.001);
 
         this.positionTracker = new PositionTracker();
+        engine.setExposureSource(positionTracker::snapshotExposure);
         this.spotProvider = new LiveSpotProvider();
         this.marketAdapter = new LiveMarketSnapshotAdapter(spotProvider);
         double maxConcentration = config.getDouble("risk.max_concentration", maxNotional);
