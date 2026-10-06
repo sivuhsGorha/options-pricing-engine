@@ -37,6 +37,9 @@ public class AmericanPutTest {
         double bin500 = binomialAmericanPut(S, K, T, r, sigma, 500);
         double bin1000 = binomialAmericanPut(S, K, T, r, sigma, 1000);
         double bin2000 = binomialAmericanPut(S, K, T, r, sigma, 2000);
+        // A CRR tree converges as 1/N, so even 2000 steps is off by ~4e-4. Richardson extrapolation removes the
+        // leading error term and is the reference the PDE should be judged against.
+        double reference = 2.0 * bin2000 - bin1000;
         
         System.out.println("Binomial 500 steps: " + bin500);
         System.out.println("Binomial 1000 steps: " + bin1000);
@@ -53,9 +56,9 @@ public class AmericanPutTest {
         System.out.println("PDE 1000 steps: " + pde1000);
         System.out.println("PDE 2000 steps: " + pde2000);
         
-        double error500 = Math.abs(pde500 - bin2000);
-        double error1000 = Math.abs(pde1000 - bin2000);
-        double error2000 = Math.abs(pde2000 - bin2000);
+        double error500 = Math.abs(pde500 - reference);
+        double error1000 = Math.abs(pde1000 - reference);
+        double error2000 = Math.abs(pde2000 - reference);
         
         System.out.println("PDE Error at 500 steps vs bin2000: " + error500);
         System.out.println("PDE Error at 1000 steps vs bin2000: " + error1000);
@@ -63,9 +66,9 @@ public class AmericanPutTest {
         
         assertTrue(error2000 < error1000, "PDE error should decrease as steps increase");
         
-        double tolerance = 0.01;
+        double tolerance = 2e-4;
         System.out.println("Tolerance: " + tolerance);
-        assertEquals(bin2000, pde2000, tolerance, "PDE should match 2000-step binomial");
+        assertEquals(reference, pde2000, tolerance, "PDE should match the extrapolated binomial reference");
         
         OptionParameters eurParams = new OptionParameters(S, K, T, r, sigma, 0.0);
         double europeanPrice = BlackScholesPricer.price(OptionType.PUT, eurParams);
