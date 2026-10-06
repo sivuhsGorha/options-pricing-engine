@@ -149,11 +149,13 @@
                                     <limits>
                                         <!-- Recalibrated 0.55 -> 0.50 on 2026-10-06: removing dead (but covered) engine tick code
                                              dropped a clean-checkout build to 55.8%, too close to the line for CI platform variance.
-                                             Ratchet from here: raise as tests are added, never lower again. -->
+                                             Ratchet from here: raise as tests are added, never lower again.
+                                             Raised 0.50 -> 0.60 on 2026-10-06 (measured 66%, keeping ~6 points of headroom
+                                             for CI platform variance). -->
                                         <limit>
                                             <counter>INSTRUCTION</counter>
                                             <value>COVEREDRATIO</value>
-                                            <minimum>0.50</minimum>
+                                            <minimum>0.60</minimum>
                                         </limit>
                                     </limits>
                                 </rule>
