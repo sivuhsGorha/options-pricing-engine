@@ -22,6 +22,34 @@ class PositionTrackerTest {
     }
 
     @Test
+    void positionDeltaIsLinearInQuantityAndKeepsItsSign() {
+        PositionTracker longTracker = new PositionTracker();
+        longTracker.applyFill(new PositionTracker.ExecutionFill("SPY", 10, 100, 100.0));
+        assertEquals(1_000.0, longTracker.getNetDelta(), 1e-9, "long 10 x 100 shares = +1000 delta");
+
+        longTracker.applyFill(new PositionTracker.ExecutionFill("SPY", 10, 100, 100.0));
+        assertEquals(2_000.0, longTracker.getNetDelta(), 1e-9, "delta must scale linearly, not quadratically");
+
+        PositionTracker shortTracker = new PositionTracker();
+        shortTracker.applyFill(new PositionTracker.ExecutionFill("SPY", -10, 100, 100.0));
+        assertEquals(-1_000.0, shortTracker.getNetDelta(), 1e-9, "short 10 x 100 shares = -1000 delta");
+    }
+
+    @Test
+    void fillsDoNotOverwritePricerSuppliedGreeks() {
+        PositionTracker tracker = new PositionTracker();
+        tracker.applyFill(new PositionTracker.ExecutionFill("SPY", 10, 100, 100.0));
+        tracker.getPosition("SPY").updateGreeks(0.5, 0.04, 20.0);
+
+        tracker.applyFill(new PositionTracker.ExecutionFill("SPY", 10, 100, 100.0));
+
+        assertEquals(0.5, tracker.getPosition("SPY").getDelta(), 1e-12);
+        assertEquals(0.04, tracker.getPosition("SPY").getGamma(), 1e-12);
+        assertEquals(20.0, tracker.getPosition("SPY").getVega(), 1e-12);
+        assertEquals(20 * 100 * 0.5, tracker.getNetDelta(), 1e-9);
+    }
+
+    @Test
     void rejectsInvalidFillData() {
         PositionTracker tracker = new PositionTracker();
         assertThrows(IllegalArgumentException.class, () -> tracker.applyFill(new PositionTracker.ExecutionFill("SPY", 0, 100, 101.0)));

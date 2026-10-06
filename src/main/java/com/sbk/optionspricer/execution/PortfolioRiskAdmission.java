@@ -49,16 +49,34 @@ public class PortfolioRiskAdmission {
             return false;
         }
 
-        if (existing != null) {
-            double deltaImpact = Math.abs(existing.getDelta() * quantity);
-            double gammaImpact = Math.abs(existing.getGamma() * quantity);
-            double vegaImpact = Math.abs(existing.getVega() * quantity);
+        // Post-trade Greek exposure of the whole book. A new symbol is linear underlying exposure
+        // (delta 1, no gamma/vega), matching PositionTracker.
+        int multiplier = existing == null ? 100 : existing.getMultiplier();
+        double unitDelta = existing == null ? 1.0 : existing.getDelta();
+        double unitGamma = existing == null ? 0.0 : existing.getGamma();
+        double unitVega = existing == null ? 0.0 : existing.getVega();
+        double scale = (double) proposedNet * multiplier;
 
-            if (deltaImpact > maxDelta || gammaImpact > maxGamma || vegaImpact > maxVega) {
-                return false;
-            }
-        }
+        double currentPositionDelta = existing == null ? 0.0 : existing.getPositionDelta();
+        double currentPositionGamma = existing == null ? 0.0 : existing.getPositionGamma();
+        double currentPositionVega = existing == null ? 0.0 : existing.getPositionVega();
 
-        return true;
+        double currentDelta = tracker.getNetDelta();
+        double currentGamma = tracker.getNetGamma();
+        double currentVega = tracker.getNetVega();
+
+        double projectedDelta = currentDelta - currentPositionDelta + scale * unitDelta;
+        double projectedGamma = currentGamma - currentPositionGamma + scale * unitGamma;
+        double projectedVega = currentVega - currentPositionVega + scale * unitVega;
+
+        return !breaches(projectedDelta, currentDelta, maxDelta)
+                && !breaches(projectedGamma, currentGamma, maxGamma)
+                && !breaches(projectedVega, currentVega, maxVega);
+    }
+
+    /** A limit is breached only if the projected exposure is over the limit and not a reduction of current exposure. */
+    private static boolean breaches(double projected, double current, double limit) {
+        double projectedAbs = Math.abs(projected);
+        return projectedAbs > limit && projectedAbs > Math.abs(current);
     }
 }

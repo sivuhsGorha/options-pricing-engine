@@ -50,6 +50,9 @@ public class PositionTracker {
         PortfolioPosition position = positions.get(symbol);
         if (position == null) {
             position = new PortfolioPosition(symbol, 0, fill.multiplier());
+            // Linear underlying exposure until a pricer supplies instrument Greeks:
+            // +1 delta per unit, no gamma or vega. Exposure then scales as quantity * multiplier * delta.
+            position.updateGreeks(1.0, 0.0, 0.0);
             positions.put(symbol, position);
         }
 
@@ -58,11 +61,6 @@ public class PositionTracker {
         }
 
         position.addQuantity(fill.quantity());
-
-        double delta = (double) position.getQuantity();
-        double gamma = 0.0;
-        double vega = 0.0;
-        position.updateGreeks(delta, gamma, vega);
 
         lastExecutionPrice.put(symbol, fill.executionPrice());
         lastLiveTracker = this;
