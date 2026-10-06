@@ -9,13 +9,24 @@ import java.util.List;
 
 /**
  * Projects future dividends based on historical patterns fetched from Yahoo Finance.
+ *
+ * <p>This is a naive model: each past dividend is assumed to recur on the same date one year later
+ * with the same amount, so special dividends are projected as if they were regular. A production
+ * model would use a corporate-actions feed.
  */
 public class DividendForecaster implements DividendProvider {
+
+    /** History older than this is not a reliable guide to the next payout. */
+    private static final int MAX_HISTORY_YEARS = 5;
 
     private final YahooDividendProvider historyProvider;
 
     public DividendForecaster() {
-        this.historyProvider = new YahooDividendProvider();
+        this(new YahooDividendProvider());
+    }
+
+    DividendForecaster(YahooDividendProvider historyProvider) {
+        this.historyProvider = historyProvider;
     }
 
     @Override
@@ -23,22 +34,15 @@ public class DividendForecaster implements DividendProvider {
         List<YahooDividendProvider.HistoricalDividend> history = historyProvider.getHistoricalDividends(symbol);
         List<DiscreteDividend> projected = new ArrayList<>();
 
-        if (history.isEmpty()) {
-            return projected;
-        }
-
-        // Simple naive projection: Assume the dividend amount is the same as last year, 
-        // paid on roughly the same date (+364 days to keep same day of week, or +365)
-        // A full production model would use IEX Cloud or a corporate actions feed.
-
         for (YahooDividendProvider.HistoricalDividend pastDiv : history) {
+            if (pastDiv.exDate().isBefore(from.minusYears(MAX_HISTORY_YEARS))) {
+                continue;
+            }
+            // Roll forward by whole years until the date is on or after `from` (bounded by the age filter above).
             LocalDate nextExDate = pastDiv.exDate().plusYears(1);
-            
-            // Fast-forward to the future range if the history is older
             while (nextExDate.isBefore(from)) {
                 nextExDate = nextExDate.plusYears(1);
             }
-
             if (!nextExDate.isAfter(to)) {
                 double timeToDividendInYears = ChronoUnit.DAYS.between(from, nextExDate) / 365.25;
                 if (timeToDividendInYears > 0) {
