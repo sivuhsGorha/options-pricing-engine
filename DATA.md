@@ -106,4 +106,9 @@ The quantitative engine includes a multi-tiered python market data ingestion pip
 python fetch_real_api_data.py
 ```
 
-The script fetches the current equity spot price (e.g., SPY) and dynamically generates an arbitrage-free Black-Scholes call/put chain saved to [`market_data.csv`](file:///c:/options-pricing-engine/market_data.csv) for exchange gateway tick replay.
+The script fetches the current equity spot price (e.g., SPY) and generates a **synthetic** Black-Scholes call/put chain around it, saved to [`market_data.csv`](market_data.csv) for gateway tick replay. Only the spot is real: the option prices are model output, not market quotes.
+
+- Providers without a configured key are skipped; each request has a 5 second timeout; credentials are never printed.
+- Polygon (previous close) and Marketstack (end-of-day) are not live prices, and the script says so when it uses them.
+- If no provider returns a usable price the script exits with status 2 and leaves `market_data.csv` untouched. It never invents a spot. Pass `--synthetic --spot N` to generate fully synthetic data deliberately.
+- The file is replaced atomically, so a reader never sees a half-written chain.

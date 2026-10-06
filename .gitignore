@@ -21,3 +21,5 @@ data/
 web/assets/
 web/index.html
 node_modules/
+__pycache__/
+*.pyc

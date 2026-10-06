@@ -102,7 +102,9 @@ options-pricing-engine/
 # 1. Compile Java 25 codebase with Incubator Vector API support
 javac --add-modules jdk.incubator.vector -d target/classes (Get-ChildItem -Recurse src/main/java/*.java)
 
-# 2. Ingest Live Market Data (Finnhub, Polygon, Alpha Vantage, MarketStack)
+# 2. Refresh market_data.csv around a real SPY spot (Finnhub, Polygon, Alpha Vantage, MarketStack).
+#    Keys come from .env or the environment. Exits with status 2 and leaves the file untouched if no
+#    provider answers; use --synthetic --spot 500 to generate fully synthetic data on purpose.
 python fetch_real_api_data.py
 
 # 3. Launch Core Verification Suite
