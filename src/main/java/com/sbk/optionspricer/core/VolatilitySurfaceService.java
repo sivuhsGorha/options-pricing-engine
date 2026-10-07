@@ -100,11 +100,12 @@ public final class VolatilitySurfaceService implements VolatilitySurfaceSource, 
         // Nine grid rows draw as a sheet; the fitted expiries are kept exactly and reported separately.
         SurfaceFitter.Fit ssvi = SurfaceFitter.densify(tryFit("SSVI", () -> SurfaceFitter.fitSsvi(extraction.points()), warnings), 9);
         SurfaceFitter.Fit sabr = SurfaceFitter.densify(tryFit("SABR", () -> SurfaceFitter.fitSabr(extraction.points()), warnings), 9);
-        if (ssvi == null && sabr == null) {
+        SurfaceFitter.Fit svi = SurfaceFitter.densify(tryFit("SVI", () -> SurfaceFitter.fitSvi(extraction.points()), warnings), 9);
+        if (ssvi == null && sabr == null && svi == null) {
             status = new Status(State.FAILED, "could not fit a surface to " + extraction.points().size() + " quotes: " + lastOrEmpty(warnings), now);
             return;
         }
-        latest = new Snapshot(now, symbol, String.join("+", sources), marketData, chains.get(0).spot(), ssvi, sabr,
+        latest = new Snapshot(now, symbol, String.join("+", sources), marketData, chains.get(0).spot(), ssvi, sabr, svi,
                 extraction.quotesSkipped(), List.copyOf(warnings));
         status = new Status(State.READY, String.format(java.util.Locale.ROOT, "%d quotes from %s", extraction.points().size(), String.join("+", sources)), now);
     }

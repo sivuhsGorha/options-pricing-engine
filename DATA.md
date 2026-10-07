@@ -60,8 +60,8 @@ price cannot be inverted.
 every `market_data.refresh_interval_seconds`, the service asks the provider for its listed expiries (Cboe's
 contract list; the next eight monthly third Fridays for providers without a listing), picks the dates nearest
 to 1, 2, 3 and 6 months, loads those chains, inverts the out-of-the-money two-sided quotes to implied volatility,
-and fits SSVI (global eta, gamma, rho with per-expiry ATM variance from the data) and SABR (alpha, rho, nu per
-expiry, beta 0.5) by Nelder-Mead least squares. The result carries the provider name, whether it is market data,
+and fits SSVI (global eta, gamma, rho with per-expiry ATM variance from the data), raw SVI (a, b, rho, m, sigma
+per expiry) and SABR (alpha, rho, nu per expiry, beta 0.5) by Nelder-Mead least squares. The result carries the provider name, whether it is market data,
 the quotes used and skipped, the RMSE, the parameters, whether SSVI's closed-form no-arbitrage conditions hold,
 and warnings. `/api/surface3d` returns it, or the calibration status while nothing is fitted. If the chain came
 from the synthetic fallback the surface is labelled `DEMO`; nothing on the startup path waits for this.

@@ -12,6 +12,7 @@ import ChartPanel from './components/ChartPanel';
 
 const SURFACE_MODELS = [
   { id: 'SSVI', label: 'SSVI' },
+  { id: 'SVI', label: 'SVI' },
   { id: 'SABR', label: 'SABR 2002' },
 ];
 
@@ -111,7 +112,7 @@ function App() {
     addLog(`COMMAND: ${cleanCmd}`);
 
     if (cleanCmd.includes('HELP') || cleanCmd.includes('F1')) {
-      addLog("HELP: F1:HELP F2:TICK F3:VOLS F4:RISK F5:MARGIN · HALT / RESUME · STRATEGY ON / STRATEGY OFF · SSVI / SABR");
+      addLog("HELP: F1:HELP F2:TICK F3:VOLS F4:RISK F5:MARGIN · HALT / RESUME · STRATEGY ON / STRATEGY OFF · SSVI / SVI / SABR");
     } else if (cleanCmd.includes('RESUME')) {
       resumeTrading();
     } else if (cleanCmd.includes('HALT')) {
@@ -125,7 +126,10 @@ function App() {
       addLog("VOLS: Focused Volatility Surface & Smile curves.");
     } else if (cleanCmd.includes('SSVI')) {
       setSurfaceModel('SSVI');
-      addLog("MODEL SWITCH: SSVI (Gatheral) Arbitrage-Free Surface.");
+      addLog("MODEL SWITCH: SSVI, one global fit; the badge says whether its no-arbitrage conditions hold.");
+    } else if (cleanCmd.includes('SVI')) {
+      setSurfaceModel('SVI');
+      addLog("MODEL SWITCH: raw SVI, five parameters per expiry.");
     } else if (cleanCmd.includes('SABR')) {
       setSurfaceModel('SABR');
       addLog("MODEL SWITCH: SABR (Hagan 2002) Surface.");

@@ -371,7 +371,7 @@ public class OptionsDashboardServer {
         }
         var snapshot = source.latest();
         var status = source.status();
-        var fit = snapshot.map(s -> "SSVI".equals(model) ? s.ssvi() : s.sabr()).orElse(null);
+        var fit = snapshot.map(s -> "SSVI".equals(model) ? s.ssvi() : "SVI".equals(model) ? s.svi() : s.sabr()).orElse(null);
         if (snapshot.isEmpty() || fit == null) {
             body.put("ready", false);
             body.put("status", snapshot.isEmpty() ? status.state().name() : "FAILED");
@@ -585,7 +585,7 @@ public class OptionsDashboardServer {
             if (!authorizeApi(exchange)) return;
             String requested = queryParam(exchange.getRequestURI().getRawQuery(), "model");
             // FREE_SABR was a deprecated alias of SABR (no free-boundary correction was ever implemented).
-            String model = "SSVI".equals(requested) ? "SSVI" : "SABR";
+            String model = "SSVI".equals(requested) ? "SSVI" : "SVI".equals(requested) ? "SVI" : "SABR";
             sendJson(exchange, 200, surfaceBody(model));
         }));
         server.createContext("/", new StaticFileHandler(webRoot, this::isSecureRequest));

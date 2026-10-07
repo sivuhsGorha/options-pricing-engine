@@ -286,6 +286,99 @@ public final class SurfaceFitter {
                 parameters, false, List.copyOf(warnings), expiries);
     }
 
+    // ------------------------------------------------------------------ SVI (raw, per expiry)
+
+    /**
+     * Gatheral's raw SVI per expiry: total variance {@code w(k) = a + b (rho (k - m) + sqrt((k - m)^2 + sigma^2))},
+     * five parameters per slice fitted by least squares on volatility. Parameters that would make the minimum
+     * variance negative are rejected by {@link SviModel} and therefore treated as infinitely bad by the optimiser.
+     */
+    public static Fit fitSvi(List<MarketPoint> points) {
+        List<String> warnings = new ArrayList<>();
+        TreeMap<Double, List<MarketPoint>> byExpiry = groupUsable(points, warnings);
+        double[] expiries = byExpiry.keySet().stream().mapToDouble(Double::doubleValue).toArray();
+        double[][] fittedParams = new double[expiries.length][];
+        double[] forwards = new double[expiries.length];
+        Map<String, Double> parameters = new LinkedHashMap<>();
+        List<MarketPoint> used = new ArrayList<>();
+        for (int i = 0; i < expiries.length; i++) {
+            List<MarketPoint> slice = byExpiry.get(expiries[i]);
+            double t = expiries[i];
+            forwards[i] = slice.get(0).forward();
+            double atmTotalVariance = Math.pow(atmVol(slice, warnings), 2) * t;
+            java.util.function.ToDoubleFunction<double[]> loss = p -> {
+                double[] s = sviParams(p);
+                double sum = 0.0;
+                for (MarketPoint mp : slice) {
+                    double d = sviVol(mp, t, s) - mp.marketVol();
+                    sum += d * d;
+                }
+                return sum / slice.size();
+            };
+            NelderMead.Result best = null;
+            for (double rhoStart : new double[]{-0.3, 0.2}) {
+                double[] start = {0.5 * atmTotalVariance, Math.log(Math.max(1e-6, 10.0 * atmTotalVariance)), atanh(rhoStart), 0.0, Math.log(0.1)};
+                double[] step = {0.5 * atmTotalVariance, 0.5, 0.5, 0.05, 0.5};
+                NelderMead.Result r = NelderMead.minimize(loss, start, step, MAX_ITERATIONS, TOLERANCE);
+                if (best == null || r.value() < best.value()) best = r;
+            }
+            if (!best.converged()) {
+                warnings.add(String.format(java.util.Locale.ROOT, "SVI fit for T=%.3f reached the iteration cap", t));
+            }
+            fittedParams[i] = sviParams(best.point());
+            if (Math.abs(fittedParams[i][2]) > 0.99) {
+                warnings.add(String.format(java.util.Locale.ROOT, "SVI rho sits at its bound for T=%.3f: the quotes carry little skew information", t));
+            }
+            String tag = String.format(java.util.Locale.ROOT, "[%.3f]", t);
+            parameters.put("a" + tag, fittedParams[i][0]);
+            parameters.put("b" + tag, fittedParams[i][1]);
+            parameters.put("rho" + tag, fittedParams[i][2]);
+            parameters.put("m" + tag, fittedParams[i][3]);
+            parameters.put("sigma" + tag, fittedParams[i][4]);
+            used.addAll(slice);
+        }
+
+        double[] strikes = strikeGrid(used);
+        double[][] vols = new double[expiries.length][strikes.length];
+        for (int i = 0; i < expiries.length; i++) {
+            for (int j = 0; j < strikes.length; j++) {
+                double k = Math.log(strikes[j] / forwards[i]);
+                vols[i][j] = sviVol(k, expiries[i], fittedParams[i]);
+            }
+        }
+        List<FittedPoint> fitted = new ArrayList<>(used.size());
+        double sumSq = 0.0;
+        for (int i = 0; i < expiries.length; i++) {
+            for (MarketPoint mp : byExpiry.get(expiries[i])) {
+                double model = sviVol(mp, expiries[i], fittedParams[i]);
+                fitted.add(new FittedPoint(mp.timeToExpiry(), mp.strike(), mp.marketVol(), model));
+                sumSq += (model - mp.marketVol()) * (model - mp.marketVol());
+            }
+        }
+        warnings.add("raw SVI guarantees non-negative variance per slice only; butterfly and calendar arbitrage are not excluded");
+        return new Fit("SVI", strikes, expiries, vols, List.copyOf(fitted), Math.sqrt(sumSq / used.size()), used.size(),
+                parameters, false, List.copyOf(warnings), expiries);
+    }
+
+    private static double sviVol(MarketPoint mp, double t, double[] s) {
+        return sviVol(Math.log(mp.strike() / mp.forward()), t, s);
+    }
+
+    private static double sviVol(double k, double t, double[] s) {
+        return SviModel.impliedVolatility(SviModel.impliedVariance(k, s[0], s[1], s[2], s[3], s[4]), t);
+    }
+
+    /** Unconstrained (a, pb, pr, m, ps) to a (free), b = e^pb, rho = tanh(pr), m (free), sigma = e^ps. */
+    private static double[] sviParams(double[] p) {
+        return new double[]{
+                p[0],
+                Math.exp(clamp(p[1], -20, 5)),
+                Math.max(-0.999999, Math.min(0.999999, Math.tanh(clamp(p[2], -10, 10)))),
+                clamp(p[3], -5, 5),
+                Math.exp(clamp(p[4], -10, 3))
+        };
+    }
+
     /** Unconstrained (a, c, d) to alpha = e^a, rho = tanh(c), nu = e^d. */
     private static double[] sabrParams(double[] p) {
         return new double[]{

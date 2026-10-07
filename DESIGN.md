@@ -23,7 +23,8 @@ scenario margin, execution-book notional, the margin optimizer's suggested hedge
 terminal event log (last 8 lines).
 
 **Centre: Volatility surface.** A 3D surface plus smile and term-structure charts (Plotly). Buttons switch
-between SSVI (one global fit) and SABR 2002 (per expiry). The surface is **fitted to the option chain** by
+between SSVI (one global fit with closed-form no-arbitrage conditions), SVI (Gatheral's raw form, five
+parameters per expiry, the closest fit) and SABR 2002 (three parameters per expiry). The surface is **fitted to the option chain** by
 `core/VolatilitySurfaceService` in the background, and the badge in the panel header states its provenance:
 `FIT · <provider> · N quotes · RMSE x vol pts` (green) when the chain is market data, `DEMO · SYNTHETIC` (amber)
 when the chain is the synthetic fallback, or the calibration status (`LOADING`, `FAILED: reason`) while no fit

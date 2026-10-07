@@ -19,9 +19,10 @@ public interface VolatilitySurfaceSource {
      * @param marketData false when any chain is a synthetic fallback: the surface is then a demonstration
      * @param ssvi       the SSVI fit, or null if it could not be fitted (see warnings)
      * @param sabr       the SABR fit, or null if it could not be fitted
+     * @param svi        the raw SVI (per expiry) fit, or null if it could not be fitted
      */
     record Snapshot(Instant asOf, String symbol, String source, boolean marketData, double spot,
-                    SurfaceFitter.Fit ssvi, SurfaceFitter.Fit sabr, int quotesSkipped, List<String> warnings) {}
+                    SurfaceFitter.Fit ssvi, SurfaceFitter.Fit sabr, SurfaceFitter.Fit svi, int quotesSkipped, List<String> warnings) {}
 
     Optional<Snapshot> latest();
 

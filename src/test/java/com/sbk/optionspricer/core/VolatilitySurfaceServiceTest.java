@@ -83,6 +83,7 @@ class VolatilitySurfaceServiceTest {
         assertFalse(snapshot.marketData(), "generated prices must never be presented as a market-fitted surface");
         assertNotNull(snapshot.ssvi());
         assertNotNull(snapshot.sabr());
+        assertNotNull(snapshot.svi());
         assertEquals(100.0, snapshot.spot());
         assertEquals(4, chains.get(), "each loaded chain is handed to the history callback");
     }

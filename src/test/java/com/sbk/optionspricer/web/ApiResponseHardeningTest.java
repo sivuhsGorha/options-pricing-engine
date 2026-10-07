@@ -328,7 +328,8 @@ class ApiResponseHardeningTest {
         var extraction = com.sbk.optionspricer.volatility.SurfaceFitter.extractPoints(chains, 0.05, 0.0, today);
         var snapshot = new com.sbk.optionspricer.volatility.VolatilitySurfaceSource.Snapshot(Instant.now(), "SPY", "SYNTHETIC", false, 100.0,
                 com.sbk.optionspricer.volatility.SurfaceFitter.fitSsvi(extraction.points()),
-                com.sbk.optionspricer.volatility.SurfaceFitter.fitSabr(extraction.points()), extraction.quotesSkipped(), java.util.List.of());
+                com.sbk.optionspricer.volatility.SurfaceFitter.fitSabr(extraction.points()),
+                com.sbk.optionspricer.volatility.SurfaceFitter.fitSvi(extraction.points()), extraction.quotesSkipped(), java.util.List.of());
         var ready = new com.sbk.optionspricer.volatility.VolatilitySurfaceSource.Status(
                 com.sbk.optionspricer.volatility.VolatilitySurfaceSource.State.READY, "ok", Instant.now());
         start(reader(() -> new MmapStateReader.RiskState(0, 0, 0, 0)), null, null, null, surfaceSource(snapshot, ready));
@@ -346,5 +347,11 @@ class ApiResponseHardeningTest {
         JsonNode sabr = MAPPER.readTree(get("/api/surface3d?model=SABR").body());
         assertEquals("SABR", sabr.get("model").asText());
         assertTrue(sabr.get("parameters").has("beta"));
+
+        JsonNode svi = MAPPER.readTree(get("/api/surface3d?model=SVI").body());
+        assertEquals("SVI", svi.get("model").asText());
+        assertTrue(svi.get("ready").asBoolean());
+        assertTrue(svi.get("parameters").fieldNames().next().startsWith("a["), "five raw-SVI parameters per expiry");
+        assertFalse(svi.get("noArbitrageConditionsHold").asBoolean(), "raw SVI must not claim a guarantee it lacks");
     }
 }

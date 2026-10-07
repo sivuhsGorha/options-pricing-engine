@@ -93,6 +93,24 @@ class SurfaceFitterTest {
     }
 
     @Test
+    void sviRoundTripReproducesTheSliceItWasGeneratedFrom() {
+        double a = 0.004, b = 0.03, rho = -0.4, m = 0.0, sigma = 0.15; // ATM vol ~ 18.6% at 90 days
+        DoubleBinaryOperator vol = (t, k) -> SviModel.impliedVolatility(SviModel.impliedVariance(Math.log(k / forward(t)), a, b, rho, m, sigma), t);
+        List<OptionChain> chains = new ArrayList<>();
+        for (int days : new int[]{90, 180}) chains.add(chainFrom(AS_OF.plusDays(days), range(85, 115, 2.5), vol));
+
+        SurfaceFitter.Fit fit = SurfaceFitter.fitSvi(SurfaceFitter.extractPoints(chains, R, Q, AS_OF).points());
+
+        assertEquals(2, fit.expiries().length);
+        assertTrue(fit.rmse() < 1e-3, "RMSE " + fit.rmse() + " warnings " + fit.warnings());
+        assertEquals(5 * 2, fit.parameters().size(), "five raw-SVI parameters per expiry");
+        double fittedRho = fit.parameters().entrySet().stream().filter(e -> e.getKey().startsWith("rho[")).findFirst().orElseThrow().getValue();
+        assertEquals(rho, fittedRho, 0.15, "SVI parameters are only weakly identified; the shape, not each number, is what must match");
+        assertFalse(fit.noArbitrageConditionsHold(), "raw SVI makes no such guarantee and must not claim one");
+        assertFiniteGrid(fit);
+    }
+
+    @Test
     void quotesWithoutATwoSidedMarketAreSkippedAndCountedAndTheInTheMoneySideIsIgnored() {
         LocalDate expiry = AS_OF.plusDays(30);
         double t = TimeConventions.yearFraction(AS_OF, expiry);
