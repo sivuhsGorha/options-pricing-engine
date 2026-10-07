@@ -45,7 +45,7 @@ public class SmartOrderRouter {
         buffer.putInt(order.instrumentId());
         buffer.put((byte) (order.isBuy() ? 1 : 2));
         buffer.putInt(order.quantity());
-        buffer.putLong((long)(order.price() * 10000));
+        buffer.putLong(PriceScale.toTicks(order.price()));
 
         // 3. Dispatch to NIC (Network Interface Card) via socket
         // Provide the generated sequence ID alongside (for durability tracing)

@@ -53,6 +53,8 @@ public class OrderManager {
     private final MarketDataPolicy marketDataPolicy;
     private final TradingHalt tradingHalt;
     private final PortfolioRiskAdmission portfolioAdmission;
+    /** Units of the underlying per contract; scales every notional and exposure the same way. */
+    private final int contractMultiplier;
     private final PositionTracker positionTracker;
     private final AtomicLong sequence = new AtomicLong(1L);
     /** Orders still working at the venue (ACCEPTED or PARTIALLY_FILLED). Filled/cancelled/rejected orders are not kept here. */
@@ -82,9 +84,24 @@ public class OrderManager {
         this(riskFilter, transport, positionTracker, marketDataPolicy, tradingHalt, null);
     }
 
-    /** {@code portfolioAdmission} may be null to skip the portfolio Greek/notional admission check. */
+    /** {@code portfolioAdmission} may be null to skip the portfolio Greek/notional admission check. Multiplier 1 (shares). */
     public OrderManager(PreTradeRiskFilter riskFilter, ExchangeTransport transport, PositionTracker positionTracker,
                         MarketDataPolicy marketDataPolicy, TradingHalt tradingHalt, PortfolioRiskAdmission portfolioAdmission) {
+        this(riskFilter, transport, positionTracker, marketDataPolicy, tradingHalt, portfolioAdmission, 1);
+    }
+
+    /**
+     * @param contractMultiplier units of the underlying per contract (1 for shares, 100 for standard equity options);
+     *                           it scales the order notional checked by the risk filter, the concentration exposure,
+     *                           the booked position and the portfolio admission check identically
+     */
+    public OrderManager(PreTradeRiskFilter riskFilter, ExchangeTransport transport, PositionTracker positionTracker,
+                        MarketDataPolicy marketDataPolicy, TradingHalt tradingHalt, PortfolioRiskAdmission portfolioAdmission,
+                        int contractMultiplier) {
+        if (contractMultiplier < 1) {
+            throw new IllegalArgumentException("contractMultiplier must be at least 1");
+        }
+        this.contractMultiplier = contractMultiplier;
         this.portfolioAdmission = portfolioAdmission;
         if (marketDataPolicy == null) {
             throw new IllegalArgumentException("marketDataPolicy must not be null");
@@ -134,12 +151,12 @@ public class OrderManager {
 
         if (portfolioAdmission != null && positionTracker != null) {
             int signedRequest = order.isBuy() ? order.quantity() : -order.quantity();
-            if (!portfolioAdmission.canAdmitOrder(snapshot.symbol(), signedRequest, order.price(), positionTracker)) {
+            if (!portfolioAdmission.canAdmitOrder(snapshot.symbol(), signedRequest, order.price(), positionTracker, contractMultiplier)) {
                 return reject(orderId, mds, "failed portfolio risk admission", "order failed portfolio risk admission");
             }
         }
 
-        if (!riskFilter.checkRisk(order, snapshot.symbol(), snapshot.bid(), snapshot.ask(), snapshot.volume())) {
+        if (!riskFilter.checkRisk(order, snapshot.symbol(), snapshot.bid(), snapshot.ask(), snapshot.volume(), contractMultiplier)) {
             return reject(orderId, mds, "failed pre-trade risk validation", "order failed pre-trade risk validation");
         }
 
@@ -162,9 +179,9 @@ public class OrderManager {
         try {
             if (positionTracker != null) {
                 int signedQuantity = order.isBuy() ? filled : -filled;
-                positionTracker.applyFill(new PositionTracker.ExecutionFill(result.symbol(), signedQuantity, 1, result.executionPrice()));
+                positionTracker.applyFill(new PositionTracker.ExecutionFill(result.symbol(), signedQuantity, contractMultiplier, result.executionPrice()));
             }
-            double filledNotional = (double) filled * result.executionPrice();
+            double filledNotional = (double) filled * result.executionPrice() * contractMultiplier;
             riskFilter.recordFill(result.symbol(), order.isBuy() ? filledNotional : -filledNotional);
         } catch (RuntimeException e) {
             // The order executed at the venue but our books may not reflect it. Never throw to the

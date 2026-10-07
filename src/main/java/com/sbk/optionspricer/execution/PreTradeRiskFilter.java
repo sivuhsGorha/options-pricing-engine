@@ -60,6 +60,14 @@ public class PreTradeRiskFilter {
     }
 
     public synchronized boolean checkRisk(Order order, String underlying, double bid, double ask, long volume) {
+        return checkRisk(order, underlying, bid, ask, volume, 1);
+    }
+
+    /** @param multiplier units of the underlying per contract: the order notional is quantity x price x multiplier */
+    public synchronized boolean checkRisk(Order order, String underlying, double bid, double ask, long volume, int multiplier) {
+        if (multiplier < 1) {
+            throw new IllegalArgumentException("multiplier must be at least 1");
+        }
         if (order == null) {
             throw new IllegalArgumentException("order must not be null");
         }
@@ -81,7 +89,7 @@ public class PreTradeRiskFilter {
         }
 
         // 2. Fat Finger Notional Value Check (Quantity * Price)
-        double notional = order.quantity() * order.price();
+        double notional = (double) order.quantity() * order.price() * multiplier;
         if (notional > maxOrderNotional) {
             System.err.printf(java.util.Locale.ROOT, "[RISK BLOCK] Notional value %.2f exceeds max %.2f%n", notional, maxOrderNotional);
             return false;

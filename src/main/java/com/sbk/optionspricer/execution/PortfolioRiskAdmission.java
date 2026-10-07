@@ -28,6 +28,14 @@ public class PortfolioRiskAdmission {
     }
 
     public boolean canAdmitOrder(String symbol, int quantity, double price, PositionTracker tracker) {
+        return canAdmitOrder(symbol, quantity, price, tracker, DEFAULT_MULTIPLIER);
+    }
+
+    /** @param newPositionMultiplier multiplier assumed for a symbol that has no position yet (an existing position keeps its own) */
+    public boolean canAdmitOrder(String symbol, int quantity, double price, PositionTracker tracker, int newPositionMultiplier) {
+        if (newPositionMultiplier < 1) {
+            throw new IllegalArgumentException("multiplier must be at least 1");
+        }
         if (symbol == null || symbol.isBlank()) {
             throw new IllegalArgumentException("symbol must not be blank");
         }
@@ -43,7 +51,7 @@ public class PortfolioRiskAdmission {
 
         PortfolioPosition existing = tracker.getPosition(symbol);
         int proposedNet = (existing == null ? 0 : existing.getQuantity()) + quantity;
-        int multiplier = existing == null ? DEFAULT_MULTIPLIER : existing.getMultiplier();
+        int multiplier = existing == null ? newPositionMultiplier : existing.getMultiplier();
         double notional = Math.abs((double) proposedNet * multiplier * price);
 
         if (notional > maxNotional) {

@@ -32,7 +32,7 @@ public class AppCompositionRoot {
         this.config = new ConfigManager();
         this.publisher = new MmapStatePublisher();
         this.engine = UnifiedQuantEngine.fromConfig(config, publisher);
-        
+
         String symbol = config.getString("execution.symbol", "SPY");
         double slippageBps = config.getDouble("execution.slippage_bps", 25.0);
         double maxNotional = config.getDouble("risk.max_notional", ConfigManager.DEFAULT_MAX_NOTIONAL);
@@ -42,6 +42,7 @@ public class AppCompositionRoot {
         double maxPositionAbs = config.getDouble("risk.max_position", ConfigManager.DEFAULT_MAX_POSITION);
         double baseQuantity = config.getDouble("strategy.base_quantity", 10.0);
         double triggerPct = config.getDouble("strategy.trigger_pct", 0.001);
+        int contractMultiplier = (int) config.getDouble("execution.contract_multiplier", 1.0);
 
         this.positionTracker = new PositionTracker();
         engine.setExposureSource(positionTracker::snapshotExposure);
@@ -61,9 +62,9 @@ public class AppCompositionRoot {
                 : OrderManager.MarketDataPolicy.strict();
         com.sbk.optionspricer.execution.TradingHalt tradingHalt = new com.sbk.optionspricer.execution.TradingHalt();
         tradingHalt.haltOnCriticalAlerts(engine.getGreekAlertManager());
-        this.orderManager = new OrderManager(preTradeFilter, executionTransport, positionTracker, dataPolicy, tradingHalt, riskAdmission);
+        this.orderManager = new OrderManager(preTradeFilter, executionTransport, positionTracker, dataPolicy, tradingHalt, riskAdmission, contractMultiplier);
         this.strategyLoop = new StrategyExecutionLoop(symbol, orderManager, riskAdmission, positionTracker, baseQuantity, triggerPct, marketAdapter);
-        
+
         this.harness = new QuantSimulationHarness(engine, spotProvider, positionTracker, orderManager, riskAdmission, strategyLoop);
 
         String apiSecret = OptionsDashboardServer.requireEnvironmentVariable("API_SECRET");
@@ -75,7 +76,7 @@ public class AppCompositionRoot {
         String portEnv = System.getProperty("PORT", com.sbk.optionspricer.config.EnvironmentConfigLoader.get("PORT"));
         int port = portEnv == null ? 8080 : Integer.parseInt(portEnv);
         String allowedOrigins = com.sbk.optionspricer.config.EnvironmentConfigLoader.getOrDefault("ALLOWED_ORIGIN", "http://127.0.0.1:" + port + ",http://localhost:" + port);
-        
+
         MmapStateReader mmapReader = new MmapStateReader();
         this.dashboard = new OptionsDashboardServer(apiSecret, operatorPassword, allowedOrigins, bindAddress, port, port + 1, mmapReader, "web", orderManager, positionTracker, marketAdapter);
     }
