@@ -8,8 +8,19 @@ import java.util.List;
 
 public interface OptionChainProvider {
 
-    /** A chain together with the provider that produced it, so a synthetic fallback can never pass as market data. */
-    record SourcedChain(OptionChain chain, String source, boolean marketData) {}
+    /**
+     * A chain together with the provider that produced it, so a synthetic fallback can never pass as market
+     * data, and the reasons any earlier provider failed, so a fallback can say why it happened.
+     */
+    record SourcedChain(OptionChain chain, String source, boolean marketData, List<String> notes) {
+        public SourcedChain {
+            notes = notes == null ? List.of() : List.copyOf(notes);
+        }
+
+        public SourcedChain(OptionChain chain, String source, boolean marketData) {
+            this(chain, source, marketData, List.of());
+        }
+    }
 
     OptionChain getOptionChain(String symbol, LocalDate expiry);
 

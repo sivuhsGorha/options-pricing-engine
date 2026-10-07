@@ -10,7 +10,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
-public class QuantSimulationHarness {
+public class QuantSimulationHarness implements com.sbk.optionspricer.execution.StrategySwitch {
     private final UnifiedQuantEngine engine;
     private final ScheduledExecutorService engineScheduler;
     private final LiveSpotProvider spotProvider;
@@ -19,6 +19,8 @@ public class QuantSimulationHarness {
     private final PortfolioRiskAdmission riskAdmission;
     private final StrategyExecutionLoop strategyLoop;
     private boolean isRunning = false;
+    /** Operator switch: when off, prices are still processed for risk but the strategy generates no orders. */
+    private volatile boolean strategyEnabled = true;
     
     // NaN until a real price arrives: nothing downstream may be fed an invented spot.
     private double currentSpot = Double.NaN;
@@ -80,8 +82,18 @@ public class QuantSimulationHarness {
         engineScheduler.scheduleAtFixedRate(this::tick, 0, 10, TimeUnit.MILLISECONDS);
     }
     
+    @Override
+    public boolean isStrategyEnabled() {
+        return strategyEnabled;
+    }
+
+    @Override
+    public void setStrategyEnabled(boolean enabled) {
+        this.strategyEnabled = enabled;
+    }
+
     public synchronized StrategyExecutionLoop.ExecutionSummary runStrategyStep(double price) {
-        if (strategyLoop == null) {
+        if (strategyLoop == null || !strategyEnabled) {
             return new StrategyExecutionLoop.ExecutionSummary(0, 0, 0, 0);
         }
         return strategyLoop.onPrice(price, null);
@@ -106,7 +118,7 @@ public class QuantSimulationHarness {
                 // processTick handles its own fatal path; stop the scheduler instead of ticking no-ops.
                 throw new IllegalStateException("Engine stopped fatally, halting scheduler.");
             }
-            if (strategyLoop != null) {
+            if (strategyLoop != null && strategyEnabled) {
                 runStrategyStep(spot);
             }
         } catch (RuntimeException e) {

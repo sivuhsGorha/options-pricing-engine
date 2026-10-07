@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import './App.css';
-import { secureFetch } from './lib/api';
+import { secureFetch, securePost } from './lib/api';
 import { formatNumber } from './lib/format';
 import { renderSurfaceCharts } from './lib/surfaceCharts';
 import LoginForm from './components/LoginForm';
@@ -36,6 +36,7 @@ function App() {
   });
   const [positions, setPositions] = useState({ halted: false, haltReason: null, positions: [] });
   const [orders, setOrders] = useState([]);
+  const [control, setControl] = useState({ halted: false, haltReason: null, strategyEnabled: true, symbol: null, triggerPct: NaN, baseQuantity: 0 });
   const [logs, setLogs] = useState([{ time: '09:00:00', msg: 'AURA-OPT Unified Engine online. Mmap IPC active.' }]);
   const [surfaceData, setSurfaceData] = useState(null);
   const [expandedChart, setExpandedChart] = useState(null);
@@ -119,7 +120,15 @@ function App() {
     addLog(`COMMAND: ${cleanCmd}`);
 
     if (cleanCmd.includes('HELP') || cleanCmd.includes('F1')) {
-      addLog("HELP: Shortcuts -> F1:HELP F2:TICK F3:VOLS F4:RISK F5:MARGIN");
+      addLog("HELP: F1:HELP F2:TICK F3:VOLS F4:RISK F5:MARGIN · HALT / RESUME · STRATEGY ON / STRATEGY OFF · SSVI / SABR");
+    } else if (cleanCmd.includes('RESUME')) {
+      resumeTrading();
+    } else if (cleanCmd.includes('HALT')) {
+      haltTrading();
+    } else if (cleanCmd.includes('STRATEGY OFF')) {
+      operate('/control/strategy', { enabled: false }, 'strategy switched off');
+    } else if (cleanCmd.includes('STRATEGY ON')) {
+      operate('/control/strategy', { enabled: true }, 'strategy switched on');
     } else if (cleanCmd.includes('VOLS') || cleanCmd.includes('F3')) {
       setExpandedChart(null);
       addLog("VOLS: Focused Volatility Surface & Smile curves.");
@@ -146,6 +155,21 @@ function App() {
 
   const toggleChart = (name) => setExpandedChart(expandedChart === name ? null : name);
 
+  // Operator actions go through POST endpoints that require the session and the page's origin.
+  const operate = async (path, body, label) => {
+    try {
+      const response = await securePost(path, body);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      setControl(await response.json());
+      addLog(`OPERATOR: ${label}.`);
+    } catch (error) {
+      addLog(`OPERATOR: ${label} failed (${error.message}).`);
+    }
+  };
+  const haltTrading = () => operate('/control/halt', { reason: 'halted from the dashboard' }, 'trading halted');
+  const resumeTrading = () => operate('/control/resume', {}, 'trading resumed');
+  const toggleStrategy = () => operate('/control/strategy', { enabled: !control.strategyEnabled }, control.strategyEnabled ? 'strategy switched off' : 'strategy switched on');
+
   useEffect(() => {
     if (!authenticated) return;
     const poll = (path, onData, onError) => async () => {
@@ -165,9 +189,10 @@ function App() {
       () => addLog("Failed to map Volatility Surface."));
     const fetchPositions = poll('/positions', setPositions, () => {});
     const fetchOrders = poll('/execution', setOrders, () => {});
+    const fetchControl = poll('/control', setControl, () => {});
     const fetchHealthData = poll('/health', setHealthInfo, () => setHealthInfo({ symbol: 'SPY', providers: {} }));
 
-    const jobs = [[updateRiskMetrics, 1000], [fetchSpotData, 2000], [fetchSurfaceData, 5000], [fetchHealthData, 5000], [fetchPositions, 2000], [fetchOrders, 2000]];
+    const jobs = [[updateRiskMetrics, 1000], [fetchSpotData, 2000], [fetchSurfaceData, 5000], [fetchHealthData, 5000], [fetchPositions, 2000], [fetchOrders, 2000], [fetchControl, 2000]];
     jobs.forEach(([job]) => job());
     const timers = jobs.map(([job, ms]) => setInterval(job, ms));
     return () => timers.forEach(clearInterval);
@@ -268,7 +293,7 @@ function App() {
           </div>
         </div>
 
-        <ExecutionPanel positions={positions} orders={orders} />
+        <ExecutionPanel positions={positions} orders={orders} control={control} onHalt={haltTrading} onResume={resumeTrading} onToggleStrategy={toggleStrategy} />
       </div>
 
       <footer className="sys-footer">

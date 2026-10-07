@@ -33,14 +33,15 @@ background and fits SSVI and SABR with a Nelder-Mead least-squares fitter; the d
 quotes used, RMSE and the market points, and labels a synthetic-chain fit `DEMO`. Startup no longer waits on
 the option-chain network call.
 
+**Operator controls** (2026-10-07). HALT / RESUME and a strategy ON/OFF switch in the paper-trading panel and
+the command bar, backed by POST-only `/api/control` endpoints that require the session and the page's Origin.
+
 ---
 
 ## Next: deployment readiness (this week, 2026-10-07 to 2026-10-11)
 
 Goal: a reviewer can clone, run, and trust every number on screen.
 
-4. **Operator controls in the UI.** Halt / resume trading (authenticated POST), strategy on/off, and the
-   current trigger and size shown in the paper-trading panel.
 5. **Config parser hardening.** Inline comments, clear error messages naming the key and line, and a
    `--check-config` mode.
 6. **Hermetic tests.** Inject a fake spot provider into the remaining tests that construct `LiveSpotProvider`;

@@ -88,5 +88,6 @@ public class AppCompositionRoot {
         this.surfaceService = new com.sbk.optionspricer.core.VolatilitySurfaceService(engine.getOptionChainProvider(), symbol,
                 riskFreeRate, dividendYield, java.time.Duration.ofSeconds(refreshSeconds), java.time.Clock.systemUTC(), engine::recordChainSnapshots);
         dashboard.setSurfaceSource(surfaceService);
+        dashboard.setOperatorControls(new com.sbk.optionspricer.core.OperatorConsole(tradingHalt, harness, strategyLoop));
     }
 }

@@ -93,6 +93,65 @@ public class OptionsDashboardServer {
         this.surfaceSource = source;
     }
 
+    private volatile com.sbk.optionspricer.execution.OperatorControls operatorControls;
+    private static final com.fasterxml.jackson.databind.ObjectMapper JSON_IN = new com.fasterxml.jackson.databind.ObjectMapper();
+
+    /** Exposes halt/resume and the strategy switch at /api/control. Call before {@link #start()}. */
+    public void setOperatorControls(com.sbk.optionspricer.execution.OperatorControls controls) {
+        this.operatorControls = controls;
+    }
+
+    private static java.util.Map<String, Object> controlJson(com.sbk.optionspricer.execution.OperatorControls.ControlState s) {
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("halted", s.halted());
+        body.put("haltReason", s.haltReason());
+        body.put("haltedAt", s.haltedAt() == null ? null : s.haltedAt().toEpochMilli());
+        body.put("strategyEnabled", s.strategyEnabled());
+        body.put("symbol", s.symbol());
+        body.put("triggerPct", Double.isFinite(s.triggerPct()) ? s.triggerPct() : null);
+        body.put("baseQuantity", s.baseQuantity());
+        return body;
+    }
+
+    /** State-changing calls: POST only, and a browser (cookie) request must carry an allowed Origin, against CSRF. */
+    private boolean acceptMutation(HttpExchange exchange) throws IOException {
+        if (!"POST".equals(exchange.getRequestMethod())) {
+            exchange.getResponseHeaders().set("Allow", "POST");
+            sendJsonError(exchange, 405, "method not allowed");
+            return false;
+        }
+        String origin = exchange.getRequestHeaders().getFirst("Origin");
+        boolean browser = BrowserSessionManager.getSessionToken(exchange.getRequestHeaders().getFirst("Cookie")) != null;
+        if (browser && (origin == null || !sessions.isAllowedOrigin(origin))) {
+            sendJsonError(exchange, 403, "origin not allowed");
+            return false;
+        }
+        return true;
+    }
+
+    /** A small JSON object body, or an empty object for no body. Sends the error and returns null when the body is unusable. */
+    private static com.fasterxml.jackson.databind.JsonNode readJsonObject(HttpExchange exchange) throws IOException {
+        byte[] body = exchange.getRequestBody().readNBytes(4097);
+        if (body.length > 4096) {
+            sendJsonError(exchange, 413, "payload too large");
+            return null;
+        }
+        if (body.length == 0) {
+            return JSON_IN.createObjectNode();
+        }
+        try {
+            com.fasterxml.jackson.databind.JsonNode node = JSON_IN.readTree(body);
+            if (node == null || !node.isObject()) {
+                sendJsonError(exchange, 400, "body must be a JSON object");
+                return null;
+            }
+            return node;
+        } catch (IOException malformed) {
+            sendJsonError(exchange, 400, "body must be a JSON object");
+            return null;
+        }
+    }
+
     public OptionsDashboardServer(String apiSecret, String operatorPassword, String allowedOrigins,
                                   String bindAddress, int port, int wsPort, MmapStateReader mmapReader,
                                   String webRoot, OrderManager orderManager, PositionTracker positionTracker,
@@ -355,6 +414,45 @@ public class OptionsDashboardServer {
             }
             body.put("positions", rows);
             sendJson(exchange, 200, body);
+        }));
+
+        server.createContext("/api/control", guarded(exchange -> {
+            applySecurityHeaders(exchange, true, isSecureRequest(exchange));
+            if (!authorizeApi(exchange)) return;
+            com.sbk.optionspricer.execution.OperatorControls controls = operatorControls;
+            if (controls == null) {
+                sendJsonError(exchange, 503, "operator controls unavailable");
+                return;
+            }
+            String path = exchange.getRequestURI().getPath();
+            if ("/api/control".equals(path)) {
+                if (!"GET".equals(exchange.getRequestMethod())) {
+                    exchange.getResponseHeaders().set("Allow", "GET");
+                    sendJsonError(exchange, 405, "method not allowed");
+                    return;
+                }
+                sendJson(exchange, 200, controlJson(controls.state()));
+                return;
+            }
+            if (!acceptMutation(exchange)) return;
+            com.fasterxml.jackson.databind.JsonNode body = readJsonObject(exchange);
+            if (body == null) return;
+            switch (path) {
+                case "/api/control/halt" -> {
+                    com.fasterxml.jackson.databind.JsonNode reason = body.get("reason");
+                    sendJson(exchange, 200, controlJson(controls.halt(reason == null || !reason.isTextual() ? null : reason.asText())));
+                }
+                case "/api/control/resume" -> sendJson(exchange, 200, controlJson(controls.resume()));
+                case "/api/control/strategy" -> {
+                    com.fasterxml.jackson.databind.JsonNode enabled = body.get("enabled");
+                    if (enabled == null || !enabled.isBoolean()) {
+                        sendJsonError(exchange, 400, "body must be {\"enabled\": true|false}");
+                        return;
+                    }
+                    sendJson(exchange, 200, controlJson(controls.setStrategyEnabled(enabled.asBoolean())));
+                }
+                default -> sendJsonError(exchange, 404, "not found");
+            }
         }));
 
         server.createContext("/api/risk", guarded(exchange -> {

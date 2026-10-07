@@ -133,6 +133,12 @@ public final class SurfaceFitter {
             warnings.add("SSVI fit reached the iteration cap; parameters are the best found, not a converged optimum");
         }
         SsviApproximation.SsviParams params = ssviParams(best.point());
+        if (Math.abs(params.rho) > 0.99) {
+            warnings.add("SSVI rho sits at its bound: the quotes carry little skew information");
+        }
+        if (params.eta < 1e-3) {
+            warnings.add("SSVI eta ~ 0: the quotes show no smile, so the fitted surface is flat in moneyness");
+        }
 
         double[] strikes = strikeGrid(used);
         double[][] vols = new double[expiries.length][strikes.length];
@@ -205,6 +211,9 @@ public final class SurfaceFitter {
                 warnings.add(String.format(java.util.Locale.ROOT, "SABR fit for T=%.3f reached the iteration cap", t));
             }
             fittedParams[i] = sabrParams(r.point());
+            if (Math.abs(fittedParams[i][1]) > 0.99) {
+                warnings.add(String.format(java.util.Locale.ROOT, "SABR rho sits at its bound for T=%.3f: the quotes carry little skew information", t));
+            }
             String tag = String.format(java.util.Locale.ROOT, "[%.3f]", t);
             parameters.put("alpha" + tag, fittedParams[i][0]);
             parameters.put("rho" + tag, fittedParams[i][1]);

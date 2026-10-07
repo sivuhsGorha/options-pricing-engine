@@ -2,10 +2,15 @@ import { formatNumber, formatCurrency } from '../lib/format';
 
 const timeOf = (ms) => (ms ? new Date(ms).toLocaleTimeString() : '--');
 
-/** Paper-trading state: halt status, open positions, and the most recent orders with reasons for rejections. */
-export default function ExecutionPanel({ positions, orders }) {
+/**
+ * Paper-trading state and operator controls: halt status with HALT / RESUME, the strategy switch with its
+ * trigger and size, open positions, and the most recent orders with reasons for rejections.
+ */
+export default function ExecutionPanel({ positions, orders, control, onHalt, onResume, onToggleStrategy }) {
     const recent = [...orders].reverse().slice(0, 25);
     const accepted = orders.filter(o => o.accepted).length;
+    const halted = control.halted;
+    const triggerText = Number.isFinite(control.triggerPct) ? `${(control.triggerPct * 100).toFixed(3)}%` : '--';
     return (
         <div className="panel tape-panel">
             <div className="panel-header">
@@ -15,10 +20,26 @@ export default function ExecutionPanel({ positions, orders }) {
                 </span>
             </div>
             <div style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap',
                 padding: '6px 8px', fontSize: '13px', borderBottom: '1px solid #1C232D',
-                background: positions.halted ? '#3D0A0A' : '#0A3D2A', color: positions.halted ? '#FF3D00' : '#00E676'
+                background: halted ? '#3D0A0A' : '#0A3D2A', color: halted ? '#FF3D00' : '#00E676'
             }}>
-                {positions.halted ? `TRADING HALTED — ${positions.haltReason || 'no reason given'}` : 'TRADING ACTIVE'}
+                <span>{halted ? `TRADING HALTED — ${control.haltReason || 'no reason given'}` : 'TRADING ACTIVE'}</span>
+                {halted
+                    ? <button type="button" className="fkey" style={{ borderColor: '#00E676', color: '#00E676' }} onClick={onResume}>RESUME</button>
+                    : <button type="button" className="fkey" style={{ borderColor: '#FF3D00', color: '#FF3D00' }} onClick={onHalt}>HALT</button>}
+            </div>
+            <div style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap',
+                padding: '6px 8px', fontSize: '12px', borderBottom: '1px solid #1C232D', color: '#9EC1FF'
+            }}>
+                <span>
+                    STRATEGY <span style={{ color: control.strategyEnabled ? '#00E676' : '#FF9900', fontWeight: 'bold' }}>{control.strategyEnabled ? 'ON' : 'OFF'}</span>
+                    {' · '}{control.symbol || '--'} · trigger {triggerText} · size {control.baseQuantity || '--'}
+                </span>
+                <button type="button" className="fkey" onClick={onToggleStrategy}>
+                    {control.strategyEnabled ? 'STRATEGY OFF' : 'STRATEGY ON'}
+                </button>
             </div>
             <div className="panel-content no-padding">
                 <table className="data-table">

@@ -65,7 +65,7 @@ public final class VolatilitySurfaceService implements VolatilitySurfaceSource, 
     public synchronized void refresh() {
         Instant now = clock.instant();
         LocalDate today = LocalDate.ofInstant(now, ZoneOffset.UTC);
-        List<String> warnings = new ArrayList<>();
+        Set<String> warnings = new LinkedHashSet<>(); // a provider failing on every expiry is reported once
 
         List<LocalDate> expiries;
         try {
@@ -84,13 +84,14 @@ public final class VolatilitySurfaceService implements VolatilitySurfaceSource, 
                 chains.add(sourced.chain());
                 sources.add(sourced.source());
                 marketData &= sourced.marketData();
+                warnings.addAll(sourced.notes());
                 onChainLoaded.accept(sourced.chain());
             } catch (RuntimeException e) {
                 warnings.add("expiry " + expiry + ": " + rootMessage(e));
             }
         }
         if (chains.isEmpty()) {
-            status = new Status(State.FAILED, "no option chain for " + symbol + (warnings.isEmpty() ? "" : ": " + warnings.get(0)), now);
+            status = new Status(State.FAILED, "no option chain for " + symbol + (warnings.isEmpty() ? "" : ": " + warnings.iterator().next()), now);
             return;
         }
 
@@ -175,7 +176,7 @@ public final class VolatilitySurfaceService implements VolatilitySurfaceSource, 
         return new ArrayList<>(chosen).stream().sorted().toList();
     }
 
-    private static SurfaceFitter.Fit tryFit(String model, Supplier<SurfaceFitter.Fit> fit, List<String> warnings) {
+    private static SurfaceFitter.Fit tryFit(String model, Supplier<SurfaceFitter.Fit> fit, Set<String> warnings) {
         try {
             return fit.get();
         } catch (RuntimeException e) {
@@ -190,7 +191,9 @@ public final class VolatilitySurfaceService implements VolatilitySurfaceSource, 
         return cause.getMessage() == null ? cause.getClass().getSimpleName() : cause.getMessage();
     }
 
-    private static String lastOrEmpty(List<String> warnings) {
-        return warnings.isEmpty() ? "" : warnings.get(warnings.size() - 1);
+    private static String lastOrEmpty(Set<String> warnings) {
+        String last = "";
+        for (String w : warnings) last = w;
+        return last;
     }
 }

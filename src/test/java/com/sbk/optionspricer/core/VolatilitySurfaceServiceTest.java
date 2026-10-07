@@ -93,6 +93,8 @@ class VolatilitySurfaceServiceTest {
         fallback.refresh();
         assertEquals("SYNTHETIC", fallback.latest().orElseThrow().source());
         assertFalse(fallback.latest().orElseThrow().marketData());
+        assertTrue(fallback.latest().orElseThrow().warnings().stream().anyMatch(w -> w.contains("FAKE_VENUE") && w.contains("boom")),
+                "the fallback must say why the market provider was not used: " + fallback.latest().orElseThrow().warnings());
 
         VolatilitySurfaceService venue = service(new CompositeOptionChainProvider(List.of(FAKE_VENUE, new SyntheticOptionChainProvider())), null);
         venue.refresh();

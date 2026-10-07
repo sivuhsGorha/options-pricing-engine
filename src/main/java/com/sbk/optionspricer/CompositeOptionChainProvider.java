@@ -26,14 +26,26 @@ public class CompositeOptionChainProvider implements OptionChainProvider {
     @Override
     public SourcedChain getSourcedChain(String symbol, LocalDate expiry) {
         RuntimeException lastException = null;
+        java.util.List<String> notes = new java.util.ArrayList<>();
         for (OptionChainProvider provider : providers) {
             try {
-                return provider.getSourcedChain(symbol, expiry);
+                SourcedChain answered = provider.getSourcedChain(symbol, expiry);
+                java.util.List<String> merged = new java.util.ArrayList<>(notes);
+                merged.addAll(answered.notes());
+                return new SourcedChain(answered.chain(), answered.source(), answered.marketData(), merged);
             } catch (Exception e) {
-                lastException = new RuntimeException("Provider " + provider.sourceName() + " failed: " + e.getMessage(), e);
+                String note = "Provider " + provider.sourceName() + " failed: " + rootMessage(e);
+                notes.add(note);
+                lastException = new RuntimeException(note, e);
             }
         }
         throw new RuntimeException("All option chain providers failed for symbol " + symbol, lastException);
+    }
+
+    private static String rootMessage(Throwable t) {
+        Throwable cause = t;
+        while (cause.getCause() != null && cause.getCause() != cause) cause = cause.getCause();
+        return cause.getMessage() == null ? cause.getClass().getSimpleName() : cause.getMessage();
     }
 
     /** The listing of the first provider that has one; the monthly default if none does. */

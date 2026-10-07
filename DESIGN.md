@@ -31,9 +31,12 @@ exists. The quotes the surface was fitted to are overlaid as markers on the 3D p
 can be judged by eye; warnings (too few quotes, calendar arbitrage in the data, iteration cap) are in the badge
 tooltip. Each chart has EXPAND / SHRINK.
 
-**Right: Paper Trading.** Trading status (ACTIVE, or HALTED with the reason), the position table (symbol,
+**Right: Paper Trading.** Trading status (ACTIVE with a HALT button, or HALTED with the reason and a RESUME
+button), the strategy row (ON/OFF switch, symbol, trigger percentage, order size), the position table (symbol,
 quantity, multiplier, notional) and the last 25 orders (time, id, quantity, fill price, `FILLED (<data
-status>)` or `REJECTED: <reason>`), from `/api/positions` and `/api/execution`.
+status>)` or `REJECTED: <reason>`), from `/api/positions`, `/api/control` and `/api/execution`. The buttons
+call POST endpoints that require the session cookie and the page's own Origin (see EXECUTION.md); every
+action is written to the event log with its outcome.
 
 **Footer ribbon.** SPY price and status, SOURCE, and GATEWAY, which reads `PAPER` because orders fill only in
 the paper-trading adapter.
@@ -48,7 +51,9 @@ the paper-trading adapter.
 | `TICK` / F2 | describes the paper-trading panel |
 | `VOLS` / F3 | un-expands the charts |
 | `RISK`, `MARGIN` / F4, F5 | logs a note; the risk panel is always visible |
-| `SSVI`, `SABR`, `FREE` | switch the surface model |
+| `HALT`, `RESUME` | trip or clear the trading halt (same as the panel buttons) |
+| `STRATEGY ON`, `STRATEGY OFF` | switch order generation on or off |
+| `SSVI`, `SABR` | switch the surface model |
 | anything else | `UNKNOWN FUNCTION` |
 
 ---

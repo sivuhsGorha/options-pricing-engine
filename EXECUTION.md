@@ -53,8 +53,14 @@ accepted and rejected orders with the data status and the rejection reason.
 | `GET /api/execution` | the audit trail: order id, accepted, source data status, rejection reason, fill price, quantity, time |
 | `GET /api/positions` | `halted`, `haltReason`, and positions (symbol, quantity, multiplier, notional) |
 | `GET /api/risk` | engine risk state (from the mmap file) plus the execution book's exposure; 503 while the engine state is unavailable |
+| `GET /api/control` | `halted`, `haltReason`, `haltedAt`, `strategyEnabled`, `symbol`, `triggerPct`, `baseQuantity` |
+| `POST /api/control/halt` | body `{"reason": "..."}` (optional); trips `TradingHalt`, returns the new state |
+| `POST /api/control/resume` | clears the halt, returns the new state |
+| `POST /api/control/strategy` | body `{"enabled": true\|false}`; switches order generation, returns the new state |
 
-All endpoints require a session cookie or HMAC-signed request and set security headers (see INFRA.md).
+All endpoints require a session cookie or HMAC-signed request and set security headers (see INFRA.md). The
+state-changing endpoints accept POST only, and a cookie-bearing request must also carry an allowed `Origin`
+header, so a page on another site cannot trip or clear the halt through the operator's browser.
 
 ---
 

@@ -143,5 +143,12 @@ class SurfaceFitterTest {
         assertTrue(extraction.points().size() >= 20, "points " + extraction.points().size());
         assertTrue(fit.rmse() < 1e-3, "RMSE " + fit.rmse());
         for (double[] row : fit.vols()) for (double v : row) assertEquals(0.20, v, 0.005);
+        assertTrue(fit.warnings().stream().anyMatch(w -> w.contains("flat")), "flat data must be reported as such: " + fit.warnings());
+
+        // Flat quotes carry no skew information, so SABR's rho is unidentifiable; the fit must say so instead of
+        // presenting a boundary value as a calibration result.
+        SurfaceFitter.Fit sabr = SurfaceFitter.fitSabr(extraction.points());
+        assertTrue(sabr.rmse() < 1e-3);
+        assertTrue(sabr.warnings().stream().anyMatch(w -> w.contains("bound")), sabr.warnings().toString());
     }
 }

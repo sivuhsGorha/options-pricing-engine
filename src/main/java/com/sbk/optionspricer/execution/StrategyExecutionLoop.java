@@ -60,6 +60,18 @@ public class StrategyExecutionLoop {
         this.marketSnapshotAdapter = marketSnapshotAdapter;
     }
 
+    public String symbol() {
+        return symbol;
+    }
+
+    public double triggerPct() {
+        return triggerPct;
+    }
+
+    public int baseQuantity() {
+        return baseQuantity;
+    }
+
     public ExecutionSummary run(List<Double> prices) {
         return run(prices, null);
     }
