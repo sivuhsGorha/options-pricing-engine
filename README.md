@@ -1,139 +1,73 @@
-# Enterprise Options Pricing & Quantitative Trading Engine (AURA-OPT)
+# Options Pricing & Paper-Trading Engine (AURA-OPT)
 
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)](https://github.com/)
-[![Market Coverage](https://img.shields.io/badge/exchanges-Euronext%20%7C%20LSEG%20%7C%20Eurex%20%7C%20SIX%20%7C%20Nasdaq%20Nordic-blue.svg)](https://github.com/)
-[![Java Version](https://img.shields.io/badge/java-25-orange.svg)](https://oracle.com)
-[![Latency](https://img.shields.io/badge/tick--to--trade-%3C%208.5%20%CE%BCs-red.svg)](https://github.com/)
+[![CI](https://github.com/sivuhsGorha/options-pricing-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/sivuhsGorha/options-pricing-engine/actions)
+[![Java Version](https://img.shields.io/badge/java-25-orange.svg)](https://openjdk.org/)
 
-An institutional-grade, multi-asset quantitative options pricing, risk management, and execution platform engineered for high-frequency market making, volatility arbitrage, and portfolio risk management across major European exchanges.
+A Java 25 options pricing and risk library with a paper-trading loop and a web dashboard. It prices
+options, calibrates volatility surfaces, computes Greeks and portfolio risk, and runs an order flow
+(pre-trade checks, risk admission, simulated fills) against live or simulated market data.
 
----
-
-## 🏛 Exchange Integration & European Market Coverage
-
-Designed specifically to interface directly with top-tier European derivatives venues:
-
-| Exchange Group | Platform / API Protocol | Products Covered | Market Data Interface |
-| :--- | :--- | :--- | :--- |
-| **Eurex (Deutsche Börse)** | T7 Binary Interface / FIX 4.4 | FDAX, FCHI, FSTX, Equity Options | EOBI (Enhanced Order Book Interface) |
-| **Euronext** | Optiq OEG (Order Entry Gateway) | AEX, CAC40, BEL20, Individual Equities | Optiq MDG (Market Data Gateway) |
-| **London Stock Exchange Group (LSEG)** | SOLA / Millennium | FTSE 100 Index Options, UK Equities | GTP (Group Ticker Plant) |
-| **SIX Swiss Exchange** | OTI / FIX | SMI Options, Swiss Equity Options | QDF (Quick Data Feed) |
-| **Nasdaq Nordic** | INET / OUCH / FIX | OMXS30 Options, Nordic Equities | ITCH 5.0 / NLS |
+**What it is not:** a connection to any exchange. There is no live order entry and no exchange market-data
+feed. Orders only ever fill in the built-in paper-trading adapter. The `gateways/` package and
+`execution/SmartOrderRouter` are simulations of binary-protocol encoding and decoding (see their class
+headers). No latency figure is measured or claimed.
 
 ---
 
-## 🚀 Core Architectural Pillars
+## What is implemented
 
-```
-                     ┌─────────────────────────────────────────────────────────┐
-                     │            European Market Data Feeds                   │
-                     │  (Eurex EOBI, Euronext MDG, LSEG GTP, Nasdaq ITCH)     │
-                     └────────────────────────────┬────────────────────────────┘
-                                                  │
-                                                  ▼
-┌───────────────────────────────────────────────────────────────────────────────────────────┐
-│                          LMAX Disruptor Zero-Copy Ring Buffer                             │
-└──────────────┬──────────────────────────────────┬──────────────────────────┬──────────────┘
-               │                                  │                          │
-               ▼                                  ▼                          ▼
-┌────────────────────────────┐  ┌───────────────────────────┐  ┌────────────────────────────┐
-│ Market Data & Vol Surface  │  │ Analytical & PDE Pricing  │  │  High-Speed Monte Carlo    │
-│  - SABR / SSVI Calibration │  │  - Black-Scholes-Merton   │  │   - 10M Paths / Sec (AVX)  │
-│  - OIS Yield Curves        │  │  - Longstaff-Schwartz     │  │   - Variance Reduction     │
-│  - Real-time Tick Capture  │  │  - Trinomial Trees        │  │   - Sobol Sequences        │
-└──────────────┬─────────────┘  └─────────────┬─────────────┘  └─────────────┬──────────────┘
-               │                              │                              │
-               └──────────────────────────────┼──────────────────────────────┘
-                                              │
-                                              ▼
-┌───────────────────────────────────────────────────────────────────────────────────────────┐
-│                                 Institutional Risk Engine                                 │
-│      Greeks (L1/L2) | Real-time Portfolio VaR | Eurex Prisma / SPAN Margin | Kill-Switch  │
-└─────────────────────────────────────────────┬─────────────────────────────────────────────┘
-                                              │
-                                              ▼
-┌───────────────────────────────────────────────────────────────────────────────────────────┐
-│                             Low-Latency Execution Engine                                  │
-│             Smart Order Router (SOR) | Native Binary Connectors | Co-location DMA          │
-└───────────────────────────────────────────────────────────────────────────────────────────┘
-```
+| Area | Implementation |
+| :--- | :--- |
+| Closed-form pricing | Black-Scholes-Merton with continuous dividend yield; accurate normal CDF; safeguarded Newton implied-volatility solver |
+| Early exercise | Trinomial tree; Crank-Nicolson PDE (Rannacher start, Brennan-Schwartz) in log-spot; discrete-dividend PDE pricer |
+| Monte Carlo | European Monte Carlo pricer used as a cross-check for the closed form; VaR / expected shortfall calculators |
+| Volatility | SVI, SSVI with no-arbitrage conditions and validation, SABR (Hagan) and a free-boundary variant, Dupire local vol |
+| Rates | OIS / par-yield curve bootstrap, ACT/365F day count, optional FRED and ESTR providers |
+| Greeks and risk | First, second and higher-order Greeks, portfolio aggregation, limit alerts, margin approximation (not an exchange margin model) |
+| Execution | `OrderManager` (halt check, data-quality policy, portfolio admission, pre-trade limits, order state machine), `PositionTracker`, paper-trading fills, contract multiplier |
+| Dashboard | Embedded HTTP API and a Jetty WebSocket feed, HMAC request signing, browser sessions, React frontend in `web-react/` |
+| IPC | Engine state published through a memory-mapped file (seqlock) and read by the web layer |
 
-1. **Ultra-Low Latency Core**: Written in modern Java 25 utilizing `MemorySegment` off-heap allocations, LMAX Disruptor zero-copy ring buffers, and vector API SIMD instructions to achieve sub-microsecond pricing.
-2. **Comprehensive Option Models**:
-   - **Analytical**: Closed-form Black-Scholes-Merton with continuous dividends & yields.
-   - **American / Early Exercise**: Trinomial Trees and Longstaff-Schwartz Monte Carlo (LSMC).
-   - **Stochastic Volatility**: SABR, SVI, SSVI, and Heston pricing engines.
-3. **Institutional Volatility Surface Engineering**: Automated real-time calibration of implied volatility surfaces with arbitrage-free constraints (no static/calendar or butterfly arbitrage).
-4. **Real-time Enterprise Risk**: Continuous sub-millisecond calculation of first-order ($\Delta, \text{Vega}, \Theta, \text{Rho}$), second-order ($\Gamma, \text{Vanna}, \text{Volga}$), and third-order ($\text{Speed}, \text{Color}$) Greeks alongside Eurex Prisma / SPAN margin requirements.
+Market data comes from Finnhub, Polygon, Alpha Vantage, MarketStack and Yahoo Finance when API keys are
+configured. Without a live source, quotes are marked `SIMULATED`/`UNAVAILABLE` and orders are rejected
+unless `ALLOW_SIMULATED_DATA=true`.
 
 ---
 
-## 📦 Directory & File Structure
+## Quick start
 
-```
-options-pricing-engine/
-├── README.md               # System Architecture & Overview
-├── STRATEGY.md             # Quantitative Trading Strategies & Alpha Generation
-├── DATA.md                 # Market Data Pipelines, Tick Replay & Yield Curves
-├── BACKTEST.md             # High-Fidelity Event-Driven Options Simulator
-├── RISK.md                 # Institutional Risk Controls & Greek Sensitivity
-├── ROADMAP.md              # Engineering Milestones & Future Scalability
-├── EXECUTION.md            # Exchange Connectivity & Smart Order Routing
-├── INFRA.md                # Infrastructure, Co-Location & JVM Optimization
-├── RESEARCH.md             # Academic Foundations & Stochastic Volatility Models
-├── CONTRIBUTING.md         # Developer Guidelines & PR Rules
-├── CODE_STYLE.md           # Zero-Allocation Coding Standards & Math Conventions
-└── AGENTS.md               # Autonomous Quant AI Agent Operational Manual
-```
+Prerequisites: JDK 25, Maven 3.9+, and Node 20+ only if you rebuild the frontend.
 
----
-
-## 🛠 Quick Start
-
-### Prerequisites
-- **Java 25** or higher
-- **Maven 3.9+** or **Gradle 8.5+**
-- Linux kernel 5.15+ (with `cgroups v2` and isolated CPU cores for production)
-
-### Build & Run
-### Build & Run
 ```bash
-# 1. Compile Java 25 codebase with Incubator Vector API support
-javac --add-modules jdk.incubator.vector -d target/classes (Get-ChildItem -Recurse src/main/java/*.java)
+# Build and test (JaCoCo coverage gate included)
+mvn clean verify
 
-# 2. Refresh market_data.csv around a real SPY spot (Finnhub, Polygon, Alpha Vantage, MarketStack).
-#    Keys come from .env or the environment. Exits with status 2 and leaves the file untouched if no
-#    provider answers; use --synthetic --spot 500 to generate fully synthetic data on purpose.
+# Configuration: copy config.example.yaml to config.yaml, and put secrets in .env (never committed):
+#   API_SECRET=<at least 32 characters>
+#   OPERATOR_PASSWORD=<at least 12 characters>
+#   FINNHUB_API_KEY=...  POLYGON_API_KEY=...  (any provider you have)
+
+# Run the engine and the dashboard (http://127.0.0.1:8080, WebSocket on port 8081)
+java --add-modules jdk.incubator.vector -jar target/options-pricing-engine-1.0.0-SNAPSHOT.jar
+
+# Optional: refresh market_data.csv from a real provider (exits with status 2 if none answers)
 python fetch_real_api_data.py
-
-# 3. Launch Core Verification Suite
-java --add-modules jdk.incubator.vector -cp target/classes com.sbk.optionspricer.Main
-
-# 4. Launch Bloomberg Terminal Dashboard Server (Web UI: http://localhost:8080)
-java --add-modules jdk.incubator.vector -cp target/classes com.sbk.optionspricer.web.OptionsDashboardServer
 ```
 
----
-
-## 🖥 Bloomberg Terminal Web Dashboard
-
-The engine includes a zero-dependency embedded web server hosting a Bloomberg-style dark mode terminal UI at **`http://localhost:8080/`**:
-
-- **Real-Time Market Rate Feed**: Connects to Finnhub, Polygon.io, Alpha Vantage, and MarketStack for live SPY equity options chain ingestion.
-- **Interactive 3D Volatility Surface**: Real-time Plotly 3D visualizer supporting **SSVI (Gatheral)**, **Free-Boundary SABR**, and **SABR (Hagan 2002)** models with hotkey switching (`SSVI`, `FREE`, `SABR`).
-- **Telemetry & Risk Matrix**: Streaming zero-allocation binary WebSocket telemetry on `ws://localhost:8081` for real-time Greeks, L3 order fill probability, Smart Order Router (SOR) allocation breakdown, and SPAN / Eurex Prisma margin optimizer.
+Risk and execution settings (`risk.*`, `execution.*`, `strategy.*`) are documented in `config.example.yaml`.
+`execution.contract_multiplier` (default 1) scales notional, limits and positions identically.
 
 ---
 
-## 📜 Documentation Index
+## Documentation
 
-- Read [`DESIGN.md`](file:///c:/options-pricing-engine/DESIGN.md) for Bloomberg Terminal UI specs and color tokens.
-- Read [`STRATEGY.md`](file:///c:/options-pricing-engine/STRATEGY.md) for strategy design and volatility arbitrage execution.
-- Read [`DATA.md`](file:///c:/options-pricing-engine/DATA.md) for market data ingestion, feeds, and multi-API provider pipeline.
-- Read [`BACKTEST.md`](file:///c:/options-pricing-engine/BACKTEST.md) for simulation engine details.
-- Read [`RISK.md`](file:///c:/options-pricing-engine/RISK.md) for real-time risk parameters and hardware kill-switches.
-- Read [`EXECUTION.md`](file:///c:/options-pricing-engine/EXECUTION.md) for native binary gateway protocol specs and Smart Order Routing.
-- Read [`INFRA.md`](file:///c:/options-pricing-engine/INFRA.md) for kernel tuning, Solarflare OpenOnload, and off-heap memory models.
-- Read [`RESEARCH.md`](file:///c:/options-pricing-engine/RESEARCH.md) for stochastic calculus and PDE numerical derivations.
-- Read [`AGENTS.md`](file:///c:/options-pricing-engine/AGENTS.md) for automated agent operating procedures.
+- [DESIGN.md](DESIGN.md): dashboard UI specification
+- [STRATEGY.md](STRATEGY.md): strategy design
+- [DATA.md](DATA.md): market-data ingestion and providers
+- [BACKTEST.md](BACKTEST.md): backtesting
+- [RISK.md](RISK.md): risk parameters and limits
+- [EXECUTION.md](EXECUTION.md): order flow and (simulated) gateway layouts
+- [INFRA.md](INFRA.md): deployment and JVM notes
+- [QUANT_MATH.md](QUANT_MATH.md) and [RESEARCH.md](RESEARCH.md): the mathematics
+- [HFT_ARCHITECTURE.md](HFT_ARCHITECTURE.md): design notes for the memory-mapped IPC and vectorised maths
+- [CONTRIBUTING.md](CONTRIBUTING.md), [CODE_STYLE.md](CODE_STYLE.md), [AGENTS.md](AGENTS.md): working agreements

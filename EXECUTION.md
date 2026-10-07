@@ -1,5 +1,8 @@
 # Low-Latency Execution & Exchange Gateway Protocols (EXECUTION.md)
 
+> **Status: design target, not implemented.** The only working execution path is the paper-trading adapter (`execution/PaperTradingExecutionAdapter`) behind `OrderManager`. The exchange protocol layouts, venue routing, kernel bypass and co-location described below are plans or simulations (`gateways/`, `execution/SmartOrderRouter`); there is no connection to any exchange.
+
+
 This document details the high-frequency execution architecture, exchange binary protocol handlers, Smart Order Routing (SOR) algorithms, and Direct Market Access (DMA) co-location setups across European derivatives markets.
 
 ---

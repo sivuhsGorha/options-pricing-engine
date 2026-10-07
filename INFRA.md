@@ -1,5 +1,8 @@
 # Enterprise Infrastructure & Low-Latency JVM Tuning (INFRA.md)
 
+> **Status: deployment ideas, not verified.** Nothing here is installed or measured by this repository. The shipped deployment is the `Dockerfile` (a plain JVM container).
+
+
 This document specifies the bare-metal hardware configuration, Linux kernel parameters, low-latency JVM tuning, containerization, and monitoring stack required for ultra-low latency execution.
 
 ---

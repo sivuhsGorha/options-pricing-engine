@@ -94,7 +94,7 @@ Unlike index options which assume continuous dividend yield ($q$), single-stock 
 
 ## 5. Multi-API Real-Time Ingestion Pipeline
 
-The quantitative engine includes a multi-tiered python market data ingestion pipeline ([`fetch_real_api_data.py`](file:///c:/options-pricing-engine/fetch_real_api_data.py)) connecting to major financial data APIs:
+The quantitative engine includes a multi-tiered python market data ingestion pipeline ([`fetch_real_api_data.py`](fetch_real_api_data.py)) connecting to major financial data APIs:
 
 1. **Finnhub.io**: Primary real-time stock quote API (`/v1/quote`).
 2. **Polygon.io**: Secondary fallback previous close & aggregate REST API (`/v2/aggs`).

@@ -1,5 +1,8 @@
 # Multi-Phase Engineering Roadmap (ROADMAP.md)
 
+> **Status:** this is a wish list. Items are not committed work, and none of the low-latency or multi-venue items exist yet.
+
+
 This document outlines the strategic engineering phases, feature milestones, and scalability goals for expanding the Options Pricing & Quantitative Execution Engine into a global multi-asset platform.
 
 ---

@@ -1,5 +1,8 @@
 # Institutional Risk Management & Real-Time Controls (RISK.md)
 
+> **Status:** the implemented controls are pre-trade limits, concentration limits, portfolio admission, Greek alerts that halt trading (`TradingHalt`), and a margin *approximation*. Hardware or exchange-level kill switches and exchange margin models (Prisma/SPAN) mentioned below are not implemented.
+
+
 This document establishes the real-time risk management architecture, Greek exposure limits, Value-at-Risk (VaR) calculations, initial margin modeling (Eurex Prisma / SPAN), and automated emergency circuit breakers.
 
 ---

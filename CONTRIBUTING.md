@@ -1,13 +1,13 @@
 # Developer Guidelines & Contribution Workflow (CONTRIBUTING.md)
 
-Thank you for contributing to the Options Pricing & Quantitative Trading Platform. This project operates under strict institutional quality, performance, and correctness standards.
+Thank you for contributing to the Options Pricing & Quantitative Trading Platform. Correctness comes first: changes to pricing or risk code need tests that show the numbers are right.
 
 ---
 
 ## 1. Development Principles
 
 1. **Empirical Verification First**: Every claim regarding performance improvement or numerical accuracy must be accompanied by benchmark logs and empirical test suites.
-2. **Zero Allocation on Hot Paths**: Code executing in market data loops, option pricing routines, or execution gateways must perform zero memory allocations on the Java heap.
+2. **Avoid Allocation on Hot Paths**: Keep market data loops and option pricing routines allocation-free where practical, and do not add allocations to them without a reason.
 3. **Absence of Arbitrage Constraints**: Any modification to pricing, interpolation, or volatility surface code must prove mathematically and empirically that no static or dynamic arbitrage opportunities are introduced.
 
 ---
@@ -30,14 +30,13 @@ Thank you for contributing to the Options Pricing & Quantitative Trading Platfor
 Before submitting a Pull Request, you **MUST** run and pass all quantitative sanity checks:
 
 ```bash
-# Compile and run full test & verification suite
-javac -d target/classes src/main/java/com/sbk/optionspricer/*.java
-java -cp target/classes com.sbk.optionspricer.Main
+# Compile, run the full test suite and enforce the coverage gate (the same command CI runs)
+mvn -B clean verify
 ```
 
 ### Pull Request Checklist:
-- [ ] Code compiles cleanly on JDK 21 LTS with zero warnings.
+- [ ] `mvn clean verify` passes on JDK 25.
 - [ ] Closed-form pricing matches Monte Carlo simulation within 95% Confidence Interval.
 - [ ] Put-Call parity condition $C - P = S e^{-qT} - K e^{-rT}$ holds to within $10^{-6}$ tolerance.
 - [ ] Implied Volatility solver accurately recovers input volatility across extreme strikes ($0.5 \le K/S \le 1.5$) and short maturities ($T = 1 \text{ day}$).
-- [ ] Zero memory allocations added to critical pricing loops.
+- [ ] No allocations added to critical pricing loops.
