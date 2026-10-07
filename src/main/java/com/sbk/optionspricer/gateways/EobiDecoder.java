@@ -7,7 +7,7 @@ import java.nio.ByteOrder;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * High-performance binary decoder for simulated Eurex EOBI (Enhanced Order Book Interface) packets.
+ * Binary decoder for a SIMULATED, EOBI-like packet layout (not the real Eurex EOBI schema).
  * Decodes raw network byte streams directly into off-heap OrderBookTicks without creating any objects.
  */
 public class EobiDecoder {

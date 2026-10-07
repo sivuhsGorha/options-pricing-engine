@@ -6,8 +6,9 @@ import java.nio.ByteOrder;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Mock Multicast UDP Handler for Eurex EOBI.
- * Simulates an exchange feed generating raw byte packets and passing them to the EobiDecoder.
+ * SIMULATION: mock feed, not a multicast UDP handler. It generates random packets in a made-up
+ * EOBI-like layout and passes them to the EobiDecoder; no network socket is opened and the
+ * prices are random numbers, not market data.
  */
 public class EobiMarketDataHandler {
 

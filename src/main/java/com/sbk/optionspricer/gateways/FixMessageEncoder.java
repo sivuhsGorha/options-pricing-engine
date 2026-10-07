@@ -1,7 +1,8 @@
 package com.sbk.optionspricer.gateways;
 
 /**
- * Encodes OrderTickets into standard FIX 4.4 (Financial Information eXchange) messages.
+ * SIMULATION: encodes OrderTickets into FIX 4.4-style New Order Single messages. There is no FIX session
+ * (logon, heartbeats, sequence recovery) and no counterparty; the output is not sent anywhere.
  */
 public class FixMessageEncoder {
 

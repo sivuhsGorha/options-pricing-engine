@@ -149,8 +149,7 @@ public final class UnifiedQuantEngine {
                     quote.openInterest()
             ));
         }
-        System.out.println("[UNIFIED ENGINE] Off-heap FFM Structs, SPSC ring buffer, SSVI Surface,");
-        System.out.println("[UNIFIED ENGINE] Parallel Solvers, SOR, Margin Optimizer & Mmap IPC ONLINE.");
+        System.out.println("[UNIFIED ENGINE] Pricing, SSVI surface, margin approximation and mmap IPC state online.");
         System.out.println("=========================================================================");
     }
 

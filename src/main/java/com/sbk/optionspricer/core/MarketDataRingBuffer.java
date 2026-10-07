@@ -7,7 +7,7 @@ import java.lang.invoke.VarHandle;
 
 /**
  * Single-Producer Single-Consumer (SPSC) Lock-Free Ring Buffer.
- * Mechanically sympathetic design heavily inspired by the LMAX Disruptor.
+ * Off-heap SPSC ring in the spirit of the LMAX Disruptor (it is not the Disruptor, and its latency is unmeasured).
  * 
  * Pre-allocates a massive contiguous block of off-heap memory and slices it 
  * into flyweight OrderBookTicks. Sequences are padded to prevent false sharing.

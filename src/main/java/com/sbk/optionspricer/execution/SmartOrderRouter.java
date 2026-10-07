@@ -5,9 +5,10 @@ import java.nio.ByteOrder;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Smart Order Router (SOR) and Gateway.
- * Takes validated orders and translates them into the raw binary payload
- * required by the exchange (e.g., Eurex ETI - Enhanced Trading Interface).
+ * SIMULATION: order encoder in the style of an exchange binary protocol.
+ * Takes validated orders and writes a fixed-layout payload loosely modelled on Eurex ETI. It is NOT
+ * a conformant ETI implementation (no session layer, no schema versioning) and there is no real
+ * venue behind it, so it performs no routing between venues.
  */
 public class SmartOrderRouter {
 

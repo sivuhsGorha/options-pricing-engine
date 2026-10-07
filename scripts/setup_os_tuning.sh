@@ -19,4 +19,5 @@ echo "performance" | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_gover
 # Bypasses the standard Linux TCP/IP stack to talk directly to the NIC via user-space.
 # Usage:
 # onload --profile=latency java -XX:+UseZGC -XX:+AlwaysPreTouch -jar target/options-pricer.jar
-echo "OS Tuning Configuration saved. Solarflare Onload ready."
+echo "Governor set (if sudo succeeded). IRQ affinity and OpenOnload above are commented examples only;"
+echo "this script does not install or verify them."
