@@ -27,12 +27,12 @@ public class MonteCarloVaRCalculator {
      * @param netVega Portfolio vega
      * @return The 99% Monte Carlo VaR loss
      */
-    public static double calculate99PercentVaR(double spot, SlvParams heston, 
-                                               double riskFreeRate, double divYield, 
+    public static double calculate99PercentVaR(double spot, SlvParams heston,
+                                               double riskFreeRate, double divYield,
                                                int holdingPeriodDays,
                                                double netDelta, double netGamma, double netVega) {
 
-        double dt = 1.0 / (365.0 * STEPS_PER_DAY);
+        double dt = 1.0 / (com.sbk.optionspricer.TimeConventions.DAYS_PER_YEAR * STEPS_PER_DAY);
         int totalSteps = holdingPeriodDays * STEPS_PER_DAY;
         double sqrtDt = Math.sqrt(dt);
         double rho = heston.rho;
@@ -58,10 +58,10 @@ public class MonteCarloVaRCalculator {
                 // Heston dynamics (Euler-Maruyama with full truncation for variance)
                 double vPositive = Math.max(v, 0.0);
                 double sqrtV = Math.sqrt(vPositive);
-                
+
                 s = s * Math.exp((riskFreeRate - divYield - 0.5 * vPositive) * dt + sqrtV * dw1);
                 v = v + heston.kappa * (heston.theta - vPositive) * dt + heston.xi * sqrtV * dw2;
-                
+
                 // Truncate variance to prevent negative values in simulation
                 v = Math.max(v, 0.0);
             }
@@ -69,10 +69,10 @@ public class MonteCarloVaRCalculator {
             // PnL approximation using Taylor expansion (Delta-Gamma-Vega)
             double dS = s - spot;
             double dVol = Math.sqrt(v) - Math.sqrt(heston.v0); // Convert variance back to vol for vega
-            
+
             // PnL = Delta * dS + 0.5 * Gamma * dS^2 + Vega * dVol
-            return (netDelta * dS) + (0.5 * netGamma * dS * dS) + (netVega * dVol * 100.0); 
-            // Note: Vega is typically quoted for a 1 point (or 1%) move in vol. 
+            return (netDelta * dS) + (0.5 * netGamma * dS * dS) + (netVega * dVol * 100.0);
+            // Note: Vega is typically quoted for a 1 point (or 1%) move in vol.
             // Depending on convention, we scale dVol by 100 if Vega is per 1% vol change.
         });
 

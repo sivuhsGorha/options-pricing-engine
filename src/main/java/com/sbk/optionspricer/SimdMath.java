@@ -5,8 +5,10 @@ import jdk.incubator.vector.VectorSpecies;
 import jdk.incubator.vector.VectorOperators;
 
 /**
- * SIMD Vectorized Mathematics Engine using jdk.incubator.vector.
- * Accelerates bulk math operations (sqrt, exp, log) via CPU AVX-512 / NEON instructions.
+ * Bulk array math. {@code sqrt}, {@code add} (and the other element-wise arithmetic) use the incubator Vector
+ * API. {@code exp} and {@code log} are NOT vectorized: they loop over {@link FastMath} approximations, whose
+ * errors (1e-7 to 1e-6) are documented there. Every method gives the same result for an element whether it falls
+ * in the vector body or in the scalar tail.
  */
 public class SimdMath {
 
@@ -18,25 +20,23 @@ public class SimdMath {
     public static void sqrt(double[] src, double[] dst, int length) {
         int i = 0;
         int upperBound = SPECIES.loopBound(length);
-        
+
         for (; i < upperBound; i += SPECIES.length()) {
             DoubleVector v = DoubleVector.fromArray(SPECIES, src, i);
             v.lanewise(VectorOperators.SQRT).intoArray(dst, i);
         }
-        
-        // Scalar fallback loop for tail elements
+
+        // Scalar tail: the same exact IEEE sqrt as the vector body, so a result does not depend on the array length.
         for (; i < length; i++) {
-            dst[i] = FastMath.fastSqrt(src[i]);
+            dst[i] = Math.sqrt(src[i]);
         }
     }
 
     /**
-     * Vectorized exponentiation.
-     * Note: VectorOperators.EXP is not standard on all architectures yet, so we apply 
-     * a vectorized polynomial approximation (Taylor/Maclaurin) or fallback to FastMath.
+     * exp for every element via {@link FastMath#fastExp} (relative error up to ~1.6e-7). Scalar loop, not SIMD.
      */
     public static void exp(double[] src, double[] dst, int length) {
-        // Fallback to scalar FastMath.fastExp since bitwise Double-to-Long manipulations 
+        // Fallback to scalar FastMath.fastExp since bitwise Double-to-Long manipulations
         // across vectors require complex re-interpretations that can bottleneck.
         // A full AVX-512 implementation would use SVML (Short Vector Math Library) bindings.
         for (int i = 0; i < length; i++) {
@@ -45,7 +45,7 @@ public class SimdMath {
     }
 
     /**
-     * Vectorized natural logarithm.
+     * Natural log for every element via {@link FastMath#fastLog} (absolute error up to ~1.1e-6). Scalar loop, not SIMD.
      */
     public static void log(double[] src, double[] dst, int length) {
         // Similar to exp, full cross-platform SIMD log requires SVML.
@@ -61,13 +61,13 @@ public class SimdMath {
     public static void add(double[] a, double[] b, double[] dst, int length) {
         int i = 0;
         int upperBound = SPECIES.loopBound(length);
-        
+
         for (; i < upperBound; i += SPECIES.length()) {
             DoubleVector va = DoubleVector.fromArray(SPECIES, a, i);
             DoubleVector vb = DoubleVector.fromArray(SPECIES, b, i);
             va.add(vb).intoArray(dst, i);
         }
-        
+
         for (; i < length; i++) {
             dst[i] = a[i] + b[i];
         }
@@ -79,13 +79,13 @@ public class SimdMath {
     public static void multiply(double[] a, double[] b, double[] dst, int length) {
         int i = 0;
         int upperBound = SPECIES.loopBound(length);
-        
+
         for (; i < upperBound; i += SPECIES.length()) {
             DoubleVector va = DoubleVector.fromArray(SPECIES, a, i);
             DoubleVector vb = DoubleVector.fromArray(SPECIES, b, i);
             va.mul(vb).intoArray(dst, i);
         }
-        
+
         for (; i < length; i++) {
             dst[i] = a[i] * b[i];
         }

@@ -18,6 +18,20 @@ import java.util.List;
  */
 public class Main {
 
+    /**
+     * One-line Black-Scholes demonstration. It reports C - P next to S*exp(-qT) - K*exp(-rT): the two must be equal,
+     * and their difference is the put-call parity error (rounding noise, ~1e-14). The old line printed C - P under the
+     * label "Parity", which looked like a violation whenever it was non-zero, but C - P is not zero (here it is -2.4075).
+     */
+    public static String pricingSummary(double spot, double strike, double expiry, double rate, double vol, double dividendYield) {
+        double call = BlackScholesPricer.price(OptionType.CALL, spot, strike, expiry, rate, vol, dividendYield);
+        double put = BlackScholesPricer.price(OptionType.PUT, spot, strike, expiry, rate, vol, dividendYield);
+        double forwardGap = spot * Math.exp(-dividendYield * expiry) - strike * Math.exp(-rate * expiry);
+        return String.format(java.util.Locale.ROOT,
+                "Black-Scholes Call: %.4f | Put: %.4f | C - P = %.4f | S*exp(-qT) - K*exp(-rT) = %.4f | parity error = %.3E",
+                call, put, call - put, forwardGap, (call - put) - forwardGap);
+    }
+
     public static void main(String[] args) throws Exception {
         System.out.println("=========================================================================");
         System.out.println("      AURA-OPT INSTITUTIONAL OPTIONS PRICING & EXECUTION PLATFORM        ");
@@ -31,17 +45,14 @@ public class Main {
 
         // 1. Core Mathematical Models
         System.out.println("\n[MODULE 1] Core Mathematical Pricing Models");
-        OptionParameters params = OptionParameters.noDividend(
-                config.getDouble("market_data.spot", 100.0),
-                105.0,
-                0.5,
+        double demoSpot = config.getDouble("market_data.spot", 100.0);
+        System.out.println(pricingSummary(
+                demoSpot,
+                config.getDouble("demo.strike", demoSpot * 1.05),
+                config.getDouble("demo.expiry_years", 0.5),
                 config.getDouble("market_data.risk_free_rate", 0.05),
-                config.getDouble("volatility.default_volatility", 0.25)
-        );
-        double callPrice = BlackScholesPricer.price(OptionType.CALL, params);
-        double putPrice = BlackScholesPricer.price(OptionType.PUT, params);
-        System.out.printf(java.util.Locale.ROOT, "Black-Scholes Call: %.4f | Put: %.4f | Parity: %.6f%n",
-                callPrice, putPrice, callPrice - putPrice);
+                config.getDouble("volatility.default_volatility", 0.25),
+                config.getDouble("market_data.dividend_yield", 0.0)));
 
         System.out.println("\n[MODULE 9] Launching Unified Quant Execution Engine...");
         AppCompositionRoot root = new AppCompositionRoot();

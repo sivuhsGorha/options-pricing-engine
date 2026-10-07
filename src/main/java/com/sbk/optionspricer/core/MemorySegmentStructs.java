@@ -7,9 +7,9 @@ import java.lang.foreign.StructLayout;
 import java.lang.foreign.ValueLayout;
 
 /**
- * Modern Java 21 Foreign Function & Memory (FFM) API Struct Layouts.
- * Enforces strict 64-byte cache-line aligned off-heap memory representation
- * for market ticks and execution orders, ensuring 100% zero-GC operation.
+ * Foreign Function & Memory (FFM) API struct layouts for market ticks and execution orders.
+ * Keeping tick data off-heap avoids garbage-collector pressure from the data itself; it does not make a
+ * process allocation-free, since the code around it still allocates normally.
  */
 public final class MemorySegmentStructs {
 

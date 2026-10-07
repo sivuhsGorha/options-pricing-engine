@@ -1,9 +1,19 @@
 package com.sbk.optionspricer;
 
 /**
- * Ultra-fast mathematical approximations for high-frequency quantitative options pricing.
- * Bypasses native C libm overhead with argument-reduced Chebyshev/Remez minimax polynomials,
- * IEEE 754 bit-manipulation for exponentiation and logarithms, and fast cdf evaluation.
+ * Low-precision approximations of exp, log, sqrt and the normal CDF/PDF.
+ *
+ * <p><strong>These trade accuracy for nothing you should rely on.</strong> Measured over the ranges tested
+ * (see {@code MathAndConventionsTest}): {@code fastExp} relative error up to 1.6e-7, {@code fastLog} absolute
+ * error up to 1.1e-6, {@code fastSqrt} relative error up to 1.5e-6, {@code fastCdf} absolute error up to 7.4e-8
+ * (it is the Abramowitz &amp; Stegun 26.2.17 rational approximation), {@code fastPdf} up to 4.5e-8.
+ * {@link Math#sqrt} is a hardware instruction on current JVMs and {@link NormalDistribution#cdf} is exact to
+ * double precision, so prefer them wherever the value feeds a price. Earlier documentation described these as
+ * Chebyshev/Remez minimax polynomials; they are a degree-6 Taylor polynomial (exp), a short odd series in
+ * (m-1)/(m+1) (log) and two Newton steps from a bit-pattern guess (sqrt).
+ *
+ * <p>Edge cases follow IEEE conventions: log of a negative or NaN is NaN, log(0) is -infinity, log(+infinity) is
+ * +infinity, sqrt of a negative is NaN.
  */
 public final class FastMath {
 
@@ -11,12 +21,11 @@ public final class FastMath {
 
     private static final double LN2 = 0.6931471805599453;
     private static final double INV_LN2 = 1.4426950408889634; // 1 / ln(2)
-    private static final double SQRT_2_PI = 0.7978845608028654; // sqrt(2/pi)
     private static final double ONE_OVER_SQRT_2PI = 0.3989422804014327; // 1 / sqrt(2*pi)
 
     /**
-     * Fast exp(x) approximation using argument reduction x = k*ln(2) + r
-     * and bitwise IEEE 754 double scaling for 2^k.
+     * exp(x) by argument reduction x = k*ln(2) + r, a degree-6 Taylor polynomial for exp(r) on
+     * [-ln2/2, ln2/2], and exact scaling by 2^k through the exponent bits. Relative error up to ~1.6e-7.
      */
     public static double fastExp(double x) {
         if (x < -700.0) return 0.0;
@@ -26,7 +35,6 @@ public final class FastMath {
         int k = (int) Math.round(x * INV_LN2);
         double r = x - k * LN2;
 
-        // 6th degree Horner scheme polynomial for exp(r), r in [-ln2/2, ln2/2]
         double p = 1.0 + r * (1.0 + r * (0.5 + r * (0.16666666666666666 + r * (0.041666666666666664 + r * (0.008333333333333333 + r * 0.001388888888888889)))));
 
         // Scale by 2^k via bit manipulation
@@ -35,11 +43,16 @@ public final class FastMath {
     }
 
     /**
-     * Fast log(x) approximation using mantissa/exponent bit decomposition
-     * and Padé / series representation of ln((1+u)/(1-u)).
+     * ln(x) from the exponent/mantissa decomposition and a short series for ln((1+u)/(1-u)), u = (m-1)/(m+1).
+     * Absolute error up to ~1.1e-6.
      */
     public static double fastLog(double x) {
-        if (x <= 0.0) return Double.NaN;
+        if (Double.isNaN(x) || x < 0.0) return Double.NaN;
+        if (x == 0.0) return Double.NEGATIVE_INFINITY;
+        if (x == Double.POSITIVE_INFINITY) return Double.POSITIVE_INFINITY;
+        if (x < Double.MIN_NORMAL) {
+            return fastLog(x * 0x1p54) - 54.0 * LN2; // subnormals have no implicit leading 1 in the mantissa bits
+        }
 
         long bits = Double.doubleToLongBits(x);
         int exp = (int) ((bits >> 52) & 0x7FF) - 1023;
@@ -48,38 +61,35 @@ public final class FastMath {
 
         double u = (m - 1.0) / (m + 1.0);
         double u2 = u * u;
-
-        // 9th degree polynomial for ln((1+u)/(1-u))
         double p = u * (2.0 + u2 * (0.6666666666666666 + u2 * (0.4 + u2 * (0.2857142857142857 + u2 * 0.2222222222222222))));
 
         return exp * LN2 + p;
     }
 
     /**
-     * Fast sqrt(x) using doubleToLongBits initial bit shift guess (Quake III style for double)
-     * followed by 2 Newton-Raphson iterations.
+     * sqrt(x) from a bit-pattern initial guess and two Newton-Raphson steps. Relative error up to ~1.5e-6;
+     * {@link Math#sqrt} is exact and at least as fast, so this exists only for completeness.
      */
     public static double fastSqrt(double x) {
-        if (x <= 0.0) return 0.0;
+        if (Double.isNaN(x) || x < 0.0) return Double.NaN;
+        if (x == 0.0 || x == Double.POSITIVE_INFINITY || x < Double.MIN_NORMAL) return Math.sqrt(x);
         long bits = Double.doubleToLongBits(x);
-        // Bit magic initial estimate for double precision sqrt
         bits = (bits >> 1) + 0x1FF8000000000000L;
         double y = Double.longBitsToDouble(bits);
-        // 2 Newton-Raphson steps
         y = 0.5 * (y + x / y);
         y = 0.5 * (y + x / y);
         return y;
     }
 
     /**
-     * Fast Cumulative Normal Distribution Function (CDF) using Hart's rational approximation.
+     * Phi(x) by the Abramowitz &amp; Stegun 26.2.17 rational approximation (absolute error up to ~7.4e-8) with
+     * {@link #fastExp} inside. Use {@link NormalDistribution#cdf} when the value feeds a price.
      */
     public static double fastCdf(double x) {
         if (x < -7.0) return 0.0;
         if (x > 7.0) return 1.0;
 
         double absX = x < 0 ? -x : x;
-        // Rational approximation: CDF(x) = 1 - pdf(x) * rational(absX)
         double k = 1.0 / (1.0 + 0.2316419 * absX);
         double poly = k * (0.319381530 + k * (-0.356563782 + k * (1.781477937 + k * (-1.821255978 + k * 1.330274429))));
         double pdf = ONE_OVER_SQRT_2PI * fastExp(-0.5 * absX * absX);
@@ -88,9 +98,7 @@ public final class FastMath {
         return x < 0 ? 1.0 - cdf : cdf;
     }
 
-    /**
-     * Fast Standard Normal Probability Density Function (PDF).
-     */
+    /** Standard normal density using {@link #fastExp} (absolute error up to ~4.5e-8). */
     public static double fastPdf(double x) {
         return ONE_OVER_SQRT_2PI * fastExp(-0.5 * x * x);
     }

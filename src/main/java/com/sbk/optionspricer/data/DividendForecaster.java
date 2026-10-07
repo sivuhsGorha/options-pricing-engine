@@ -3,7 +3,6 @@ package com.sbk.optionspricer.data;
 import com.sbk.optionspricer.models.pde.DiscreteDividendPricer.DiscreteDividend;
 
 import java.time.LocalDate;
-import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -44,7 +43,7 @@ public class DividendForecaster implements DividendProvider {
                 nextExDate = nextExDate.plusYears(1);
             }
             if (!nextExDate.isAfter(to)) {
-                double timeToDividendInYears = ChronoUnit.DAYS.between(from, nextExDate) / 365.25;
+                double timeToDividendInYears = com.sbk.optionspricer.TimeConventions.yearFraction(from, nextExDate);
                 if (timeToDividendInYears > 0) {
                     projected.add(new DiscreteDividend(timeToDividendInYears, pastDiv.amount()));
                 }

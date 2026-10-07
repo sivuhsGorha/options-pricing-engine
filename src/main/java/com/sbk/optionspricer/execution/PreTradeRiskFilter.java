@@ -7,8 +7,8 @@ import java.util.Collections;
 import java.util.Map;
 
 /**
- * Sub-microsecond pre-trade risk filter.
- * This is the final line of defense before a packet leaves the server.
+ * Pre-trade risk filter: constant-time checks with no allocation on the accept path (latency is not benchmarked,
+ * and the check is synchronized). This is the final line of defense before an order is transmitted.
  * It prevents "Fat Finger" errors and algorithmic runaways (e.g., Knight Capital).
  */
 public class PreTradeRiskFilter {

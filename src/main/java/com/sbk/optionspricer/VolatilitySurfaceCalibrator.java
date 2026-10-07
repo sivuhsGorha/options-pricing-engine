@@ -1,7 +1,6 @@
 package com.sbk.optionspricer;
 
 import java.time.LocalDate;
-import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -111,6 +110,6 @@ public final class VolatilitySurfaceCalibrator {
     }
 
     private static double yearsBetween(LocalDate from, LocalDate to) {
-        return ChronoUnit.DAYS.between(from, to) / 365.0;
+        return TimeConventions.yearFraction(from, to);
     }
 }

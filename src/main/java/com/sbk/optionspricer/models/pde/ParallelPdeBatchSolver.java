@@ -6,9 +6,11 @@ import jdk.incubator.vector.DoubleVector;
 import jdk.incubator.vector.VectorSpecies;
 
 /**
- * Parallel-Vectorized Crank-Nicolson PDE Solver using Java 21 Incubator Vector API.
- * Vectorizes grid computations and tridiagonal matrix operations across Parallel lanes
- * (AVX2 / AVX-512) for ultra-low latency option pricing.
+ * Prices a batch of strikes with the scalar PDE solver ({@link DiscreteDividendPricer}).
+ *
+ * <p>Despite the class name, nothing here is vectorized: strikes are processed in chunks the width of a vector
+ * register, but each lane is an independent scalar solve. The results are identical to calling the scalar pricer
+ * strike by strike.
  */
 public final class ParallelPdeBatchSolver {
 
@@ -18,7 +20,7 @@ public final class ParallelPdeBatchSolver {
 
     /**
      * Prices a batch of American Options across an array of strikes using vector Parallel processing.
-     * 
+     *
      * @param isCall True for call, false for put
      * @param spot Underlying spot price
      * @param strikes Array of strikes

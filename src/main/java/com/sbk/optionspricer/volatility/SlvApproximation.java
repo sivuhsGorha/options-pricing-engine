@@ -1,6 +1,5 @@
 package com.sbk.optionspricer.volatility;
 
-import com.sbk.optionspricer.FastMath;
 import com.sbk.optionspricer.NormalDistribution;
 
 import java.util.OptionalDouble;
@@ -104,9 +103,9 @@ public class SlvApproximation {
      */
     public static double computeLeverageFactor(double dupireVol, SlvParams heston, double expiry) {
         // Expected Heston variance E[v_t] at time T
-        double expKappaT = FastMath.fastExp(-heston.kappa * expiry);
+        double expKappaT = Math.exp(-heston.kappa * expiry);
         double expectedVariance = heston.theta + (heston.v0 - heston.theta) * expKappaT;
-        double expectedVol = FastMath.fastSqrt(Math.max(expectedVariance, 1e-6));
+        double expectedVol = Math.sqrt(Math.max(expectedVariance, 1e-6));
 
         double leverage = dupireVol / expectedVol;
         // Clamp leverage ratio to preserve numerical stability
