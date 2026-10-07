@@ -6,7 +6,7 @@ import { renderSurfaceCharts } from './lib/surfaceCharts';
 import LoginForm from './components/LoginForm';
 import DataBanner from './components/DataBanner';
 import RiskPanel from './components/RiskPanel';
-import TapePanel from './components/TapePanel';
+import ExecutionPanel from './components/ExecutionPanel';
 import ChartPanel from './components/ChartPanel';
 
 const SURFACE_MODELS = [
@@ -25,6 +25,8 @@ function App() {
     recommendedHedge: null, optimizedMargin: null, marginReductionPct: null,
     l3FillProb: null, sorAllocations: null
   });
+  const [positions, setPositions] = useState({ halted: false, haltReason: null, positions: [] });
+  const [orders, setOrders] = useState([]);
   const [logs, setLogs] = useState([{ time: '09:00:00', msg: 'AURA-OPT Unified Engine online. Mmap IPC active.' }]);
   const [surfaceData, setSurfaceData] = useState(null);
   const [expandedChart, setExpandedChart] = useState(null);
@@ -124,7 +126,7 @@ function App() {
     } else if (cleanCmd.includes('RISK') || cleanCmd.includes('F4') || cleanCmd.includes('F5') || cleanCmd.includes('MARGIN')) {
       addLog("RISK: Live portfolio Greeks & scenario margin optimizer active.");
     } else if (cleanCmd.includes('TICK') || cleanCmd.includes('F2')) {
-      addLog("TICK: Market tape view (no exchange feed is connected).");
+      addLog("TICK: Paper-trading orders and positions (no exchange feed is connected).");
     } else {
       addLog(`UNKNOWN FUNCTION: ${cleanCmd}`);
     }
@@ -155,9 +157,11 @@ function App() {
     const fetchSurfaceData = poll(`/surface3d?model=${surfaceModel}`,
       (data) => { setSurfaceData(data); addLog(`Vol Surface updated [${surfaceModel}].`); },
       () => addLog("Failed to map Volatility Surface."));
+    const fetchPositions = poll('/positions', setPositions, () => {});
+    const fetchOrders = poll('/execution', setOrders, () => {});
     const fetchHealthData = poll('/health', setHealthInfo, () => setHealthInfo({ symbol: 'SPY', providers: {} }));
 
-    const jobs = [[updateRiskMetrics, 1000], [fetchSpotData, 2000], [fetchSurfaceData, 5000], [fetchHealthData, 5000]];
+    const jobs = [[updateRiskMetrics, 1000], [fetchSpotData, 2000], [fetchSurfaceData, 5000], [fetchHealthData, 5000], [fetchPositions, 2000], [fetchOrders, 2000]];
     jobs.forEach(([job]) => job());
     const timers = jobs.map(([job, ms]) => setInterval(job, ms));
     return () => timers.forEach(clearInterval);
@@ -246,7 +250,7 @@ function App() {
           </div>
         </div>
 
-        <TapePanel metrics={metrics} />
+        <ExecutionPanel positions={positions} orders={orders} />
       </div>
 
       <footer className="sys-footer">

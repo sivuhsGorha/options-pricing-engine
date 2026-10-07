@@ -95,6 +95,37 @@ class ApiResponseHardeningTest {
     }
 
     @Test
+    void positionsEndpointReportsPositionsAndTheTradingHalt() throws Exception {
+        PositionTracker tracker = new PositionTracker(FillRecorder.NONE);
+        OrderManager manager = new OrderManager(new PreTradeRiskFilter(1000, 1e9, 1000),
+                (order, sym, bid, ask) -> new ExecutionResult(sym, order.quantity(), order.price(), true, "Executed"), tracker);
+        manager.submit(new Order(1, true, 7, 100.0), new MarketSnapshot("SPY", 99.99, 100.01, 100.0, 2000L,
+                Instant.now(), Instant.now(), 0L, "TEST", MarketDataStatus.LIVE));
+        start(reader(() -> new MmapStateReader.RiskState(0, 0, 0, 0)), manager, tracker, null);
+
+        JsonNode flat = MAPPER.readTree(get("/api/positions").body());
+        assertFalse(flat.get("halted").asBoolean());
+        assertEquals("SPY", flat.get("positions").get(0).get("symbol").asText());
+        assertEquals(7, flat.get("positions").get(0).get("quantity").asInt());
+        assertEquals(1, flat.get("positions").get(0).get("multiplier").asInt());
+
+        manager.getTradingHalt().halt("test halt \"quoted\"");
+        JsonNode halted = MAPPER.readTree(get("/api/positions").body());
+        assertTrue(halted.get("halted").asBoolean());
+        assertEquals("test halt \"quoted\"", halted.get("haltReason").asText());
+    }
+
+    @Test
+    void positionsEndpointWithoutAnExecutionStackIsEmptyNotAnError() throws Exception {
+        start(reader(() -> new MmapStateReader.RiskState(0, 0, 0, 0)), null, null, null);
+
+        JsonNode body = MAPPER.readTree(get("/api/positions").body());
+
+        assertFalse(body.get("halted").asBoolean());
+        assertEquals(0, body.get("positions").size());
+    }
+
+    @Test
     void riskEndpointReportsUnavailableStateAsAnErrorNotAsZeroRisk() throws Exception {
         start(reader(() -> { throw new IllegalStateException("UNAVAILABLE"); }), null, null, null);
 

@@ -239,6 +239,29 @@ public class OptionsDashboardServer {
             sendJson(exchange, 200, rows);
         }));
 
+        server.createContext("/api/positions", guarded(exchange -> {
+            applySecurityHeaders(exchange, true, isSecureRequest(exchange));
+            if (!authorizeApi(exchange)) return;
+            java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+            var halt = orderManager == null ? null : orderManager.getTradingHalt();
+            body.put("halted", halt != null && halt.isHalted());
+            body.put("haltReason", halt == null ? null : halt.reason().map(r -> r.message()).orElse(null));
+            java.util.List<java.util.Map<String, Object>> rows = new java.util.ArrayList<>();
+            if (positionTracker != null) {
+                for (var entry : positionTracker.getPositions().entrySet()) {
+                    var position = entry.getValue();
+                    java.util.Map<String, Object> row = new java.util.LinkedHashMap<>();
+                    row.put("symbol", entry.getKey());
+                    row.put("quantity", position.getQuantity());
+                    row.put("multiplier", position.getMultiplier());
+                    row.put("notional", Json.round(positionTracker.getNotional(entry.getKey()), 2));
+                    rows.add(row);
+                }
+            }
+            body.put("positions", rows);
+            sendJson(exchange, 200, body);
+        }));
+
         server.createContext("/api/risk", guarded(exchange -> {
             applySecurityHeaders(exchange, true, isSecureRequest(exchange));
             if (!authorizeApi(exchange)) return;
