@@ -62,23 +62,70 @@ visitor instead of a demo; Yahoo (now `401 Invalid Crumb`) stays available but o
 
 ---
 
-## Next: deployment readiness (this week, 2026-10-07 to 2026-10-11)
+## Next: from a pricing dashboard to an options paper-trading system
 
-Goal: a reviewer can clone, run, and trust every number on screen.
+Dated 2026-10-07. The order is deliberate: each phase makes the previous one's numbers mean more, and every
+task ships only with tests that failed first, a clean `mvn clean verify`, and green CI. Estimates are working
+days for one person. Nothing here promises exchange connectivity or performance figures.
 
-All eight deployment-readiness items are done; see the dated entries above.
+### Phase A: trade options off the fitted surface (4 to 5 days)
+
+Today the strategy trades SPY shares, so gamma and vega are honestly zero and the Greek alerts, hedge analysis
+and halt have nothing real to act on. After this phase the book holds option contracts priced from the fitted
+surface and marked to market every tick.
+
+| # | Task | What changes | Tests that must fail first | Done when |
+| :-- | :--- | :--- | :--- | :--- |
+| A1 | **Instrument identity on the order path** | `MarketSnapshot` gains an optional `instrument` (OCC symbol, expiry, strike, type, multiplier) built from `instruments/Instrument`; `OrderManager` books fills under the contract symbol with the contract's multiplier (100) instead of the configured default; `/api/positions` shows contract, expiry, strike, type | an option fill is booked under `SPY261120C00780000` with multiplier 100 and notional qty x price x 100; a share fill is unchanged | positions table lists contracts, not just `SPY` |
+| A2 | **Option quotes as market snapshots** | `OptionQuoteSnapshotAdapter` turns a Cboe chain quote (bid, ask, mid, volume, feed timestamp) into a `MarketSnapshot` with status `DELAYED`; the same freshness rules apply (120 s against the feed's timestamp) | a quote from the fixture becomes a snapshot with the right book and a `STALE` one when the feed timestamp is old; a zero-bid quote is not tradable | the order gate accepts or rejects option orders for stated reasons |
+| A3 | **Mark-to-market service** | `core/PortfolioValuationService` runs after each surface refresh and every N seconds: for each open contract, implied vol from the fitted SVI slice at its strike and expiry, Black-Scholes price and Greeks (`Greeks`, `AnalyticalHigherGreeks`), `PortfolioPosition.updateGreeks`, unrealised P&L against fill prices; theta and rho added to `PortfolioExposure` | a known position gets the Black-Scholes delta/gamma/vega at the surface's vol; a contract past expiry is valued at intrinsic and flagged; no surface means Greeks are reported as `UNAVAILABLE`, not zero | risk panel shows non-zero gamma/vega for an option book, with the valuation time |
+| A4 | **Options strategy** | `execution/VolSpreadStrategy` (on/off and parameters via `/api/control`): compares the market implied vol of the front-month ATM straddle with the fitted SVI value; sells the straddle when market IV exceeds the fit by more than `strategy.vol_edge` (default 1 vol pt) and buys it when below; delta-hedges with shares when net delta exceeds `strategy.hedge_band`; one position at a time, closes at `strategy.max_days_to_expiry` | generated chains where the market IV is pushed above the fit produce a sell; below, a buy; inside the band, nothing; the hedge fires only outside the band; everything still passes `OrderManager`'s gates | orders and positions in the dashboard show straddle legs and the hedge, each with its fill or rejection reason |
+| A5 | **Risk engine on real Greeks** | `UnifiedQuantEngine` publishes the valuation service's exposure (including theta and rho); `GreekAlertManager` thresholds come from `risk.*` config instead of constructor constants; the margin approximation's gamma term now matters | a book with gamma beyond `risk.max_gamma` trips a CRITICAL alert and the halt; the published mmap state matches the valuation | the halt fires for an options book that breaches a configured limit |
+| A6 | **Dashboard and docs** | positions table with contract columns and unrealised P&L; a "VALUATION" badge with the time and surface used; risk panel shows theta and rho; `STRATEGY.md`, `RISK.md`, `EXECUTION.md`, `DESIGN.md` updated | frontend tests for the new columns and badge | a reviewer can see a straddle, its Greeks and its P&L change with the market |
+
+Decisions taken up front: the strategy prices off **SVI** (the closest fit) and reports the edge against SSVI too,
+so the two are visible side by side; contract multiplier is read from the instrument, never from config, once A1
+lands; expired contracts are settled at intrinsic value against the spot of the day and removed, with a ledger
+entry. Risk: Cboe quotes are 15 minutes delayed, so "edge" includes staleness; the strategy's band must be
+wider than that noise and the docs must say so.
+
+### Phase B: a broker behind `ExchangeTransport` (2 to 3 days, needs your Alpaca paper keys)
+
+| # | Task | Done when |
+| :-- | :--- | :--- |
+| B1 | `AlpacaPaperTransport`: submit, acknowledge, poll for fills (partial fills become `PARTIALLY_FILLED`), cancel; keys from `.env` (`ALPACA_KEY_ID`, `ALPACA_SECRET`), paper endpoint only, hermetic tests against recorded responses | an order placed from the dashboard appears in the Alpaca paper account and its fill comes back into the position tracker |
+| B2 | Reconciliation: compare the local book with Alpaca positions at start and every minute; a mismatch trips the halt with the difference in the reason | a deliberately mismatched position halts trading and names the contract |
+| B3 | Transport selection in config (`execution.transport: paper | alpaca`) and a `TRANSPORT` badge in the UI | the dashboard says which transport is live |
+
+### Phase C: state that survives a restart (1 to 2 days)
+
+| # | Task | Done when |
+| :-- | :--- | :--- |
+| C1 | Move the fill ledger out of `target/` (which `mvn clean` deletes) into `data/`, SQLite via the JDK-free `sqlite-jdbc` dependency, with positions rebuilt from it at start | stop, start, and the positions table is unchanged |
+| C2 | Persist surface snapshots (parameters, RMSE, quotes used) so the surface history can be charted | a "surface history" chart of ATM vol and skew over the day |
+| C3 | Daily P&L and drawdown from the ledger on the dashboard | the risk panel shows realised and unrealised P&L since start |
+
+### Phase D: presentation (half a day, needs your screenshot)
+
+| # | Task | Done when |
+| :-- | :--- | :--- |
+| D1 | `docs/dashboard.png` captured by you; README header image and a 30-second "what you are looking at" caption | the GitHub landing page shows the fitted surface |
+| D2 | README "How it works" diagram: Cboe chain -> fitter -> surface -> strategy -> order gates -> paper fills -> risk | one picture a reviewer can follow |
+| D3 | Tag `v1.0.0` with release notes generated from this file | the release page lists what is and is not implemented |
+
+### Your actions
+- Restore `strategy.trigger_pct: 0.001` in your local `config.yaml` before showing the project (it holds a test value).
+- Fix or remove the rejected Polygon key; create a free Alpaca paper account before Phase B.
+- Capture the screenshot for D1.
 
 ---
 
 ## Later (one to three months)
 
-- Mark-to-market and Greeks of open positions through the pricer each tick; theta and rho aggregation.
-- Backtester with historical chains (Parquet), expiry settlement, fees, partial fills and impact; Sharpe,
-  Sortino, drawdown duration.
-- A broker paper-trading API as the first real `ExchangeTransport` (acknowledgements, partial fills, cancel),
-  with reconciliation against the broker's positions.
-- Persistent storage for fills and snapshots (SQLite or Postgres) replacing the in-memory stores.
+- Historical option chains (a paid or recorded source) so the backtester can replay real surfaces; expiry
+  settlement, fees, partial fills and impact; Sharpe, Sortino, drawdown duration.
 - Benchmarks (JMH) committed with results before any performance claim is written down.
+- Structured one-line logging if operations need it.
 
 ---
 
