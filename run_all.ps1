@@ -1,51 +1,24 @@
-# Compile the entire project
-Write-Host "Compiling the Options Pricing Engine..." -ForegroundColor Cyan
-New-Item -ItemType Directory -Force -Path "target/classes" | Out-Null
+# Runs the same checks as CI and exits non-zero if any of them fails.
+$ErrorActionPreference = 'Continue' # native stderr output must not abort; exit codes decide
+Set-Location $PSScriptRoot
 
-$javaFiles = Get-ChildItem -Path "src/main/java" -Filter "*.java" -Recurse
-$filePaths = $javaFiles.FullName -join " "
+function Invoke-Step([string]$Name, [scriptblock]$Command) {
+    Write-Host "`n=== $Name ===" -ForegroundColor Cyan
+    & $Command
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "FAILED: $Name (exit code $LASTEXITCODE)" -ForegroundColor Red
+        exit $LASTEXITCODE
+    }
+}
 
-# We use cmd /c to handle the long command line compilation properly
-cmd /c "javac --add-modules jdk.incubator.vector -d target/classes $filePaths"
+Invoke-Step 'Java build, tests and coverage gate' { mvn -B clean verify }
+Invoke-Step 'Python script tests' { python -m unittest discover -s scripts -p "test_*.py" -v }
+Push-Location web-react
+try {
+    Invoke-Step 'Frontend lint' { npm run lint }
+    Invoke-Step 'Frontend build' { npm run build }
+} finally {
+    Pop-Location
+}
 
-Write-Host "`n======================================================="
-Write-Host " 1. Running Phase 1: Core Mathematical Pricing Models"
-Write-Host "=======================================================" -ForegroundColor Yellow
-java --add-modules jdk.incubator.vector -cp target/classes com.sbk.optionspricer.Main
-
-Write-Host "`n======================================================="
-Write-Host " 2. Running Phase 2: Lock-Free LMAX Ring Buffer"
-Write-Host "=======================================================" -ForegroundColor Yellow
-java --add-modules jdk.incubator.vector -cp target/classes com.sbk.optionspricer.core.RingBufferTest
-
-Write-Host "`n======================================================="
-Write-Host " 3. Running Phase 2: SABR & SVI Volatility Calibration"
-Write-Host "=======================================================" -ForegroundColor Yellow
-java --add-modules jdk.incubator.vector -cp target/classes com.sbk.optionspricer.volatility.VolatilitySurfaceTest
-
-Write-Host "`n======================================================="
-Write-Host " 4. Running Phase 3: Simulated Exchange Gateway Replay"
-Write-Host "=======================================================" -ForegroundColor Yellow
-java --add-modules jdk.incubator.vector -cp target/classes com.sbk.optionspricer.gateways.GatewayTest
-
-Write-Host "`n======================================================="
-Write-Host " 5. Running Phase 4: Enterprise Risk Engine & SPAN Margin"
-Write-Host "=======================================================" -ForegroundColor Yellow
-java --add-modules jdk.incubator.vector -cp target/classes com.sbk.optionspricer.risk.RiskEngineTest
-
-Write-Host "`n======================================================="
-Write-Host " 6. Running Phase 5: HFT Latency Benchmark"
-Write-Host "=======================================================" -ForegroundColor Yellow
-java --add-modules jdk.incubator.vector -cp target/classes com.sbk.optionspricer.benchmark.LatencyBenchmarkTest
-
-Write-Host "`n======================================================="
-Write-Host " 7. Running Phase 6: Level 3 Proprietary Upgrades"
-Write-Host "=======================================================" -ForegroundColor Yellow
-java --add-modules jdk.incubator.vector -cp target/classes com.sbk.optionspricer.benchmark.Level3UpgradesTest
-
-Write-Host "`n======================================================="
-Write-Host " 8. Running Phase 7: Institutional Quantitative & Architecture Upgrades"
-Write-Host "=======================================================" -ForegroundColor Yellow
-java --add-modules jdk.incubator.vector -cp target/classes com.sbk.optionspricer.benchmark.InstitutionalSuiteTest
-
-Write-Host "`nALL TESTS COMPLETED SUCCESSFULLY!" -ForegroundColor Green
+Write-Host "`nAll checks passed." -ForegroundColor Green
