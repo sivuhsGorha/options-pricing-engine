@@ -74,6 +74,37 @@ export function residuals(model, quotes, t) {
     return quotes.map(q => ({ strike: q.strike, error: pct(interpolate(model.x, row, q.strike) - q.marketVol) }));
 }
 
+/**
+ * |model - quote| in vol points at every grid node, from the full quote set. For a fitted expiry the quotes of
+ * that slice are interpolated across strike; rows between fitted expiries interpolate the error in time. Nodes
+ * outside the quoted strike range of a slice are NaN: no quote there means no error to report.
+ */
+export function errorGrid(surface, points) {
+    const { x: strikes, y: expiries, z: vols } = surface;
+    const fitted = (surface.fittedExpiries && surface.fittedExpiries.length ? surface.fittedExpiries : expiries).slice().sort((a, b) => a - b);
+    const sliceError = new Map();
+    for (const t of fitted) {
+        const quotes = (points || []).filter(p => Math.abs(p.t - t) < 1e-6).sort((a, b) => a.strike - b.strike);
+        const row = vols[nearestRow(expiries, t)];
+        if (quotes.length < 2) { sliceError.set(t, strikes.map(() => NaN)); continue; }
+        const qx = quotes.map(q => q.strike), qv = quotes.map(q => q.marketVol);
+        sliceError.set(t, strikes.map((k, j) => (k < qx[0] || k > qx[qx.length - 1]) ? NaN : Math.abs(pct(row[j] - interpolate(qx, qv, k)))));
+    }
+    return expiries.map(t => {
+        let hi = 0;
+        while (hi < fitted.length - 1 && fitted[hi] < t) hi++;
+        const lo = Math.max(0, hi - 1);
+        if (Math.abs(fitted[hi] - t) < 1e-9 || hi === lo) return sliceError.get(Math.abs(fitted[hi] - t) < 1e-9 ? fitted[hi] : fitted[lo]);
+        const w = (t - fitted[lo]) / (fitted[hi] - fitted[lo]);
+        const a = sliceError.get(fitted[lo]), b = sliceError.get(fitted[hi]);
+        return strikes.map((_, j) => (Number.isNaN(a[j]) || Number.isNaN(b[j])) ? NaN : a[j] + w * (b[j] - a[j]));
+    });
+}
+
+const ERROR_COLORSCALE = [[0.0, '#0C1A2E'], [0.25, '#00E5FF'], [0.6, '#FF9900'], [1.0, '#FF3D00']];
+/** Same colour scale for every model so a reviewer can compare them: 0 to this many vol points of error. */
+const ERROR_SCALE_MAX_VOL_PTS = 3;
+
 const nearestRow = (expiries, t) => {
     let best = 0;
     for (let i = 1; i < expiries.length; i++) if (Math.abs(expiries[i] - t) < Math.abs(expiries[best] - t)) best = i;
@@ -91,15 +122,22 @@ export function renderSurfaceCharts(plotly, surface, elements, otherModels = [])
     const zValues = vols.flat().map(pct);
     const zRange = [Math.max(0, Math.min(...zValues) - 3), Math.max(...zValues) + 3];
 
+    // Shape: the fitted surface. Colour: this model's error against the quotes, on one fixed scale for all models,
+    // so three fits to the same market (which look alike as shapes) show how well each explains the quotes.
+    const hasQuotes = Array.isArray(surface.points) && surface.points.length > 0;
     const traces3d = [{
         x: strikes,
         y: expiries,
         z: vols.map(row => row.map(pct)),
         type: 'surface',
-        colorscale: AMBER_CYAN_COLORSCALE,
-        showscale: false,
+        colorscale: hasQuotes ? ERROR_COLORSCALE : AMBER_CYAN_COLORSCALE,
+        surfacecolor: hasQuotes ? errorGrid(surface, surface.points) : undefined,
+        cmin: hasQuotes ? 0 : undefined,
+        cmax: hasQuotes ? ERROR_SCALE_MAX_VOL_PTS : undefined,
+        showscale: hasQuotes,
+        colorbar: { title: { text: 'fit error<br>(vol pts)', font: { size: 11 } }, thickness: 9, len: 0.55, x: 1.0, tickfont: { size: 10 } },
         opacity: points.length ? 0.92 : 1.0,
-        contours: { z: { show: true, usecolormap: true, highlightcolor: '#FF9900', project: { z: true } } }
+        contours: { z: { show: true, usecolormap: false, color: '#1C232D', project: { z: true } } }
     }];
     if (points.length) {
         traces3d.push({

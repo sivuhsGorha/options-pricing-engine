@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { displayablePoints, interpolate, renderSurfaceCharts, residuals, smileExpiries } from './surfaceCharts';
+import { displayablePoints, errorGrid, interpolate, renderSurfaceCharts, residuals, smileExpiries } from './surfaceCharts';
 
 const strikes = [600, 700, 800, 900];
 
@@ -61,6 +61,34 @@ describe('surface chart data selection', () => {
         expect(errors[0].y[1]).toBeCloseTo(-0.5, 6);   // SSVI interpolated 17.5% at 750 vs 18%
         expect(layout.yaxis2.domain[1]).toBeLessThan(layout.yaxis.domain[0], 'the error row sits under the smile');
         expect(layout.yaxis2.range[1]).toBeGreaterThan(1.0);
+    });
+
+    it('colours each grid node by that model\'s error against the quotes, NaN where nothing is quoted', () => {
+        const surface = {
+            x: [600, 700, 800, 900], y: [0.1, 0.3, 0.5], fittedExpiries: [0.1, 0.5],
+            z: [[0.30, 0.20, 0.15, 0.20], [0.275, 0.19, 0.145, 0.185], [0.25, 0.18, 0.14, 0.17]],
+            points: [
+                { t: 0.1, strike: 700, marketVol: 0.21 }, { t: 0.1, strike: 800, marketVol: 0.15 },  // short expiry quoted 700..800 only
+                { t: 0.5, strike: 600, marketVol: 0.25 }, { t: 0.5, strike: 900, marketVol: 0.17 },  // long expiry quoted 600..900
+            ]
+        };
+
+        const grid = errorGrid(surface, surface.points);
+
+        expect(grid[0][0]).toBeNaN();                 // 600 at 0.1y: no quote
+        expect(grid[0][1]).toBeCloseTo(1.0, 6);       // 20% vs 21%
+        expect(grid[0][2]).toBeCloseTo(0.0, 6);
+        expect(grid[2][0]).toBeCloseTo(0.0, 6);       // long expiry matches its quotes at the ends
+        expect(grid[2][1]).toBeCloseTo(Math.abs(18 - (25 - (25 - 17) / 3)), 6); // vs the quote line interpolated to 700
+        expect(grid[1][1]).toBeCloseTo((grid[0][1] + grid[2][1]) / 2, 6, 'the middle row interpolates in time');
+        expect(grid[1][0]).toBeNaN();
+
+        const plotly = { react: vi.fn() };
+        renderSurfaceCharts(plotly, surface, { surface3d: 'a', smile: 'b', term: 'c' });
+        const trace = plotly.react.mock.calls[0][1][0];
+        expect(trace.surfacecolor.length).toBe(3);
+        expect(trace.cmax).toBe(3);
+        expect(trace.showscale).toBe(true);
     });
 
     it('interpolates linearly within the grid and clamps outside it', () => {
