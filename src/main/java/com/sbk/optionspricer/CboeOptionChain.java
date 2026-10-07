@@ -18,7 +18,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -37,7 +36,6 @@ public final class CboeOptionChain implements OptionChainProvider {
     static final Duration CACHE_TTL = Duration.ofMinutes(5);
     private static final String URL_TEMPLATE = "https://cdn.cboe.com/api/global/delayed_quotes/options/%s.json";
     private static final ObjectMapper JSON = new ObjectMapper();
-    private static final Pattern OCC_SYMBOL = Pattern.compile("^([A-Z]{1,6})(\\d{6})([CP])(\\d{8})$");
     private static final Pattern SYMBOL = Pattern.compile("^[A-Z0-9._-]{1,10}$");
 
     @FunctionalInterface
@@ -152,20 +150,14 @@ public final class CboeOptionChain implements OptionChainProvider {
 
         Map<LocalDate, List<OptionQuote>> byExpiry = new TreeMap<>();
         for (JsonNode option : data.path("options")) {
-            Matcher m = OCC_SYMBOL.matcher(option.path("option").asText(""));
-            if (!m.matches()) {
+            java.util.Optional<com.sbk.optionspricer.instruments.OccSymbol.Parsed> contract =
+                    com.sbk.optionspricer.instruments.OccSymbol.parse(option.path("option").asText(""));
+            if (contract.isEmpty()) {
                 continue;
             }
-            LocalDate expiry;
-            try {
-                String yymmdd = m.group(2);
-                expiry = LocalDate.of(2000 + Integer.parseInt(yymmdd.substring(0, 2)),
-                        Integer.parseInt(yymmdd.substring(2, 4)), Integer.parseInt(yymmdd.substring(4, 6)));
-            } catch (RuntimeException badDate) {
-                continue;
-            }
-            double strike = Long.parseLong(m.group(4)) / 1000.0;
-            OptionType type = "C".equals(m.group(3)) ? OptionType.CALL : OptionType.PUT;
+            LocalDate expiry = contract.get().expiry();
+            double strike = contract.get().strike();
+            OptionType type = contract.get().type();
             double bid = option.path("bid").asDouble(Double.NaN);
             double ask = option.path("ask").asDouble(Double.NaN);
             if (!Double.isFinite(bid) || !Double.isFinite(ask) || bid < 0.0 || ask < 0.0) {

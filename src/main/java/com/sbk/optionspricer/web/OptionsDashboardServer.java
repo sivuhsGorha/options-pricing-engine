@@ -516,6 +516,17 @@ public class OptionsDashboardServer {
                     row.put("quantity", position.getQuantity());
                     row.put("multiplier", position.getMultiplier());
                     row.put("notional", Json.round(positionTracker.getNotional(entry.getKey()), 2));
+                    // Option positions are keyed by OCC contract symbol; decode it so the UI can show the contract.
+                    com.sbk.optionspricer.instruments.OccSymbol.parse(entry.getKey()).ifPresentOrElse(contract -> {
+                        row.put("kind", "OPTION");
+                        row.put("underlying", contract.underlying());
+                        row.put("expiry", contract.expiry().toString());
+                        row.put("strike", contract.strike());
+                        row.put("type", contract.type().name());
+                    }, () -> {
+                        row.put("kind", "STOCK");
+                        row.put("underlying", entry.getKey());
+                    });
                     rows.add(row);
                 }
             }

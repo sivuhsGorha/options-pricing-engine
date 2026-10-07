@@ -29,8 +29,14 @@ StrategyExecutionLoop ──> OrderManager.submit(order, marketSnapshot)
 most recent) and supports `cancel(orderId)` for the unfilled remainder of a working order (local state only:
 `ExchangeTransport` has no cancel operation yet).
 
-**Money and prices.** Notional is `quantity x price x contractMultiplier` everywhere (risk filter,
-admission, concentration, booking). Prices crossing the wire are converted with `execution/PriceScale` to
+**Instruments.** A snapshot for an option carries its `Instrument`; its symbol is the OCC contract symbol
+(`SPY261120C00780000`, see `instruments/OccSymbol`) and the position is booked under that symbol with the
+contract's own multiplier (100), while the pre-trade notional and concentration count against the underlying
+(`SPY`) together with any shares. A stock snapshot has no instrument and uses `execution.contract_multiplier`.
+`/api/positions` decodes contract symbols into underlying, expiry, strike and type.
+
+**Money and prices.** Notional is `quantity x price x multiplier` everywhere (risk filter, admission,
+concentration, booking), with the multiplier from the instrument when there is one. Prices crossing the wire are converted with `execution/PriceScale` to
 exact decimal ticks of 0.0001 (HALF_EVEN), never by truncating `price * 10000`.
 
 **Paper fills** (`PaperTradingExecutionAdapter`): a buy fills at the ask (or bid if no ask) moved up by

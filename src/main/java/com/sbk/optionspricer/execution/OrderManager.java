@@ -152,14 +152,19 @@ public class OrderManager {
             return reject(orderId, mds, reason, reason);
         }
 
+        // An option is booked under its contract symbol with the contract's own multiplier; its notional and
+        // concentration count against the underlying. A stock uses the configured multiplier.
+        int multiplier = snapshot.multiplierOr(contractMultiplier);
+        String underlying = snapshot.underlying();
+
         if (portfolioAdmission != null && positionTracker != null) {
             int signedRequest = order.isBuy() ? order.quantity() : -order.quantity();
-            if (!portfolioAdmission.canAdmitOrder(snapshot.symbol(), signedRequest, order.price(), positionTracker, contractMultiplier)) {
+            if (!portfolioAdmission.canAdmitOrder(snapshot.symbol(), signedRequest, order.price(), positionTracker, multiplier)) {
                 return reject(orderId, mds, "failed portfolio risk admission", "order failed portfolio risk admission");
             }
         }
 
-        if (!riskFilter.checkRisk(order, snapshot.symbol(), snapshot.bid(), snapshot.ask(), snapshot.volume(), contractMultiplier)) {
+        if (!riskFilter.checkRisk(order, underlying, snapshot.bid(), snapshot.ask(), snapshot.volume(), multiplier)) {
             return reject(orderId, mds, "failed pre-trade risk validation", "order failed pre-trade risk validation");
         }
 
@@ -182,10 +187,10 @@ public class OrderManager {
         try {
             if (positionTracker != null) {
                 int signedQuantity = order.isBuy() ? filled : -filled;
-                positionTracker.applyFill(new PositionTracker.ExecutionFill(result.symbol(), signedQuantity, contractMultiplier, result.executionPrice()));
+                positionTracker.applyFill(new PositionTracker.ExecutionFill(result.symbol(), signedQuantity, multiplier, result.executionPrice()));
             }
-            double filledNotional = (double) filled * result.executionPrice() * contractMultiplier;
-            riskFilter.recordFill(result.symbol(), order.isBuy() ? filledNotional : -filledNotional);
+            double filledNotional = (double) filled * result.executionPrice() * multiplier;
+            riskFilter.recordFill(underlying, order.isBuy() ? filledNotional : -filledNotional);
         } catch (RuntimeException e) {
             // The order executed at the venue but our books may not reflect it. Never throw to the
             // caller as if nothing happened, and never keep trading on an unknown position.

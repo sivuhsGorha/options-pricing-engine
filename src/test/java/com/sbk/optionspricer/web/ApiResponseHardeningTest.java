@@ -193,11 +193,29 @@ class ApiResponseHardeningTest {
                 Instant.now(), Instant.now(), 0L, "TEST", MarketDataStatus.LIVE));
         start(reader(() -> new MmapStateReader.RiskState(0, 0, 0, 0)), manager, tracker, null);
 
+        var call = new com.sbk.optionspricer.instruments.Instrument("SPY", LocalDate.of(2026, 11, 20), 780.0,
+                com.sbk.optionspricer.OptionType.CALL, 100.0, null, 0.01, true);
+        manager.submit(new Order(2, true, 3, 9.9), new MarketSnapshot(call.contractSymbol(), 9.8, 10.0, 9.9, 500L,
+                Instant.now(), Instant.now(), 0L, "CBOE_DELAYED", MarketDataStatus.DELAYED, call));
+
         JsonNode flat = MAPPER.readTree(get("/api/positions").body());
         assertFalse(flat.get("halted").asBoolean());
-        assertEquals("SPY", flat.get("positions").get(0).get("symbol").asText());
-        assertEquals(7, flat.get("positions").get(0).get("quantity").asInt());
-        assertEquals(1, flat.get("positions").get(0).get("multiplier").asInt());
+        JsonNode shares = null, contract = null;
+        for (JsonNode row : flat.get("positions")) {
+            if ("SPY".equals(row.get("symbol").asText())) shares = row;
+            if ("SPY261120C00780000".equals(row.get("symbol").asText())) contract = row;
+        }
+        assertNotNull(shares);
+        assertEquals(7, shares.get("quantity").asInt());
+        assertEquals(1, shares.get("multiplier").asInt());
+        assertEquals("STOCK", shares.get("kind").asText());
+        assertNotNull(contract, "the option position is listed under its contract symbol");
+        assertEquals("OPTION", contract.get("kind").asText());
+        assertEquals("SPY", contract.get("underlying").asText());
+        assertEquals("2026-11-20", contract.get("expiry").asText());
+        assertEquals(780.0, contract.get("strike").asDouble(), 1e-9);
+        assertEquals("CALL", contract.get("type").asText());
+        assertEquals(100, contract.get("multiplier").asInt());
 
         manager.getTradingHalt().halt("test halt \"quoted\"");
         JsonNode halted = MAPPER.readTree(get("/api/positions").body());

@@ -40,4 +40,9 @@ public record Instrument(
             tradingHours = "09:30-16:00";
         }
     }
+
+    /** The OCC contract symbol positions in this contract are booked under, e.g. {@code SPY261120C00780000}. */
+    public String contractSymbol() {
+        return OccSymbol.format(symbol, expiry, type, strike);
+    }
 }

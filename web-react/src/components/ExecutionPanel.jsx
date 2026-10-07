@@ -1,4 +1,5 @@
 import { formatNumber, formatCurrency } from '../lib/format';
+import { describePosition } from '../lib/contract';
 
 const timeOf = (ms) => (ms ? new Date(ms).toLocaleTimeString() : '--');
 
@@ -57,7 +58,7 @@ export default function ExecutionPanel({ positions, orders, control, onHalt, onR
                         )}
                         {positions.positions.map(p => (
                             <tr key={p.symbol}>
-                                <td>{p.symbol}</td>
+                                <td title={p.symbol}>{describePosition(p)}</td>
                                 <td className="align-right mono">{p.quantity}</td>
                                 <td className="align-right mono">{p.multiplier}</td>
                                 <td className="align-right mono">{formatCurrency(p.notional)}</td>

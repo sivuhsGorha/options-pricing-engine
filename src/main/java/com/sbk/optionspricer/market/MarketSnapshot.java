@@ -1,5 +1,7 @@
 package com.sbk.optionspricer.market;
 
+import com.sbk.optionspricer.instruments.Instrument;
+
 import java.time.Instant;
 
 /**
@@ -10,6 +12,10 @@ import java.time.Instant;
  * has {@link #VOLUME_UNKNOWN}. Consumers check {@link #hasBook()} and {@link #hasVolume()} and must not
  * trade, risk-check or display an invented number in their place. (Earlier versions filled these with a
  * +/- 1 cent spread and a volume of 2000, which the liquidity check then treated as real.)
+ *
+ * <p>For an option, {@code instrument} identifies the contract and {@code symbol} is its OCC contract symbol,
+ * so positions are booked per contract with the contract's own multiplier while concentration limits apply to
+ * the {@link #underlying()}. For a stock {@code instrument} is null and the symbol is the ticker.
  */
 public record MarketSnapshot(
         String symbol,
@@ -21,7 +27,8 @@ public record MarketSnapshot(
         Instant sourceTimestamp,
         long derivedQuoteAgeMs,
         String source,
-        MarketDataStatus status
+        MarketDataStatus status,
+        Instrument instrument
 ) {
     /** Volume the provider did not report. */
     public static final long VOLUME_UNKNOWN = -1L;
@@ -45,6 +52,10 @@ public record MarketSnapshot(
         if (volume < 0L && volume != VOLUME_UNKNOWN) {
             throw new IllegalArgumentException("volume must be non-negative or VOLUME_UNKNOWN");
         }
+        if (instrument != null && !symbol.equals(instrument.contractSymbol())) {
+            throw new IllegalArgumentException("an option snapshot's symbol must be its contract symbol "
+                    + instrument.contractSymbol() + ", not " + symbol);
+        }
         if (timestamp == null) {
             timestamp = Instant.now();
         }
@@ -59,6 +70,12 @@ public record MarketSnapshot(
         }
     }
 
+    /** A stock (or any non-option) snapshot. */
+    public MarketSnapshot(String symbol, double bid, double ask, double last, long volume, Instant timestamp,
+                          Instant sourceTimestamp, long derivedQuoteAgeMs, String source, MarketDataStatus status) {
+        this(symbol, bid, ask, last, volume, timestamp, sourceTimestamp, derivedQuoteAgeMs, source, status, null);
+    }
+
     /** True when the provider supplied a bid and an ask. */
     public boolean hasBook() {
         return !Double.isNaN(bid);
@@ -67,5 +84,19 @@ public record MarketSnapshot(
     /** True when the provider supplied a volume. */
     public boolean hasVolume() {
         return volume != VOLUME_UNKNOWN;
+    }
+
+    public boolean isOption() {
+        return instrument != null;
+    }
+
+    /** The ticker concentration limits apply to: the option's underlying, or the symbol itself for a stock. */
+    public String underlying() {
+        return instrument != null ? instrument.symbol() : symbol;
+    }
+
+    /** The contract's multiplier for an option; the given default (the configured one) for a stock. */
+    public int multiplierOr(int fallback) {
+        return instrument != null ? (int) Math.round(instrument.multiplier()) : fallback;
     }
 }

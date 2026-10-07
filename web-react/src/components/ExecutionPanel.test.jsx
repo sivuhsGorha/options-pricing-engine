@@ -37,7 +37,10 @@ describe('ExecutionPanel', () => {
     });
 
     it('lists positions with notional and orders with their fill or rejection reason, newest first', () => {
-        const positions = { positions: [{ symbol: 'SPY', quantity: 10, multiplier: 100, notional: 480250 }] };
+        const positions = { positions: [
+            { symbol: 'SPY', kind: 'STOCK', quantity: 10, multiplier: 1, notional: 480250 },
+            { symbol: 'SPY261120C00780000', kind: 'OPTION', underlying: 'SPY', expiry: '2026-11-20', strike: 780, type: 'CALL', quantity: -2, multiplier: 100, notional: 1980 },
+        ] };
         const orders = [
             { orderId: 1, accepted: true, quantity: 10, fillPrice: 480.25, sourceStatus: 'LIVE', timestamp: 1 },
             { orderId: 2, accepted: false, quantity: 10, rejectionReason: 'market data not tradable: STALE', timestamp: 2 },
@@ -45,6 +48,8 @@ describe('ExecutionPanel', () => {
         render(<ExecutionPanel positions={positions} orders={orders} control={activeControl} onHalt={() => {}} onResume={() => {}} onToggleStrategy={() => {}} />);
 
         expect(screen.getByText('$480,250.00')).toBeInTheDocument();
+        expect(screen.getByText('SPY 20 Nov 26 780 C')).toBeInTheDocument();
+        expect(screen.getByText('$1,980.00')).toBeInTheDocument();
         expect(screen.getByText('1 FILLED / 1 REJECTED')).toBeInTheDocument();
         expect(screen.getByText('FILLED (LIVE)')).toBeInTheDocument();
         expect(screen.getByText('REJECTED: market data not tradable: STALE')).toBeInTheDocument();
