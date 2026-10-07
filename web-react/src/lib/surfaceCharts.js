@@ -66,7 +66,7 @@ const nearestRow = (expiries, t) => {
  * When the surface was fitted to quotes, a thinned set of the quotes inside the drawn band is overlaid as
  * markers so the fit can be judged by eye without hiding the surface; axis ranges are pinned to the surface.
  */
-export function renderSurfaceCharts(plotly, surface, elements) {
+export function renderSurfaceCharts(plotly, surface, elements, otherModels = []) {
     const { x: strikes, y: expiries, z: vols } = surface;
     const points = displayablePoints(surface.points, strikes);
     const zValues = vols.flat().map(pct);
@@ -106,9 +106,21 @@ export function renderSurfaceCharts(plotly, surface, elements) {
     }, PLOT_CONFIG);
 
     const smileTraces = [];
-    smileExpiries(expiries, surface.fittedExpiries).forEach((t, n) => {
+    const slices = smileExpiries(expiries, surface.fittedExpiries);
+    slices.forEach((t, n) => {
         const row = nearestRow(expiries, t);
-        smileTraces.push(lineTrace(strikes, vols[row].map(pct), `Exp ${expiries[row]}y`));
+        smileTraces.push(lineTrace(strikes, vols[row].map(pct), `${surface.model || 'model'} ${expiries[row]}y`));
+        if (n === 0) {
+            // Other models at the shortest expiry, dashed: fits to the same quotes differ most where the skew is steepest.
+            for (const other of otherModels) {
+                if (!other || !Array.isArray(other.z) || !other.z.length) continue;
+                const otherRow = nearestRow(other.y, t);
+                smileTraces.push({
+                    x: other.x, y: other.z[otherRow].map(pct), type: 'scatter', mode: 'lines',
+                    name: `${other.model} ${other.y[otherRow]}y`, line: { width: 2, dash: 'dot' }
+                });
+            }
+        }
         const quotes = points.filter(p => Math.abs(p.t - t) < 1e-6);
         if (quotes.length) {
             smileTraces.push({

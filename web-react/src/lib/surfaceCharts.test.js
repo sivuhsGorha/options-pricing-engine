@@ -44,4 +44,21 @@ describe('surface chart data selection', () => {
         expect(traces[1].x).toEqual([700]);
         expect(plotly.react).toHaveBeenCalledTimes(3);
     });
+
+    it('overlays the other models at the shortest expiry on the smile so fits to the same quotes can be compared', () => {
+        const plotly = { react: vi.fn() };
+        const surface = { model: 'SSVI', x: strikes, y: [0.1, 0.5], z: [[0.3, 0.2, 0.15, 0.2], [0.25, 0.18, 0.14, 0.17]], fittedExpiries: [0.1, 0.5], points: [] };
+        const svi = { model: 'SVI', x: strikes, y: [0.1, 0.5], z: [[0.31, 0.2, 0.15, 0.19], [0.25, 0.18, 0.14, 0.17]] };
+        const sabr = { model: 'SABR', x: strikes, y: [0.1, 0.5], z: [[0.29, 0.21, 0.15, 0.21], [0.25, 0.18, 0.14, 0.17]] };
+
+        renderSurfaceCharts(plotly, surface, { surface3d: 'a', smile: 'b', term: 'c' }, [svi, sabr, null]);
+
+        const smileTraces = plotly.react.mock.calls[1][1];
+        const names = smileTraces.map(t => t.name);
+        expect(names).toContain('SSVI 0.1y');
+        expect(names).toContain('SVI 0.1y');
+        expect(names).toContain('SABR 0.1y');
+        expect(names.filter(n => n.startsWith('SVI')).length).toBe(1, 'other models appear at the shortest expiry only');
+        expect(smileTraces.find(t => t.name === 'SABR 0.1y').line.dash).toBe('dot');
+    });
 });

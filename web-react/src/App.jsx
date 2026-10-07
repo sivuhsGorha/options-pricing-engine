@@ -31,6 +31,7 @@ function App() {
   const [control, setControl] = useState({ halted: false, haltReason: null, strategyEnabled: true, symbol: null, triggerPct: NaN, baseQuantity: 0 });
   const [logs, setLogs] = useState([{ time: '09:00:00', msg: 'AURA-OPT Unified Engine online. Mmap IPC active.' }]);
   const [surfaceData, setSurfaceData] = useState(null);
+  const [otherSurfaces, setOtherSurfaces] = useState([]);
   const [expandedChart, setExpandedChart] = useState(null);
   const [cmdText, setCmdText] = useState('VOLS <GO>');
   const [surfaceModel, setSurfaceModel] = useState('SSVI'); // 'SSVI' | 'SABR' | 'FREE_SABR'
@@ -182,12 +183,25 @@ function App() {
     const fetchSurfaceData = poll(`/surface3d?model=${surfaceModel}`,
       (data) => { setSurfaceData(data); addLog(`Vol surface [${surfaceModel}]: ${surfaceLabel(data)}`); },
       () => addLog("Failed to map Volatility Surface."));
+    // The other two models are drawn on the smile so the differences between fits to the same quotes are visible.
+    const fetchOtherSurfaces = async () => {
+      const ids = SURFACE_MODELS.map(m => m.id).filter(id => id !== surfaceModel);
+      const results = await Promise.all(ids.map(async (id) => {
+        try {
+          const response = await secureFetch(`/surface3d?model=${id}`);
+          return response.ok ? await response.json() : null;
+        } catch {
+          return null;
+        }
+      }));
+      setOtherSurfaces(results.filter(s => s && s.ready !== false));
+    };
     const fetchPositions = poll('/positions', setPositions, () => {});
     const fetchOrders = poll('/execution', setOrders, () => {});
     const fetchControl = poll('/control', setControl, () => {});
     const fetchHealthData = poll('/health', setHealthInfo, () => setHealthInfo({ symbol: 'SPY', providers: {} }));
 
-    const jobs = [[updateRiskMetrics, 1000], [fetchSpotData, 2000], [fetchSurfaceData, 5000], [fetchHealthData, 5000], [fetchPositions, 2000], [fetchOrders, 2000], [fetchControl, 2000]];
+    const jobs = [[updateRiskMetrics, 1000], [fetchSpotData, 2000], [fetchSurfaceData, 5000], [fetchOtherSurfaces, 5000], [fetchHealthData, 5000], [fetchPositions, 2000], [fetchOrders, 2000], [fetchControl, 2000]];
     jobs.forEach(([job]) => job());
     const timers = jobs.map(([job, ms]) => setInterval(job, ms));
     return () => timers.forEach(clearInterval);
@@ -199,8 +213,8 @@ function App() {
       surface3d: chartRef3D.current,
       smile: chartRefSmile.current,
       term: chartRefTerm.current
-    });
-  }, [surfaceData]);
+    }, otherSurfaces);
+  }, [surfaceData, otherSurfaces]);
 
   useEffect(() => {
     const timer = setTimeout(() => window.dispatchEvent(new Event('resize')), 300);
@@ -281,7 +295,7 @@ function App() {
             )}
           />
           <div className="bottom-charts">
-            <ChartPanel id="volatilityChartSmile" chartRef={chartRefSmile} className="sub-chart" title="VOLATILITY SMILE (2D)"
+            <ChartPanel id="volatilityChartSmile" chartRef={chartRefSmile} className="sub-chart" title="SMILE · MODELS COMPARED AT THE SHORTEST EXPIRY"
               expanded={expandedChart === 'SMILE'} onToggle={() => toggleChart('SMILE')} />
             <ChartPanel id="volatilityChartTerm" chartRef={chartRefTerm} className="sub-chart" title="TERM STRUCTURE (2D)"
               expanded={expandedChart === 'TERM'} onToggle={() => toggleChart('TERM')} />
