@@ -6,7 +6,6 @@ import com.sbk.optionspricer.OptionChainProvider;
 import com.sbk.optionspricer.OptionQuote;
 import com.sbk.optionspricer.OptionType;
 import com.sbk.optionspricer.SyntheticOptionChainProvider;
-import com.sbk.optionspricer.TdAmeritradeOptionChain;
 import com.sbk.optionspricer.YahooFinanceOptionChain;
 import com.sbk.optionspricer.config.ConfigManager;
 import com.sbk.optionspricer.config.ConfigValidator;
@@ -106,8 +105,6 @@ public final class UnifiedQuantEngine {
             for (String source : sources) {
                 if ("yahoo_finance".equalsIgnoreCase(source)) {
                     providers.add(new YahooFinanceOptionChain());
-                } else if ("td_ameritrade".equalsIgnoreCase(source)) {
-                    providers.add(new TdAmeritradeOptionChain());
                 }
             }
         }

@@ -56,7 +56,6 @@ public class Main {
 
         System.out.println("\n[MODULE 9] Launching Unified Quant Execution Engine...");
         AppCompositionRoot root = new AppCompositionRoot();
-        root.engine.initialize();
 
         List<OptionSnapshot> demoBacktest = List.of(
                 new OptionSnapshot(Instant.parse("2024-01-02T09:30:00Z"), "SPY", LocalDate.of(2024, 1, 19), 510.0, OptionType.CALL, 510.0, 509.5, 510.5, 0.22, 1000, 2000),

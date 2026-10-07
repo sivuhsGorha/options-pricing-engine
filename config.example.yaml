@@ -1,5 +1,5 @@
 market_data:
-  sources: [yahoo_finance, td_ameritrade]
+  sources: [yahoo_finance]
   refresh_interval_seconds: 900
   live_data_enabled: true
 volatility:
