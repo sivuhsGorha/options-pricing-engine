@@ -43,7 +43,8 @@ background and the panel badge shows `LOADING` until it does.
 | `POLYGON unavailable: credentials rejected (HTTP 403)` | key invalid or plan does not cover the endpoint | fix the key on polygon.io; the app retries after 15 minutes |
 | `rate limited (HTTP 429)` | free-tier quota | nothing; the app backs off (60 s) and stays inside each plan's budget |
 | Banner `STALE` | last price older than 30 s (outside US hours with delayed sources this is normal) | orders are correctly blocked; wait for market hours or a live source |
-| Surface badge `DEMO · SYNTHETIC` | the option-chain provider (Yahoo) failed, so the chain is generated | hover the badge: the tooltip says why Yahoo failed |
+| Surface badge `DEMO · SYNTHETIC` | the Cboe chain fetch failed (network, or `cdn.cboe.com` unreachable), so the chain is generated | hover the badge: the tooltip says why; the surface refreshes every `refresh_interval_seconds` |
+| Surface badge `FIT · CBOE_DELAYED` | normal: the surface is fitted to Cboe's 15-minute-delayed quotes | nothing |
 | Surface badge `FAILED: ...` | fewer than three usable quotes per expiry, or a provider error | the message names the cause |
 | `TRADING HALTED — ...` | an operator pressed HALT, a CRITICAL Greek alert fired, or a fill could not be booked | read the reason; RESUME only after you understand it |
 | No orders for a long time | the strategy fires only on a move of `strategy.trigger_pct` between two quotes | expected with delayed data; lower the trigger in `config.yaml` to exercise the path |

@@ -103,7 +103,9 @@ public final class UnifiedQuantEngine {
         java.util.List<OptionChainProvider> providers = new java.util.ArrayList<>();
         if (sources != null) {
             for (String source : sources) {
-                if ("yahoo_finance".equalsIgnoreCase(source)) {
+                if ("cboe".equalsIgnoreCase(source)) {
+                    providers.add(new com.sbk.optionspricer.CboeOptionChain());
+                } else if ("yahoo_finance".equalsIgnoreCase(source)) {
                     providers.add(new YahooFinanceOptionChain());
                 }
             }

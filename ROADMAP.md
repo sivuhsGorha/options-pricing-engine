@@ -56,6 +56,10 @@ the churn this week.
 **Frontend tests** (2026-10-07). Vitest and React Testing Library cover the five components, the API helpers,
 the formatters and the surface provenance badge (29 tests); `npm test` runs in CI and in `run_all.ps1`.
 
+**Real option chains** (2026-10-07). `CboeOptionChain` reads Cboe's public delayed-quotes feed (every expiry,
+bid/ask/IV/volume/OI, no key) and is the default source, so the surface is a `FIT · CBOE_DELAYED` for every
+visitor instead of a demo; Yahoo (now `401 Invalid Crumb`) stays available but off by default.
+
 ---
 
 ## Next: deployment readiness (this week, 2026-10-07 to 2026-10-11)

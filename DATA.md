@@ -42,17 +42,23 @@ Free tiers: Finnhub and Alpha Vantage are rate limited; Polygon's free plan retu
 
 ## 2. Option chains
 
-`UnifiedQuantEngine` loads an option chain through `CompositeOptionChainProvider`: `YahooFinanceOptionChain`
-(unofficial endpoint, best effort) for sources listed in `market_data.sources`, then always
-`SyntheticOptionChainProvider` as the fallback. **If Yahoo fails, the chain is synthetic**: Black-Scholes prices
-around `market_data.spot` (default 100) at `volatility.default_volatility`. The startup log line
-`[LIVE MARKET DATA] SPY spot=100.0 | strikes=14` is that fallback. Quotes that are inverted to implied
-volatility use `VolatilitySurfaceCalibrator`, which returns no value rather than a made-up one when a price
-cannot be inverted.
+Chains come through `CompositeOptionChainProvider`, which tries the sources in `market_data.sources` in order
+and always ends with `SyntheticOptionChainProvider`:
+
+| Source | Class | What it is |
+| :--- | :--- | :--- |
+| `cboe` (default) | `CboeOptionChain` | Cboe's public delayed-quotes JSON: every listed expiry with bid, ask, implied volatility, volume and open interest, 15-minute delayed, no key. One request per symbol, cached 5 minutes. Labelled `CBOE_DELAYED`; it is market data |
+| `yahoo_finance` | `YahooFinanceOptionChain` | Yahoo's unofficial endpoint, which now answers `401 Invalid Crumb` to plain requests; kept but not default |
+| (always last) | `SyntheticOptionChainProvider` | Black-Scholes prices around `market_data.spot` at `volatility.default_volatility`. Labelled `SYNTHETIC`; **not** market data, so a surface fitted to it is a `DEMO` |
+
+Each chain records which provider produced it and why any earlier provider failed, so the dashboard can say
+"DEMO" and, in the badge tooltip, "Provider CBOE_DELAYED failed: Cboe returned HTTP 503". Quotes are inverted
+to implied volatility by `VolatilitySurfaceCalibrator`, which returns no value rather than a made-up one when a
+price cannot be inverted.
 
 **Surface calibration** (`core/VolatilitySurfaceService`, `volatility/SurfaceFitter`): on its own thread,
-every `market_data.refresh_interval_seconds`, the service asks the provider for its listed expiries (Yahoo's
-`expirationDates`; the next eight monthly third Fridays for providers without a listing), picks the dates nearest
+every `market_data.refresh_interval_seconds`, the service asks the provider for its listed expiries (Cboe's
+contract list; the next eight monthly third Fridays for providers without a listing), picks the dates nearest
 to 1, 2, 3 and 6 months, loads those chains, inverts the out-of-the-money two-sided quotes to implied volatility,
 and fits SSVI (global eta, gamma, rho with per-expiry ATM variance from the data) and SABR (alpha, rho, nu per
 expiry, beta 0.5) by Nelder-Mead least squares. The result carries the provider name, whether it is market data,

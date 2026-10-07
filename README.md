@@ -28,9 +28,11 @@ headers). No latency figure is measured or claimed.
 | Dashboard | Embedded HTTP API and a Jetty WebSocket feed, HMAC request signing, browser sessions, React frontend with risk, volatility-surface and paper-trading panels |
 | IPC | Engine state published through a memory-mapped file (seqlock) and read by the web layer |
 
-Market data comes from Finnhub, Polygon, Alpha Vantage, MarketStack and Yahoo Finance when API keys are
-configured. Every quote carries a status (LIVE, DELAYED, STALE, UNAVAILABLE, SIMULATED); only fresh LIVE or
-DELAYED quotes can back an order. See [DATA.md](DATA.md) for the fields that are still placeholders.
+Spot prices come from Finnhub, Polygon, Alpha Vantage and MarketStack when API keys are configured; option
+chains come from Cboe's public delayed feed (every expiry, no key) with a synthetic fallback that is always
+labelled as such. Every quote carries a status (LIVE, DELAYED, STALE, UNAVAILABLE, SIMULATED); only fresh LIVE
+or DELAYED quotes can back an order, and a field a provider does not publish is shown as unknown, never as a
+placeholder. See [DATA.md](DATA.md).
 
 ---
 

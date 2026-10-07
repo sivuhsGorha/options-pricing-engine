@@ -163,7 +163,7 @@ public final class ConfigManager {
     private static Map<String, Object> defaultConfig() {
         Map<String, Object> root = new LinkedHashMap<>();
         Map<String, Object> marketData = new LinkedHashMap<>();
-        marketData.put("sources", List.of("yahoo_finance"));
+        marketData.put("sources", List.of("cboe"));
         marketData.put("refresh_interval_seconds", 900);
         marketData.put("live_data_enabled", true);
 

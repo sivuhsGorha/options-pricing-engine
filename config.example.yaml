@@ -1,17 +1,30 @@
+# Copy to config.yaml. Secrets never go here: API keys and passwords live in .env (see .env.example).
 market_data:
-  sources: [yahoo_finance]
-  refresh_interval_seconds: 900
+  # Option-chain sources, tried in order; a synthetic chain is always the last fallback and is labelled DEMO.
+  # cboe: Cboe's public delayed-quotes feed (all expiries, no key, 15-minute delayed).
+  # yahoo_finance: needs a cookie/crumb Yahoo no longer grants to plain requests; kept for completeness.
+  sources: [cboe]
+  refresh_interval_seconds: 900      # how often the surface is re-fitted
   live_data_enabled: true
+  risk_free_rate: 0.05               # flat rate used for forwards and pricing
+  dividend_yield: 0.012              # continuous yield of the underlying (SPY pays ~1.2%)
 volatility:
   ssvi_enabled: true
   sabr_enabled: true
-  default_volatility: 0.2
+  default_volatility: 0.2            # volatility of the synthetic fallback chain
 risk:
   max_notional: 1000000.0
   max_delta: 5000.0
   max_gamma: 1000.0
   max_vega: 10000.0
   max_position: 10000.0
+execution:
+  symbol: SPY
+  slippage_bps: 25                   # paper fills move this far against you
+  contract_multiplier: 1             # 100 for standard equity options
+strategy:
+  base_quantity: 10
+  trigger_pct: 0.001                 # 0.1% move between two quotes fires one signal
 dashboard:
   port: 8082
   update_rate_hz: 20
