@@ -57,7 +57,9 @@ public class OptionsDashboardServerTest {
     }
 
     static void waitForWebSocketPort(OptionsDashboardServer server) throws Exception {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        // Polling returns the moment the port is bound; the limit only bounds a genuine failure. Jetty's cold start can
+        // take several seconds when the suite runs under coverage instrumentation, so 5s was flaky.
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
         while (server.getWebSocketPort() == 0 && System.nanoTime() < deadline) Thread.sleep(10);
         assertTrue(server.getWebSocketPort() > 0, "WebSocket listener did not start");
     }
