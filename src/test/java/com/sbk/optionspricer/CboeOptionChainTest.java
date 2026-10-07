@@ -79,6 +79,9 @@ class CboeOptionChainTest {
         assertEquals("CBOE_DELAYED", sourced.source());
         assertTrue(sourced.marketData(), "delayed quotes are still market data, unlike the synthetic fallback");
         assertTrue(sourced.notes().get(0).contains("2026-10-07 11:32:30") && sourced.notes().get(0).contains("delayed"), sourced.notes().toString());
+        assertEquals(Instant.parse("2026-10-07T11:32:30Z"), sourced.asOf(), "the feed timestamp is the document's generation time in UTC");
+        assertNull(CboeOptionChain.parseFeedTimestamp("yesterday"));
+        assertNull(CboeOptionChain.parseFeedTimestamp(null));
     }
 
     @Test

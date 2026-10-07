@@ -24,7 +24,7 @@ import java.util.function.Supplier;
  * a network call. Every snapshot records which provider produced the chains, so a synthetic fallback is
  * labelled as such and never shown as a market-fitted surface.
  */
-public final class VolatilitySurfaceService implements VolatilitySurfaceSource, AutoCloseable {
+public final class VolatilitySurfaceService implements VolatilitySurfaceSource, com.sbk.optionspricer.market.OptionMarketData, AutoCloseable {
 
     /** Target tenors in days; the listed expiry nearest to each is used, without duplicates. */
     static final int[] TARGET_TENOR_DAYS = {30, 60, 90, 180};
@@ -40,6 +40,8 @@ public final class VolatilitySurfaceService implements VolatilitySurfaceSource, 
 
     private volatile Status status;
     private volatile Snapshot latest;
+    /** The chains behind the latest snapshot, with their provenance and as-of time; the option market data. */
+    private volatile List<OptionChainProvider.SourcedChain> latestChains = List.of();
     private Thread worker;
     private volatile boolean closed;
 
@@ -76,12 +78,14 @@ public final class VolatilitySurfaceService implements VolatilitySurfaceSource, 
         }
 
         List<OptionChain> chains = new ArrayList<>();
+        List<OptionChainProvider.SourcedChain> sourcedChains = new ArrayList<>();
         Set<String> sources = new LinkedHashSet<>();
         boolean marketData = true;
         for (LocalDate expiry : expiries) {
             try {
                 OptionChainProvider.SourcedChain sourced = provider.getSourcedChain(symbol, expiry);
                 chains.add(sourced.chain());
+                sourcedChains.add(sourced);
                 sources.add(sourced.source());
                 marketData &= sourced.marketData();
                 warnings.addAll(sourced.notes());
@@ -94,6 +98,8 @@ public final class VolatilitySurfaceService implements VolatilitySurfaceSource, 
             status = new Status(State.FAILED, "no option chain for " + symbol + (warnings.isEmpty() ? "" : ": " + warnings.iterator().next()), now);
             return;
         }
+
+        latestChains = List.copyOf(sourcedChains); // quotes are usable even if no surface can be fitted to them
 
         SurfaceFitter.Extraction extraction = SurfaceFitter.extractPoints(chains, riskFreeRate, dividendYield, today);
         warnings.addAll(extraction.warnings());
@@ -149,6 +155,44 @@ public final class VolatilitySurfaceService implements VolatilitySurfaceSource, 
     @Override
     public Optional<Snapshot> latest() {
         return Optional.ofNullable(latest);
+    }
+
+    // ------------------------------------------------------------------ OptionMarketData
+
+    @Override
+    public List<LocalDate> loadedExpiries() {
+        return latestChains.stream().map(s -> s.chain().expiry()).sorted().toList();
+    }
+
+    @Override
+    public Optional<OptionChain> chain(LocalDate expiry) {
+        return latestChains.stream().map(OptionChainProvider.SourcedChain::chain).filter(c -> c.expiry().equals(expiry)).findFirst();
+    }
+
+    /**
+     * The contract's quote as a tradable snapshot: its own bid/ask, the standard 100 multiplier, the chain's
+     * provenance (SIMULATED for a generated chain) and the feed's as-of time for freshness.
+     */
+    @Override
+    public Optional<com.sbk.optionspricer.market.MarketSnapshot> optionQuote(String contractSymbol) {
+        var parsed = com.sbk.optionspricer.instruments.OccSymbol.parse(contractSymbol);
+        if (parsed.isEmpty() || !parsed.get().underlying().equals(symbol)) {
+            return Optional.empty();
+        }
+        var contract = parsed.get();
+        for (OptionChainProvider.SourcedChain sourced : latestChains) {
+            if (!sourced.chain().expiry().equals(contract.expiry())) {
+                continue;
+            }
+            for (com.sbk.optionspricer.OptionQuote quote : sourced.chain().quotes()) {
+                if (quote.type() == contract.type() && Math.abs(quote.strike() - contract.strike()) < 1e-9) {
+                    return com.sbk.optionspricer.market.OptionQuoteSnapshots.toSnapshot(quote, symbol,
+                            com.sbk.optionspricer.market.OptionQuoteSnapshots.STANDARD_EQUITY_MULTIPLIER,
+                            sourced.source(), sourced.marketData(), sourced.asOf(), clock.instant());
+                }
+            }
+        }
+        return Optional.empty();
     }
 
     @Override

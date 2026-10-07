@@ -89,6 +89,32 @@ class VolatilitySurfaceServiceTest {
     }
 
     @Test
+    void theLoadedChainsAreOptionMarketDataWithTheirProvenance() {
+        VolatilitySurfaceService service = service(new SyntheticOptionChainProvider(100.0, 0.2, 0.05, 0.0), null);
+        assertTrue(service.loadedExpiries().isEmpty(), "nothing before the first load");
+        assertTrue(service.optionQuote("SPY261120C00100000").isEmpty());
+
+        service.refresh();
+
+        List<LocalDate> expiries = service.loadedExpiries();
+        assertEquals(4, expiries.size());
+        LocalDate first = expiries.get(0);
+        assertTrue(service.chain(first).isPresent());
+        String contract = com.sbk.optionspricer.instruments.OccSymbol.format("SPY", first, com.sbk.optionspricer.OptionType.CALL, 100.0);
+
+        com.sbk.optionspricer.market.MarketSnapshot quote = service.optionQuote(contract).orElseThrow();
+        assertEquals(contract, quote.symbol());
+        assertEquals(100, quote.multiplierOr(1));
+        assertTrue(quote.hasBook(), "the synthetic chain quotes a two-sided market");
+        assertEquals(com.sbk.optionspricer.market.MarketDataStatus.SIMULATED, quote.status(), "a generated chain can never pass as market data");
+        assertEquals("SYNTHETIC", quote.source());
+
+        assertTrue(service.optionQuote("SPY261120C00123456").isEmpty(), "a strike that is not in the chain");
+        assertTrue(service.optionQuote("QQQ" + contract.substring(3)).isEmpty(), "another underlying");
+        assertTrue(service.optionQuote("not a contract").isEmpty());
+    }
+
+    @Test
     void theLabelNamesTheProviderThatActuallyAnswered() {
         VolatilitySurfaceService fallback = service(new CompositeOptionChainProvider(List.of(FAILING, new SyntheticOptionChainProvider())), null);
         fallback.refresh();

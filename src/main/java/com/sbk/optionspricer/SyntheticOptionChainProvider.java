@@ -53,6 +53,12 @@ public final class SyntheticOptionChainProvider implements OptionChainProvider {
         return false;
     }
 
+    /** Generated at the moment of the request, so its as-of time is "now" on the provider's clock. */
+    @Override
+    public SourcedChain getSourcedChain(String symbol, LocalDate expiry) {
+        return new SourcedChain(getOptionChain(symbol, expiry), sourceName(), false, List.of(), clock.instant());
+    }
+
     @Override
     public OptionChain getOptionChain(String symbol, LocalDate expiry) {
         if (symbol == null || symbol.isBlank()) {

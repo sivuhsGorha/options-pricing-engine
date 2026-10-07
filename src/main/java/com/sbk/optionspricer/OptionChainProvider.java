@@ -12,13 +12,17 @@ public interface OptionChainProvider {
      * A chain together with the provider that produced it, so a synthetic fallback can never pass as market
      * data, and the reasons any earlier provider failed, so a fallback can say why it happened.
      */
-    record SourcedChain(OptionChain chain, String source, boolean marketData, List<String> notes) {
+    record SourcedChain(OptionChain chain, String source, boolean marketData, List<String> notes, java.time.Instant asOf) {
         public SourcedChain {
             notes = notes == null ? List.of() : List.copyOf(notes);
         }
 
+        public SourcedChain(OptionChain chain, String source, boolean marketData, List<String> notes) {
+            this(chain, source, marketData, notes, null);
+        }
+
         public SourcedChain(OptionChain chain, String source, boolean marketData) {
-            this(chain, source, marketData, List.of());
+            this(chain, source, marketData, List.of(), null);
         }
     }
 

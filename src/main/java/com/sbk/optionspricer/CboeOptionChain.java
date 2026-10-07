@@ -98,7 +98,21 @@ public final class CboeOptionChain implements OptionChainProvider {
         OptionChain chain = getOptionChain(symbol, expiry);
         String asOf = document(symbol).asOf();
         return new SourcedChain(chain, SOURCE, true,
-                List.of("Cboe quotes as of " + (asOf == null ? "unknown time" : asOf) + " (15-minute delayed)"));
+                List.of("Cboe quotes as of " + (asOf == null ? "unknown time" : asOf + " UTC") + " (15-minute delayed)"),
+                parseFeedTimestamp(asOf));
+    }
+
+    /** The feed's {@code timestamp} ("yyyy-MM-dd HH:mm:ss") is the document's generation time in UTC; null if absent or malformed. */
+    static Instant parseFeedTimestamp(String text) {
+        if (text == null || text.isBlank()) {
+            return null;
+        }
+        try {
+            return java.time.LocalDateTime.parse(text.trim(), java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+                    .toInstant(java.time.ZoneOffset.UTC);
+        } catch (java.time.format.DateTimeParseException malformed) {
+            return null;
+        }
     }
 
     private Document document(String symbol) {

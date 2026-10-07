@@ -51,8 +51,15 @@ and always ends with `SyntheticOptionChainProvider`:
 | `yahoo_finance` | `YahooFinanceOptionChain` | Yahoo's unofficial endpoint, which now answers `401 Invalid Crumb` to plain requests; kept but not default |
 | (always last) | `SyntheticOptionChainProvider` | Black-Scholes prices around `market_data.spot` at `volatility.default_volatility`. Labelled `SYNTHETIC`; **not** market data, so a surface fitted to it is a `DEMO` |
 
-Each chain records which provider produced it and why any earlier provider failed, so the dashboard can say
-"DEMO" and, in the badge tooltip, "Provider CBOE_DELAYED failed: Cboe returned HTTP 503". Quotes are inverted
+Each chain records which provider produced it, its feed timestamp (Cboe's document time, in UTC) and why any
+earlier provider failed, so the dashboard can say "DEMO" and, in the badge tooltip, "Provider CBOE_DELAYED
+failed: Cboe returned HTTP 503".
+
+**Option quotes as tradable snapshots** (`market/OptionQuoteSnapshots`, served by the surface service as
+`OptionMarketData`): a contract's quote becomes a `MarketSnapshot` under its OCC symbol with the standard
+multiplier of 100 and its own bid/ask. A one-sided or crossed market is `UNAVAILABLE` (the mid is not a price
+anyone would trade); a generated chain is `SIMULATED`; a market chain is `DELAYED` while the feed timestamp is
+within 120 s and `STALE` beyond that or when the feed gave no time. The same order gates apply as for shares. Quotes are inverted
 to implied volatility by `VolatilitySurfaceCalibrator`, which returns no value rather than a made-up one when a
 price cannot be inverted.
 

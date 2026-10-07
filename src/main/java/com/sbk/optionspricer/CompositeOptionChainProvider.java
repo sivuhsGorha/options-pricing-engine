@@ -32,7 +32,7 @@ public class CompositeOptionChainProvider implements OptionChainProvider {
                 SourcedChain answered = provider.getSourcedChain(symbol, expiry);
                 java.util.List<String> merged = new java.util.ArrayList<>(notes);
                 merged.addAll(answered.notes());
-                return new SourcedChain(answered.chain(), answered.source(), answered.marketData(), merged);
+                return new SourcedChain(answered.chain(), answered.source(), answered.marketData(), merged, answered.asOf());
             } catch (Exception e) {
                 String note = "Provider " + provider.sourceName() + " failed: " + rootMessage(e);
                 notes.add(note);
