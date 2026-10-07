@@ -126,30 +126,31 @@ public final class UnifiedQuantEngine {
         return optionChainProvider.getOptionChain(symbol, expiry);
     }
 
+    public OptionChainProvider getOptionChainProvider() {
+        return optionChainProvider;
+    }
+
+    /** Stores a few quotes of a freshly loaded chain in the historical store (called by the surface service). */
+    public void recordChainSnapshots(OptionChain chain) {
+        if (chain == null) {
+            return;
+        }
+        Instant now = Instant.now();
+        for (OptionQuote quote : chain.quotes().stream().limit(4).toList()) {
+            historicalDataManager.store(new OptionSnapshot(now, quote.symbol(), quote.expiry(), quote.strike(), quote.type(),
+                    chain.spot(), quote.bid(), quote.ask(), quote.impliedVolatility(), quote.volume(), quote.openInterest()));
+        }
+    }
+
     public void initialize() {
         System.out.println("=========================================================================");
         System.out.println("        STARTING UNIFIED QUANTITATIVE OPTIONS EXECUTION ENGINE           ");
         System.out.println("=========================================================================");
         refreshRisk(currentSpot);
         publisher.publishRiskState(netDelta, netGamma, netVega, scenarioMargin);
-        OptionChain liveChain = getCurrentOptionChain("SPY");
-        System.out.println("[LIVE MARKET DATA] SPY spot=" + liveChain.spot() + " | strikes=" + liveChain.quotes().size());
-        for (OptionQuote quote : liveChain.quotes().stream().limit(4).toList()) {
-            historicalDataManager.store(new OptionSnapshot(
-                    Instant.now(),
-                    quote.symbol(),
-                    quote.expiry(),
-                    quote.strike(),
-                    quote.type(),
-                    liveChain.spot(),
-                    quote.bid(),
-                    quote.ask(),
-                    quote.impliedVolatility(),
-                    quote.volume(),
-                    quote.openInterest()
-            ));
-        }
-        System.out.println("[UNIFIED ENGINE] Pricing, SSVI surface, margin approximation and mmap IPC state online.");
+        // Option chains are loaded and the surface fitted by VolatilitySurfaceService on its own thread;
+        // nothing here waits on the network, so the dashboard comes up immediately.
+        System.out.println("[UNIFIED ENGINE] Risk state, margin approximation and mmap IPC online; surface calibration runs in the background.");
         System.out.println("=========================================================================");
     }
 

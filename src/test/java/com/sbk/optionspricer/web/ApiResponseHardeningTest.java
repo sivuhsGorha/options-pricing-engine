@@ -22,6 +22,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.time.LocalDate;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -39,12 +40,36 @@ class ApiResponseHardeningTest {
     }
 
     private void start(MmapStateReader reader, OrderManager orderManager, PositionTracker tracker, MarketSnapshotAdapter adapter) throws Exception {
+        start(reader, orderManager, tracker, adapter, null);
+    }
+
+    private void start(MmapStateReader reader, OrderManager orderManager, PositionTracker tracker, MarketSnapshotAdapter adapter,
+                       com.sbk.optionspricer.volatility.VolatilitySurfaceSource surfaceSource) throws Exception {
         webRoot = Files.createTempDirectory("api-hardening-web");
         server = new OptionsDashboardServer(OptionsDashboardServerTest.TEST_SECRET, OptionsDashboardServerTest.OPERATOR_PASSWORD,
                 OptionsDashboardServerTest.ALLOWED_ORIGIN, "127.0.0.1", 0, 0, reader, webRoot.toString(),
                 orderManager, tracker, adapter);
+        if (surfaceSource != null) {
+            server.setSurfaceSource(surfaceSource);
+        }
         server.start();
         OptionsDashboardServerTest.waitForWebSocketPort(server);
+    }
+
+    private static com.sbk.optionspricer.volatility.VolatilitySurfaceSource surfaceSource(
+            com.sbk.optionspricer.volatility.VolatilitySurfaceSource.Snapshot snapshot,
+            com.sbk.optionspricer.volatility.VolatilitySurfaceSource.Status status) {
+        return new com.sbk.optionspricer.volatility.VolatilitySurfaceSource() {
+            @Override
+            public java.util.Optional<Snapshot> latest() {
+                return java.util.Optional.ofNullable(snapshot);
+            }
+
+            @Override
+            public Status status() {
+                return status;
+            }
+        };
     }
 
     private static MmapStateReader reader(java.util.function.Supplier<MmapStateReader.RiskState> state) {
@@ -194,7 +219,8 @@ class ApiResponseHardeningTest {
         start(reader(() -> new MmapStateReader.RiskState(0, 0, 0, 0)), null, null, null);
 
         assertEquals("SSVI", MAPPER.readTree(get("/api/surface3d?model=SSVI").body()).get("model").asText());
-        assertEquals("FREE_SABR", MAPPER.readTree(get("/api/surface3d?model=FREE_SABR").body()).get("model").asText());
+        assertEquals("SABR", MAPPER.readTree(get("/api/surface3d?model=FREE_SABR").body()).get("model").asText(),
+                "FREE_SABR was an alias with no free-boundary correction behind it; it is served as SABR");
         assertEquals("SABR", MAPPER.readTree(get("/api/surface3d?model=SSVIX").body()).get("model").asText(),
                 "a longer, unknown value must not match as a prefix");
         assertEquals("SABR", MAPPER.readTree(get("/api/surface3d?x=model%3DSSVI").body()).get("model").asText());
@@ -202,5 +228,58 @@ class ApiResponseHardeningTest {
         assertEquals(9, surface.get("x").size());
         assertEquals(9, surface.get("z").size());
         assertEquals(9, surface.get("z").get(0).size());
+    }
+
+    @Test
+    void surfaceWithoutACalibrationServiceIsLabelledAsADemo() throws Exception {
+        start(reader(() -> new MmapStateReader.RiskState(0, 0, 0, 0)), null, null, null);
+
+        JsonNode body = MAPPER.readTree(get("/api/surface3d?model=SSVI").body());
+
+        assertTrue(body.get("ready").asBoolean());
+        assertTrue(body.get("demo").asBoolean(), "fixed parameters at spot 100 are a demonstration and must say so");
+        assertEquals("DEMO", body.get("source").asText());
+    }
+
+    @Test
+    void surfaceWhileCalibratingReportsTheStatusInsteadOfNumbers() throws Exception {
+        var loading = new com.sbk.optionspricer.volatility.VolatilitySurfaceSource.Status(
+                com.sbk.optionspricer.volatility.VolatilitySurfaceSource.State.LOADING, "calibration has not run yet", Instant.now());
+        start(reader(() -> new MmapStateReader.RiskState(0, 0, 0, 0)), null, null, null, surfaceSource(null, loading));
+
+        JsonNode body = MAPPER.readTree(get("/api/surface3d?model=SSVI").body());
+
+        assertFalse(body.get("ready").asBoolean());
+        assertEquals("LOADING", body.get("status").asText());
+        assertFalse(body.has("z"), "no surface may be shown before one has been fitted");
+    }
+
+    @Test
+    void aFittedSurfaceCarriesItsProvenanceFitQualityAndTheQuotesItWasFittedTo() throws Exception {
+        LocalDate today = LocalDate.now();
+        var synthetic = new com.sbk.optionspricer.SyntheticOptionChainProvider(100.0, 0.2, 0.05, 0.0);
+        java.util.List<com.sbk.optionspricer.OptionChain> chains = new java.util.ArrayList<>();
+        for (LocalDate expiry : com.sbk.optionspricer.OptionChainProvider.thirdFridays(today, 3)) chains.add(synthetic.getOptionChain("SPY", expiry));
+        var extraction = com.sbk.optionspricer.volatility.SurfaceFitter.extractPoints(chains, 0.05, 0.0, today);
+        var snapshot = new com.sbk.optionspricer.volatility.VolatilitySurfaceSource.Snapshot(Instant.now(), "SPY", "SYNTHETIC", false, 100.0,
+                com.sbk.optionspricer.volatility.SurfaceFitter.fitSsvi(extraction.points()),
+                com.sbk.optionspricer.volatility.SurfaceFitter.fitSabr(extraction.points()), extraction.quotesSkipped(), java.util.List.of());
+        var ready = new com.sbk.optionspricer.volatility.VolatilitySurfaceSource.Status(
+                com.sbk.optionspricer.volatility.VolatilitySurfaceSource.State.READY, "ok", Instant.now());
+        start(reader(() -> new MmapStateReader.RiskState(0, 0, 0, 0)), null, null, null, surfaceSource(snapshot, ready));
+
+        JsonNode ssvi = MAPPER.readTree(get("/api/surface3d?model=SSVI").body());
+        assertTrue(ssvi.get("ready").asBoolean());
+        assertEquals("SYNTHETIC", ssvi.get("source").asText());
+        assertTrue(ssvi.get("demo").asBoolean(), "a synthetic chain is not market data");
+        assertTrue(ssvi.get("rmse").asDouble() >= 0.0);
+        assertTrue(ssvi.get("points").size() > 0, "the quotes the surface was fitted to are returned for display");
+        assertEquals(ssvi.get("y").size(), ssvi.get("z").size());
+        assertEquals(ssvi.get("x").size(), ssvi.get("z").get(0).size());
+        assertTrue(ssvi.get("parameters").has("eta"));
+
+        JsonNode sabr = MAPPER.readTree(get("/api/surface3d?model=SABR").body());
+        assertEquals("SABR", sabr.get("model").asText());
+        assertTrue(sabr.get("parameters").has("beta"));
     }
 }

@@ -11,11 +11,20 @@ import ChartPanel from './components/ChartPanel';
 
 const SURFACE_MODELS = [
   { id: 'SSVI', label: 'SSVI' },
-  { id: 'FREE_SABR', label: 'FREE-SABR' },
   { id: 'SABR', label: 'SABR 2002' },
 ];
 
 const isFresh = (status) => status === 'LIVE' || status === 'DELAYED';
+
+// Provenance of the surface: what it was fitted to and how well. Never show a fitted-looking surface unlabelled.
+const surfaceLabel = (s) => {
+  if (!s) return 'LOADING';
+  if (s.ready === false) return `${s.status}${s.message ? ': ' + String(s.message).slice(0, 80) : ''}`;
+  const rmse = Number.isFinite(s.rmse) ? ` · RMSE ${(s.rmse * 100).toFixed(2)} vol pts` : '';
+  if (s.demo) return `DEMO · ${s.source}${rmse}`;
+  return `FIT · ${s.source} · ${s.quotesUsed} quotes${rmse}`;
+};
+const surfaceTone = (s) => (!s ? '#FF9900' : s.ready === false ? '#FF3D00' : s.demo ? '#FF9900' : '#00E676');
 const providerColor = (status) => (status === 'LIVE' ? '#00E676' : status === 'DELAYED' || status === 'STALE' ? '#FF9900' : '#FF3D00');
 
 function App() {
@@ -120,9 +129,6 @@ function App() {
     } else if (cleanCmd.includes('SABR')) {
       setSurfaceModel('SABR');
       addLog("MODEL SWITCH: SABR (Hagan 2002) Surface.");
-    } else if (cleanCmd.includes('FREE')) {
-      setSurfaceModel('FREE_SABR');
-      addLog("MODEL SWITCH: Free-Boundary SABR Density Solver.");
     } else if (cleanCmd.includes('RISK') || cleanCmd.includes('F4') || cleanCmd.includes('F5') || cleanCmd.includes('MARGIN')) {
       addLog("RISK: Live portfolio Greeks & scenario margin optimizer active.");
     } else if (cleanCmd.includes('TICK') || cleanCmd.includes('F2')) {
@@ -155,7 +161,7 @@ function App() {
     const updateRiskMetrics = poll('/risk', setMetrics, () => addLog("DESYNC: Retrying Mmap IPC reader..."));
     const fetchSpotData = poll('/spot', setSpotInfo, () => {});
     const fetchSurfaceData = poll(`/surface3d?model=${surfaceModel}`,
-      (data) => { setSurfaceData(data); addLog(`Vol Surface updated [${surfaceModel}].`); },
+      (data) => { setSurfaceData(data); addLog(`Vol surface [${surfaceModel}]: ${surfaceLabel(data)}`); },
       () => addLog("Failed to map Volatility Surface."));
     const fetchPositions = poll('/positions', setPositions, () => {});
     const fetchOrders = poll('/execution', setOrders, () => {});
@@ -168,7 +174,7 @@ function App() {
   }, [authenticated, surfaceModel]);
 
   useEffect(() => {
-    if (!surfaceData || !chartRef3D.current || !chartRefSmile.current || !chartRefTerm.current || !window.Plotly) return;
+    if (!surfaceData || surfaceData.ready === false || !chartRef3D.current || !chartRefSmile.current || !chartRefTerm.current || !window.Plotly) return;
     renderSurfaceCharts(window.Plotly, surfaceData, {
       surface3d: chartRef3D.current,
       smile: chartRefSmile.current,
@@ -247,6 +253,10 @@ function App() {
                 {SURFACE_MODELS.map(({ id, label }) => (
                   <button key={id} type="button" className={`fkey ${surfaceModel === id ? 'active' : ''}`} onClick={() => setSurfaceModel(id)}>{label}</button>
                 ))}
+                <span className="status-badge" style={{ color: surfaceTone(surfaceData), borderColor: surfaceTone(surfaceData) }}
+                  title={surfaceData && surfaceData.warnings && surfaceData.warnings.length ? surfaceData.warnings.join('\n') : 'where this surface comes from'}>
+                  {surfaceLabel(surfaceData)}
+                </span>
               </div>
             )}
           />

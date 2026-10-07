@@ -1,0 +1,135 @@
+package com.sbk.optionspricer.core;
+
+import com.sbk.optionspricer.CompositeOptionChainProvider;
+import com.sbk.optionspricer.OptionChain;
+import com.sbk.optionspricer.OptionChainProvider;
+import com.sbk.optionspricer.SyntheticOptionChainProvider;
+import com.sbk.optionspricer.volatility.VolatilitySurfaceSource;
+import org.junit.jupiter.api.Test;
+
+import java.time.Clock;
+import java.time.Duration;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+/** Calibration runs off the startup path, reports its status, and labels where the chains came from. */
+class VolatilitySurfaceServiceTest {
+
+    private static final OptionChainProvider FAILING = new OptionChainProvider() {
+        @Override
+        public OptionChain getOptionChain(String symbol, LocalDate expiry) {
+            throw new RuntimeException("boom: venue down");
+        }
+
+        @Override
+        public String sourceName() {
+            return "FAKE_VENUE";
+        }
+    };
+
+    /** Looks like a market provider (so the label must say so) but serves generated chains. */
+    private static final OptionChainProvider FAKE_VENUE = new OptionChainProvider() {
+        private final SyntheticOptionChainProvider inner = new SyntheticOptionChainProvider(100.0, 0.2, 0.05, 0.0);
+
+        @Override
+        public OptionChain getOptionChain(String symbol, LocalDate expiry) {
+            return inner.getOptionChain(symbol, expiry);
+        }
+
+        @Override
+        public String sourceName() {
+            return "FAKE_VENUE";
+        }
+    };
+
+    private static VolatilitySurfaceService service(OptionChainProvider provider, AtomicInteger chainsSeen) {
+        return new VolatilitySurfaceService(provider, "SPY", 0.05, 0.0, Duration.ofMinutes(15), Clock.systemUTC(),
+                chain -> { if (chainsSeen != null) chainsSeen.incrementAndGet(); });
+    }
+
+    @Test
+    void beforeTheFirstRunTheStatusIsLoadingAndThereIsNoSurface() {
+        VolatilitySurfaceService service = service(new SyntheticOptionChainProvider(), null);
+
+        assertEquals(VolatilitySurfaceSource.State.LOADING, service.status().state());
+        assertTrue(service.latest().isEmpty());
+    }
+
+    @Test
+    void aProviderThatFailsLeavesAFailedStatusWithTheReasonAndNoSurface() {
+        VolatilitySurfaceService service = service(FAILING, null);
+
+        service.refresh();
+
+        assertEquals(VolatilitySurfaceSource.State.FAILED, service.status().state());
+        assertTrue(service.status().message().contains("boom"), service.status().message());
+        assertTrue(service.latest().isEmpty());
+    }
+
+    @Test
+    void aSyntheticProviderIsReadyButLabelledAsNotMarketData() {
+        AtomicInteger chains = new AtomicInteger();
+        VolatilitySurfaceService service = service(new SyntheticOptionChainProvider(100.0, 0.2, 0.05, 0.0), chains);
+
+        service.refresh();
+
+        assertEquals(VolatilitySurfaceSource.State.READY, service.status().state(), service.status().message());
+        VolatilitySurfaceSource.Snapshot snapshot = service.latest().orElseThrow();
+        assertEquals("SYNTHETIC", snapshot.source());
+        assertFalse(snapshot.marketData(), "generated prices must never be presented as a market-fitted surface");
+        assertNotNull(snapshot.ssvi());
+        assertNotNull(snapshot.sabr());
+        assertEquals(100.0, snapshot.spot());
+        assertEquals(4, chains.get(), "each loaded chain is handed to the history callback");
+    }
+
+    @Test
+    void theLabelNamesTheProviderThatActuallyAnswered() {
+        VolatilitySurfaceService fallback = service(new CompositeOptionChainProvider(List.of(FAILING, new SyntheticOptionChainProvider())), null);
+        fallback.refresh();
+        assertEquals("SYNTHETIC", fallback.latest().orElseThrow().source());
+        assertFalse(fallback.latest().orElseThrow().marketData());
+
+        VolatilitySurfaceService venue = service(new CompositeOptionChainProvider(List.of(FAKE_VENUE, new SyntheticOptionChainProvider())), null);
+        venue.refresh();
+        assertEquals("FAKE_VENUE", venue.latest().orElseThrow().source());
+        assertTrue(venue.latest().orElseThrow().marketData());
+    }
+
+    @Test
+    void expiriesAreTheListedDatesNearestToEachTargetTenorWithoutDuplicates() {
+        LocalDate today = LocalDate.of(2026, 10, 7);
+        List<LocalDate> weekly = new ArrayList<>();
+        for (LocalDate d = LocalDate.of(2026, 10, 9); !d.isAfter(LocalDate.of(2026, 12, 25)); d = d.plusWeeks(1)) weekly.add(d);
+        weekly.add(LocalDate.of(2027, 3, 19));
+
+        assertEquals(List.of(LocalDate.of(2026, 11, 6), LocalDate.of(2026, 12, 4), LocalDate.of(2026, 12, 25), LocalDate.of(2027, 3, 19)),
+                VolatilitySurfaceService.selectExpiries(weekly, today));
+        assertEquals(List.of(LocalDate.of(2026, 11, 6)), VolatilitySurfaceService.selectExpiries(List.of(LocalDate.of(2026, 11, 6)), today));
+        assertTrue(VolatilitySurfaceService.selectExpiries(List.of(LocalDate.of(2026, 10, 9)), today).isEmpty(), "two days out is too close to expiry");
+    }
+
+    @Test
+    void theDefaultExpiriesAreTheNextMonthlyThirdFridays() {
+        assertEquals(List.of(LocalDate.of(2026, 10, 16), LocalDate.of(2026, 11, 20), LocalDate.of(2026, 12, 18), LocalDate.of(2027, 1, 15)),
+                OptionChainProvider.thirdFridays(LocalDate.of(2026, 10, 7), 4));
+        // Less than a week away: skip to the next month.
+        assertEquals(LocalDate.of(2026, 11, 20), OptionChainProvider.thirdFridays(LocalDate.of(2026, 10, 12), 1).get(0));
+    }
+
+    @Test
+    void theWorkerCalibratesInTheBackgroundAndStops() throws Exception {
+        VolatilitySurfaceService service = service(new SyntheticOptionChainProvider(), null);
+        service.start();
+        long deadline = System.currentTimeMillis() + 15_000;
+        while (service.status().state() == VolatilitySurfaceSource.State.LOADING && System.currentTimeMillis() < deadline) {
+            Thread.sleep(50);
+        }
+        assertEquals(VolatilitySurfaceSource.State.READY, service.status().state(), service.status().message());
+        service.close();
+    }
+}

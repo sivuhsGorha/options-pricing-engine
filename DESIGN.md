@@ -23,9 +23,13 @@ scenario margin, execution-book notional, the margin optimizer's suggested hedge
 terminal event log (last 8 lines).
 
 **Centre: Volatility surface.** A 3D surface plus smile and term-structure charts (Plotly). Buttons switch
-between SSVI, FREE-SABR and SABR 2002. **The surface is a demonstration**: `/api/surface3d` evaluates each
-model at spot 100 with fixed parameters over a fixed strike and expiry grid. It is not calibrated to the live
-option chain. Each chart has EXPAND / SHRINK.
+between SSVI (one global fit) and SABR 2002 (per expiry). The surface is **fitted to the option chain** by
+`core/VolatilitySurfaceService` in the background, and the badge in the panel header states its provenance:
+`FIT · <provider> · N quotes · RMSE x vol pts` (green) when the chain is market data, `DEMO · SYNTHETIC` (amber)
+when the chain is the synthetic fallback, or the calibration status (`LOADING`, `FAILED: reason`) while no fit
+exists. The quotes the surface was fitted to are overlaid as markers on the 3D plot and the smile, so the fit
+can be judged by eye; warnings (too few quotes, calendar arbitrage in the data, iteration cap) are in the badge
+tooltip. Each chart has EXPAND / SHRINK.
 
 **Right: Paper Trading.** Trading status (ACTIVE, or HALTED with the reason), the position table (symbol,
 quantity, multiplier, notional) and the last 25 orders (time, id, quantity, fill price, `FILLED (<data

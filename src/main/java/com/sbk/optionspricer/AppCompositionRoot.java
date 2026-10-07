@@ -27,6 +27,7 @@ public class AppCompositionRoot {
     public final StrategyExecutionLoop strategyLoop;
     public final QuantSimulationHarness harness;
     public final OptionsDashboardServer dashboard;
+    public final com.sbk.optionspricer.core.VolatilitySurfaceService surfaceService;
 
     public AppCompositionRoot() throws Exception {
         this.config = new ConfigManager();
@@ -79,5 +80,13 @@ public class AppCompositionRoot {
 
         MmapStateReader mmapReader = new MmapStateReader();
         this.dashboard = new OptionsDashboardServer(apiSecret, operatorPassword, allowedOrigins, bindAddress, port, port + 1, mmapReader, "web", orderManager, positionTracker, marketAdapter);
+
+        // Chains are fetched and the surface fitted off the startup path; the dashboard labels the result with its source.
+        double riskFreeRate = config.getDouble("market_data.risk_free_rate", 0.05);
+        double dividendYield = config.getDouble("market_data.dividend_yield", 0.0);
+        long refreshSeconds = Math.max(30L, (long) config.getDouble("market_data.refresh_interval_seconds", 900.0));
+        this.surfaceService = new com.sbk.optionspricer.core.VolatilitySurfaceService(engine.getOptionChainProvider(), symbol,
+                riskFreeRate, dividendYield, java.time.Duration.ofSeconds(refreshSeconds), java.time.Clock.systemUTC(), engine::recordChainSnapshots);
+        dashboard.setSurfaceSource(surfaceService);
     }
 }

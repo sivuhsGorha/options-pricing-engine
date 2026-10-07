@@ -43,6 +43,17 @@ public final class SyntheticOptionChainProvider implements OptionChainProvider {
     }
 
     @Override
+    public String sourceName() {
+        return "SYNTHETIC";
+    }
+
+    /** Generated prices are not market data; a surface fitted to them is a demonstration. */
+    @Override
+    public boolean isMarketData() {
+        return false;
+    }
+
+    @Override
     public OptionChain getOptionChain(String symbol, LocalDate expiry) {
         if (symbol == null || symbol.isBlank()) {
             throw new IllegalArgumentException("symbol must not be blank");

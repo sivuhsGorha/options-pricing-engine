@@ -67,6 +67,8 @@ public class Main {
 
         root.harness.start();
         root.dashboard.start();
+        root.surfaceService.start();
+        System.out.println("[SURFACE] Calibrating SSVI/SABR to the option chain in the background; the dashboard shows the status.");
 
         System.out.println("\n[SUCCESS] UNIFIED SYSTEM ONLINE AND PROCESSING REAL-TIME MMAP IPC STATE.");
         System.out.println("Options Trading Dashboard Live at: http://127.0.0.1:" + root.dashboard.getPort());

@@ -25,6 +25,47 @@ public class YahooFinanceOptionChain implements OptionChainProvider {
     }
 
     @Override
+    public String sourceName() {
+        return "YAHOO_FINANCE";
+    }
+
+    /**
+     * The expirations Yahoo lists for the symbol. Requesting a date that is not listed returns the default
+     * (nearest) chain labelled with the wrong expiry, so callers must pick from this list.
+     */
+    @Override
+    public List<LocalDate> listExpiries(String symbol, LocalDate asOf) {
+        try {
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(String.format(YAHOO_OPTIONS_URL, symbol)))
+                    .header("User-Agent", "Mozilla/5.0")
+                    .GET()
+                    .build();
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() != 200) {
+                throw new RuntimeException("Yahoo Finance returned HTTP " + response.statusCode());
+            }
+            String section = extractArraySection(response.body(), "\"expirationDates\"");
+            if (section == null) {
+                throw new RuntimeException("no expirationDates in Yahoo Finance response");
+            }
+            List<LocalDate> expiries = new ArrayList<>();
+            for (String token : section.replace("[", "").replace("]", "").split(",")) {
+                String trimmed = token.trim();
+                if (trimmed.isEmpty()) continue;
+                LocalDate date = java.time.Instant.ofEpochSecond(Long.parseLong(trimmed)).atZone(ZoneOffset.UTC).toLocalDate();
+                if (date.isAfter(asOf)) expiries.add(date);
+            }
+            if (expiries.isEmpty()) {
+                throw new RuntimeException("Yahoo Finance listed no future expirations for " + symbol);
+            }
+            return List.copyOf(expiries);
+        } catch (Exception e) {
+            throw new RuntimeException("Error listing option expiries for " + symbol, e);
+        }
+    }
+
+    @Override
     public OptionChain getOptionChain(String symbol, LocalDate expiry) {
         try {
             long unixExpiry = expiry.atStartOfDay(ZoneOffset.UTC).toEpochSecond();

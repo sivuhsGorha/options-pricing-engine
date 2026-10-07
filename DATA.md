@@ -50,8 +50,15 @@ around `market_data.spot` (default 100) at `volatility.default_volatility`. The 
 volatility use `VolatilitySurfaceCalibrator`, which returns no value rather than a made-up one when a price
 cannot be inverted.
 
-The dashboard's 3D surface does **not** use the chain: `/api/surface3d` evaluates SSVI or SABR with fixed
-parameters at spot 100 (see [DESIGN.md](DESIGN.md)).
+**Surface calibration** (`core/VolatilitySurfaceService`, `volatility/SurfaceFitter`): on its own thread,
+every `market_data.refresh_interval_seconds`, the service asks the provider for its listed expiries (Yahoo's
+`expirationDates`; the next eight monthly third Fridays for providers without a listing), picks the dates nearest
+to 1, 2, 3 and 6 months, loads those chains, inverts the out-of-the-money two-sided quotes to implied volatility,
+and fits SSVI (global eta, gamma, rho with per-expiry ATM variance from the data) and SABR (alpha, rho, nu per
+expiry, beta 0.5) by Nelder-Mead least squares. The result carries the provider name, whether it is market data,
+the quotes used and skipped, the RMSE, the parameters, whether SSVI's closed-form no-arbitrage conditions hold,
+and warnings. `/api/surface3d` returns it, or the calibration status while nothing is fitted. If the chain came
+from the synthetic fallback the surface is labelled `DEMO`; nothing on the startup path waits for this.
 
 ---
 

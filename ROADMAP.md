@@ -25,20 +25,20 @@ coverage gate, Docker readiness, frontend lint/build and secret scanning; 336 Ja
 
 **Honesty pass.** Dead code removed, simulations labelled, documentation rewritten to match the code.
 
+**Market data without placeholders** (2026-10-07). A field a provider does not supply is unknown (`NaN` book,
+`VOLUME_UNKNOWN`), the liquidity gate judges only known fields, paper fills without a book use the order price.
+
+**Surface fitted to the chain** (2026-10-07). `VolatilitySurfaceService` loads chains for four tenors in the
+background and fits SSVI and SABR with a Nelder-Mead least-squares fitter; the dashboard shows provenance,
+quotes used, RMSE and the market points, and labels a synthetic-chain fit `DEMO`. Startup no longer waits on
+the option-chain network call.
+
 ---
 
 ## Next: deployment readiness (this week, 2026-10-07 to 2026-10-11)
 
 Goal: a reviewer can clone, run, and trust every number on screen.
 
-1. **Real market data in every field.** Replace the placeholder volume (2000) and +/- 1 cent spreads with
-   provider values where available and `UNAVAILABLE` where not; make the liquidity check skip rather than pass
-   on missing data. Tests for each provider's mapping.
-2. **Surface from the live chain.** Calibrate SSVI (and SABR per expiry) to the loaded option chain with
-   `VolatilitySurfaceCalibrator` and show the fitted surface, the quotes, and the fit error; label the surface
-   `DEMO` whenever the chain is synthetic.
-3. **Non-blocking startup.** Move the option-chain load off the startup path (dashboard up first, chain
-   loads in the background with a status badge), as was done for the feed probe.
 4. **Operator controls in the UI.** Halt / resume trading (authenticated POST), strategy on/off, and the
    current trigger and size shown in the paper-trading panel.
 5. **Config parser hardening.** Inline comments, clear error messages naming the key and line, and a

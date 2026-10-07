@@ -21,7 +21,7 @@ headers). No latency figure is measured or claimed.
 | Closed-form pricing | Black-Scholes-Merton with continuous dividend yield; accurate normal CDF; safeguarded Newton implied-volatility solver |
 | Early exercise | Trinomial tree; Crank-Nicolson PDE (Rannacher start, Brennan-Schwartz) in log-spot; discrete-dividend PDE pricer |
 | Monte Carlo | European Monte Carlo pricer used as a cross-check for the closed form; VaR / expected shortfall calculators |
-| Volatility | SVI, SSVI with no-arbitrage conditions and validation, SABR (Hagan), Dupire local vol |
+| Volatility | SVI, SSVI with no-arbitrage conditions and validation, SABR (Hagan), Dupire local vol; a background service fits SSVI and SABR to the option chain (Nelder-Mead least squares) and the dashboard shows the fit's source, quotes, RMSE and parameters |
 | Rates | OIS / par-yield curve bootstrap, ACT/365F day count, optional FRED and ESTR providers |
 | Greeks and risk | First, second and higher-order Greeks, portfolio aggregation, limit alerts that halt trading, margin approximation (not an exchange margin model) |
 | Execution | `OrderManager` (halt check, data-quality policy, portfolio admission, pre-trade limits, order state machine, audit trail), `PositionTracker`, paper-trading fills, contract multiplier, exact decimal ticks |

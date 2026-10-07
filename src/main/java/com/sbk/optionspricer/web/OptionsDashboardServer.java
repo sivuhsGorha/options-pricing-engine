@@ -85,6 +85,13 @@ public class OptionsDashboardServer {
     private final OrderManager orderManager;
     private final PositionTracker positionTracker;
     private final MarketSnapshotAdapter marketAdapter;
+    /** Fitted surface provider; null means the endpoint serves the fixed-parameter demonstration surface. */
+    private volatile com.sbk.optionspricer.volatility.VolatilitySurfaceSource surfaceSource;
+
+    /** Supplies the fitted volatility surface. Call before {@link #start()}; without it the surface is a labelled demo. */
+    public void setSurfaceSource(com.sbk.optionspricer.volatility.VolatilitySurfaceSource source) {
+        this.surfaceSource = source;
+    }
 
     public OptionsDashboardServer(String apiSecret, String operatorPassword, String allowedOrigins,
                                   String bindAddress, int port, int wsPort, MmapStateReader mmapReader,
@@ -190,6 +197,90 @@ public class OptionsDashboardServer {
         if (mmapReader != null) mmapReader.close();
     }
 
+    /** The fitted surface with its provenance, the calibration status while none is ready, or the labelled demo. */
+    java.util.Map<String, Object> surfaceBody(String model) {
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("model", model);
+        com.sbk.optionspricer.volatility.VolatilitySurfaceSource source = surfaceSource;
+        if (source == null) {
+            return demoSurface(body, model);
+        }
+        var snapshot = source.latest();
+        var status = source.status();
+        var fit = snapshot.map(s -> "SSVI".equals(model) ? s.ssvi() : s.sabr()).orElse(null);
+        if (snapshot.isEmpty() || fit == null) {
+            body.put("ready", false);
+            body.put("status", snapshot.isEmpty() ? status.state().name() : "FAILED");
+            body.put("message", snapshot.isEmpty() ? status.message()
+                    : model + " could not be fitted: " + String.join("; ", snapshot.get().warnings()));
+            body.put("updatedAt", status.updatedAt().toEpochMilli());
+            return body;
+        }
+        var s = snapshot.get();
+        body.put("ready", true);
+        body.put("source", s.source());
+        body.put("demo", !s.marketData());
+        body.put("symbol", s.symbol());
+        body.put("spot", Json.round(s.spot(), 2));
+        body.put("asOf", s.asOf().toEpochMilli());
+        body.put("quotesUsed", fit.quotesUsed());
+        body.put("quotesSkipped", s.quotesSkipped());
+        body.put("rmse", Json.round(fit.rmse(), 6));
+        body.put("noArbitrageConditionsHold", fit.noArbitrageConditionsHold());
+        java.util.Map<String, Object> parameters = new java.util.LinkedHashMap<>();
+        fit.parameters().forEach((k, v) -> parameters.put(k, Json.round(v, 6)));
+        body.put("parameters", parameters);
+        body.put("warnings", fit.warnings());
+        double[] x = new double[fit.strikes().length];
+        for (int j = 0; j < x.length; j++) x[j] = Json.round(fit.strikes()[j], 2);
+        double[] y = new double[fit.expiries().length];
+        for (int i = 0; i < y.length; i++) y[i] = Json.round(fit.expiries()[i], 4);
+        double[][] z = new double[y.length][x.length];
+        for (int i = 0; i < y.length; i++) for (int j = 0; j < x.length; j++) z[i][j] = Json.round(fit.vols()[i][j], 5);
+        body.put("x", x);
+        body.put("y", y);
+        body.put("z", z);
+        java.util.List<java.util.Map<String, Object>> points = new java.util.ArrayList<>(fit.points().size());
+        for (var p : fit.points()) {
+            java.util.Map<String, Object> row = new java.util.LinkedHashMap<>();
+            row.put("t", Json.round(p.timeToExpiry(), 4));
+            row.put("strike", Json.round(p.strike(), 2));
+            row.put("marketVol", Json.round(p.marketVol(), 5));
+            row.put("modelVol", Json.round(p.modelVol(), 5));
+            points.add(row);
+        }
+        body.put("points", points);
+        return body;
+    }
+
+    /** Fixed-parameter surface at spot 100, used only when no calibration service is wired in. Labelled DEMO. */
+    private static java.util.Map<String, Object> demoSurface(java.util.Map<String, Object> body, String model) {
+        int[] strikes = {50, 65, 80, 90, 100, 110, 120, 135, 150};
+        double[] expiries = {0.1, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0};
+        com.sbk.optionspricer.volatility.SsviApproximation.SsviParams ssviParams =
+                new com.sbk.optionspricer.volatility.SsviApproximation.SsviParams(0.55, 0.25, -0.50);
+        double[][] z = new double[expiries.length][strikes.length];
+        for (int i = 0; i < expiries.length; i++) {
+            for (int j = 0; j < strikes.length; j++) {
+                double vol = "SSVI".equals(model)
+                        ? com.sbk.optionspricer.volatility.SsviApproximation.impliedVol(100.0, strikes[j], expiries[i], 0.22, ssviParams)
+                        : SabrModel.impliedVolatility(100.0, strikes[j], expiries[i], 0.35, 0.5, -0.75, 0.85);
+                z[i][j] = Json.round(vol, 4);
+            }
+        }
+        double[] y = new double[expiries.length];
+        for (int i = 0; i < expiries.length; i++) y[i] = Json.round(expiries[i], 2);
+        body.put("ready", true);
+        body.put("source", "DEMO");
+        body.put("demo", true);
+        body.put("message", "fixed demonstration parameters; no calibration service is configured");
+        body.put("x", strikes);
+        body.put("y", y);
+        body.put("z", z);
+        body.put("points", java.util.List.of());
+        return body;
+    }
+
     private void configureContexts(String webRoot) {
         server.createContext("/login", guarded(this::handleLogin));
         server.createContext("/logout", guarded(this::handleLogout));
@@ -288,32 +379,9 @@ public class OptionsDashboardServer {
             applySecurityHeaders(exchange, true, isSecureRequest(exchange));
             if (!authorizeApi(exchange)) return;
             String requested = queryParam(exchange.getRequestURI().getRawQuery(), "model");
-            String model = "SSVI".equals(requested) ? "SSVI" : "FREE_SABR".equals(requested) ? "FREE_SABR" : "SABR";
-            int[] strikes = {50, 65, 80, 90, 100, 110, 120, 135, 150};
-            double[] expiries = {0.1, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0};
-            com.sbk.optionspricer.volatility.SsviApproximation.SsviParams ssviParams =
-                    new com.sbk.optionspricer.volatility.SsviApproximation.SsviParams(0.55, 0.25, -0.50);
-            double[][] z = new double[expiries.length][strikes.length];
-            for (int i = 0; i < expiries.length; i++) {
-                for (int j = 0; j < strikes.length; j++) {
-                    double vol = "SSVI".equals(model)
-                            ? com.sbk.optionspricer.volatility.SsviApproximation.impliedVol(100.0, strikes[j], expiries[i], 0.22, ssviParams)
-                            : "FREE_SABR".equals(model)
-                            ? com.sbk.optionspricer.volatility.SabrFreeBoundaryModel.impliedVolatility(100.0, strikes[j], expiries[i], 0.30, 0.6, -0.65, 0.60)
-                            : SabrModel.impliedVolatility(100.0, strikes[j], expiries[i], 0.35, 0.5, -0.75, 0.85);
-                    z[i][j] = Json.round(vol, 4);
-                }
-            }
-            double[] y = new double[expiries.length];
-            for (int i = 0; i < expiries.length; i++) {
-                y[i] = Json.round(expiries[i], 2);
-            }
-            java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
-            body.put("model", model);
-            body.put("x", strikes);
-            body.put("y", y);
-            body.put("z", z);
-            sendJson(exchange, 200, body);
+            // FREE_SABR was a deprecated alias of SABR (no free-boundary correction was ever implemented).
+            String model = "SSVI".equals(requested) ? "SSVI" : "SABR";
+            sendJson(exchange, 200, surfaceBody(model));
         }));
         server.createContext("/", new StaticFileHandler(webRoot, this::isSecureRequest));
     }
