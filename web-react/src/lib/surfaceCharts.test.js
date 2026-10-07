@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { displayablePoints, renderSurfaceCharts, smileExpiries } from './surfaceCharts';
+import { displayablePoints, interpolate, renderSurfaceCharts, residuals, smileExpiries } from './surfaceCharts';
 
 const strikes = [600, 700, 800, 900];
 
@@ -45,20 +45,28 @@ describe('surface chart data selection', () => {
         expect(plotly.react).toHaveBeenCalledTimes(3);
     });
 
-    it('overlays the other models at the shortest expiry on the smile so fits to the same quotes can be compared', () => {
+    it('plots each model\'s error against the quotes at the shortest expiry, where fits to the same data differ', () => {
         const plotly = { react: vi.fn() };
-        const surface = { model: 'SSVI', x: strikes, y: [0.1, 0.5], z: [[0.3, 0.2, 0.15, 0.2], [0.25, 0.18, 0.14, 0.17]], fittedExpiries: [0.1, 0.5], points: [] };
-        const svi = { model: 'SVI', x: strikes, y: [0.1, 0.5], z: [[0.31, 0.2, 0.15, 0.19], [0.25, 0.18, 0.14, 0.17]] };
-        const sabr = { model: 'SABR', x: strikes, y: [0.1, 0.5], z: [[0.29, 0.21, 0.15, 0.21], [0.25, 0.18, 0.14, 0.17]] };
+        const quotes = [{ t: 0.1, strike: 700, marketVol: 0.21 }, { t: 0.1, strike: 750, marketVol: 0.18 }];
+        const surface = { model: 'SSVI', x: strikes, y: [0.1, 0.5], z: [[0.3, 0.2, 0.15, 0.2], [0.25, 0.18, 0.14, 0.17]], fittedExpiries: [0.1, 0.5], points: quotes };
+        const svi = { model: 'SVI', x: strikes, y: [0.1, 0.5], z: [[0.31, 0.21, 0.15, 0.19], [0.25, 0.18, 0.14, 0.17]] };
 
-        renderSurfaceCharts(plotly, surface, { surface3d: 'a', smile: 'b', term: 'c' }, [svi, sabr, null]);
+        renderSurfaceCharts(plotly, surface, { surface3d: 'a', smile: 'b', term: 'c' }, [svi, null, surface]);
 
-        const smileTraces = plotly.react.mock.calls[1][1];
-        const names = smileTraces.map(t => t.name);
-        expect(names).toContain('SSVI 0.1y');
-        expect(names).toContain('SVI 0.1y');
-        expect(names).toContain('SABR 0.1y');
-        expect(names.filter(n => n.startsWith('SVI')).length).toBe(1, 'other models appear at the shortest expiry only');
-        expect(smileTraces.find(t => t.name === 'SABR 0.1y').line.dash).toBe('dot');
+        const [, smileTraces, layout] = plotly.react.mock.calls[1];
+        const errors = smileTraces.filter(t => t.yaxis === 'y2');
+        expect(errors.map(t => t.name)).toEqual(['SSVI error', 'SVI error'], 'the selected model once, each other model once');
+        expect(errors[0].y[0]).toBeCloseTo(-1.0, 6);   // SSVI 20% at 700 vs quote 21%
+        expect(errors[1].y[0]).toBeCloseTo(0.0, 6);    // SVI 21% at 700 matches the quote
+        expect(errors[0].y[1]).toBeCloseTo(-0.5, 6);   // SSVI interpolated 17.5% at 750 vs 18%
+        expect(layout.yaxis2.domain[1]).toBeLessThan(layout.yaxis.domain[0], 'the error row sits under the smile');
+        expect(layout.yaxis2.range[1]).toBeGreaterThan(1.0);
+    });
+
+    it('interpolates linearly within the grid and clamps outside it', () => {
+        expect(interpolate([1, 2, 4], [10, 20, 40], 3)).toBe(30);
+        expect(interpolate([1, 2, 4], [10, 20, 40], 0)).toBe(10);
+        expect(interpolate([1, 2, 4], [10, 20, 40], 9)).toBe(40);
+        expect(residuals(null, [{ strike: 1, marketVol: 0.2 }], 0.1)).toEqual([]);
     });
 });

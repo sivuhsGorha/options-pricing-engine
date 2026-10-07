@@ -28,9 +28,12 @@ parameters per expiry, the closest fit) and SABR 2002 (three parameters per expi
 `core/VolatilitySurfaceService` in the background, and the badge in the panel header states its provenance:
 `FIT · <provider> · N quotes · RMSE x vol pts` (green) when the chain is market data, `DEMO · SYNTHETIC` (amber)
 when the chain is the synthetic fallback, or the calibration status (`LOADING`, `FAILED: reason`) while no fit
-exists. The quotes the surface was fitted to are overlaid as markers on the 3D plot and the smile, so the fit
-can be judged by eye; warnings (too few quotes, calendar arbitrage in the data, iteration cap) are in the badge
-tooltip. Each chart has EXPAND / SHRINK.
+exists. The quotes the surface was fitted to are overlaid as markers on the 3D plot and the smile (thinned to about
+forty per expiry, inside the drawn strike band), so the fit can be judged by eye. Three models fitted to the
+same quotes look nearly identical as surfaces, so the smile panel has a second row: each model's error against
+the quotes at the shortest expiry, in vol points, which is where a global three-parameter fit and a per-slice
+five-parameter fit visibly differ. Warnings (too few quotes, calendar arbitrage in the data, iteration cap) are in
+the badge tooltip. Each chart has EXPAND / SHRINK.
 
 **Right: Paper Trading.** Trading status (ACTIVE with a HALT button, or HALTED with the reason and a RESUME
 button), the strategy row (ON/OFF switch, symbol, trigger percentage, order size), the position table (symbol,

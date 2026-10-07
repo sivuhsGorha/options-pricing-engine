@@ -295,7 +295,7 @@ function App() {
             )}
           />
           <div className="bottom-charts">
-            <ChartPanel id="volatilityChartSmile" chartRef={chartRefSmile} className="sub-chart" title="SMILE · MODELS COMPARED AT THE SHORTEST EXPIRY"
+            <ChartPanel id="volatilityChartSmile" chartRef={chartRefSmile} className="sub-chart" title="SMILE · AND EACH MODEL'S ERROR VS QUOTES"
               expanded={expandedChart === 'SMILE'} onToggle={() => toggleChart('SMILE')} />
             <ChartPanel id="volatilityChartTerm" chartRef={chartRefTerm} className="sub-chart" title="TERM STRUCTURE (2D)"
               expanded={expandedChart === 'TERM'} onToggle={() => toggleChart('TERM')} />

@@ -577,7 +577,14 @@ public class OptionsDashboardServer {
                     ? new PositionTracker.PortfolioExposure(0.0, 0.0, 0.0, 0.0)
                     : positionTracker.snapshotExposure();
             exchange.getResponseHeaders().set("Content-Type", "application/json");
-            send(exchange, 200, riskJson(state, trackedExposure));
+            double spot = Double.NaN;
+            if (marketAdapter != null) {
+                MarketSnapshot quote = marketAdapter.getSnapshot("SPY");
+                if (quote != null && quote.status() != com.sbk.optionspricer.market.MarketDataStatus.UNAVAILABLE) {
+                    spot = quote.last();
+                }
+            }
+            send(exchange, 200, riskJson(state, trackedExposure, spot));
         }));
 
         server.createContext("/api/surface3d", guarded(exchange -> {
@@ -701,7 +708,17 @@ public class OptionsDashboardServer {
      * Builds the /api/risk body. Values the platform does not compute (optimizer margin, L3 fill
      * probability, router allocation) are null rather than invented numbers.
      */
+    /** Risk JSON without a spot price: the hedge analysis needs one, so it reports nothing rather than a guess. */
     public static String riskJson(MmapStateReader.RiskState state, PositionTracker.PortfolioExposure trackedExposure) {
+        return riskJson(state, trackedExposure, Double.NaN);
+    }
+
+    /**
+     * Engine risk state plus the execution book's exposure. {@code recommendedHedge} is the quantity that flattens
+     * net delta; {@code optimizedMargin} is the same four-corner scenario margin recomputed with delta flattened
+     * (gamma and vega stress remain), and {@code marginReductionPct} the saving. Both are null without a spot.
+     */
+    public static String riskJson(MmapStateReader.RiskState state, PositionTracker.PortfolioExposure trackedExposure, double spot) {
         double netDelta = sanitizeRiskValue(state.netDelta, 0.0);
         double netGamma = sanitizeRiskValue(state.netGamma, 0.0);
         double netVega = sanitizeRiskValue(state.netVega, 0.0);
@@ -713,14 +730,19 @@ public class OptionsDashboardServer {
         body.put("netVega", Json.round(netVega, 2));
         body.put("scenarioMargin", Double.isFinite(state.scenarioMargin) ? Json.round(scenarioMargin, 2) : null);
         body.put("recommendedHedge", hedgeQty);
-        body.put("optimizedMargin", null);
-        body.put("marginReductionPct", null);
+        if (Double.isFinite(spot) && spot > 0.0 && Double.isFinite(state.scenarioMargin)) {
+            double hedgedMargin = com.sbk.optionspricer.risk.MarginApproximation.calculateInitialMargin(0.0, netGamma, netVega, spot);
+            body.put("optimizedMargin", Json.round(hedgedMargin, 2));
+            body.put("marginReductionPct", scenarioMargin > 0.0
+                    ? Json.round(100.0 * Math.max(0.0, scenarioMargin - hedgedMargin) / scenarioMargin, 1) : null);
+        } else {
+            body.put("optimizedMargin", null);
+            body.put("marginReductionPct", null);
+        }
         body.put("trackedNetDelta", Json.round(sanitizeRiskValue(trackedExposure.netDelta(), 0.0), 2));
         body.put("trackedNetGamma", Json.round(sanitizeRiskValue(trackedExposure.netGamma(), 0.0), 2));
         body.put("trackedNetVega", Json.round(sanitizeRiskValue(trackedExposure.netVega(), 0.0), 2));
         body.put("trackedNotional", Json.round(sanitizeRiskValue(trackedExposure.netNotional(), 0.0), 2));
-        body.put("l3FillProb", null);
-        body.put("sorAllocations", null);
         return Json.write(body);
     }
 

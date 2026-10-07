@@ -56,6 +56,21 @@ class LiveMarketSnapshotAdapterTest {
     }
 
     @Test
+    void aDelayedSourceIsAllowedToLagAMinuteButALiveOneIsNot() {
+        long sixtySecondsAgo = System.currentTimeMillis() / 1000 - 60;
+        assertEquals(MarketDataStatus.DELAYED, adapterFor("{\"c\":101.25,\"t\":" + sixtySecondsAgo + "}").getSnapshot("SPY").status(),
+                "a delayed feed's own timestamp runs behind during trading; 60 s is within its window");
+        long threeMinutesAgo = System.currentTimeMillis() / 1000 - 180;
+        assertEquals(MarketDataStatus.STALE, adapterFor("{\"c\":101.25,\"t\":" + threeMinutesAgo + "}").getSnapshot("SPY").status());
+
+        long sixtySecondsAgoMs = System.currentTimeMillis() - 60_000L;
+        LiveSpotProvider polygon = new LiveSpotProvider(null, "pk", null, null,
+                (url, headers) -> "{\"lastQuote\":{\"p\":123.45,\"P\":123.55,\"t\":" + sixtySecondsAgoMs + "}}");
+        assertEquals(MarketDataStatus.STALE, new LiveMarketSnapshotAdapter(polygon, 0.01d).getSnapshot("SPY").status(),
+                "a LIVE book that is a minute old is stale");
+    }
+
+    @Test
     void aQuoteWithNoTimestampIsTreatedAsStaleNotAsCurrent() {
         MarketSnapshot snapshot = adapterFor("{\"c\":101.25}").getSnapshot("SPY");
 

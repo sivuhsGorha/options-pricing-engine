@@ -55,6 +55,25 @@ export function smileExpiries(expiries, fittedExpiries) {
     return [...new Set(idx.map(i => candidates[i]))];
 }
 
+/** Linear interpolation of ys over ascending xs at x; clamped at the ends. */
+export function interpolate(xs, ys, x) {
+    if (x <= xs[0]) return ys[0];
+    for (let i = 1; i < xs.length; i++) {
+        if (x <= xs[i]) {
+            const w = (x - xs[i - 1]) / (xs[i] - xs[i - 1]);
+            return ys[i - 1] + w * (ys[i] - ys[i - 1]);
+        }
+    }
+    return ys[ys.length - 1];
+}
+
+/** model minus quote, in vol points, for every quote of one expiry slice. */
+export function residuals(model, quotes, t) {
+    if (!model || !Array.isArray(model.z) || !model.z.length) return [];
+    const row = model.z[nearestRow(model.y, t)];
+    return quotes.map(q => ({ strike: q.strike, error: pct(interpolate(model.x, row, q.strike) - q.marketVol) }));
+}
+
 const nearestRow = (expiries, t) => {
     let best = 0;
     for (let i = 1; i < expiries.length; i++) if (Math.abs(expiries[i] - t) < Math.abs(expiries[best] - t)) best = i;
@@ -105,22 +124,13 @@ export function renderSurfaceCharts(plotly, surface, elements, otherModels = [])
         margin: { t: 0, r: 0, l: 0, b: 0 }
     }, PLOT_CONFIG);
 
+    // Top: the selected model's slices with the quotes. Bottom: every model's error against the quotes at the
+    // shortest expiry, in vol points. Fits to the same quotes look identical as curves; they differ as errors.
     const smileTraces = [];
     const slices = smileExpiries(expiries, surface.fittedExpiries);
     slices.forEach((t, n) => {
         const row = nearestRow(expiries, t);
         smileTraces.push(lineTrace(strikes, vols[row].map(pct), `${surface.model || 'model'} ${expiries[row]}y`));
-        if (n === 0) {
-            // Other models at the shortest expiry, dashed: fits to the same quotes differ most where the skew is steepest.
-            for (const other of otherModels) {
-                if (!other || !Array.isArray(other.z) || !other.z.length) continue;
-                const otherRow = nearestRow(other.y, t);
-                smileTraces.push({
-                    x: other.x, y: other.z[otherRow].map(pct), type: 'scatter', mode: 'lines',
-                    name: `${other.model} ${other.y[otherRow]}y`, line: { width: 2, dash: 'dot' }
-                });
-            }
-        }
         const quotes = points.filter(p => Math.abs(p.t - t) < 1e-6);
         if (quotes.length) {
             smileTraces.push({
@@ -130,9 +140,29 @@ export function renderSurfaceCharts(plotly, surface, elements, otherModels = [])
             });
         }
     });
-    plotly.react(elements.smile, smileTraces,
-        { ...LAYOUT_2D, xaxis: { title: 'STRIKE', ...AXIS_2D, range: [Math.min(...strikes), Math.max(...strikes)] }, yaxis: { title: 'IV (%)', ...AXIS_2D, range: zRange } },
-        PLOT_CONFIG);
+    const shortest = slices[0];
+    const shortQuotes = points.filter(p => Math.abs(p.t - shortest) < 1e-6);
+    const errorModels = [surface, ...otherModels.filter(m => m && m.model !== surface.model)];
+    let errorBound = 0.5;
+    errorModels.forEach((model, n) => {
+        const r = residuals(model, shortQuotes, shortest);
+        if (!r.length) return;
+        errorBound = Math.max(errorBound, ...r.map(p => Math.abs(p.error)));
+        smileTraces.push({
+            x: r.map(p => p.strike), y: r.map(p => p.error), type: 'scatter', mode: 'lines+markers', yaxis: 'y2',
+            name: `${model.model} error`, line: { width: 1.5 }, marker: { size: 4, color: LAYOUT_BASE.colorway[n % LAYOUT_BASE.colorway.length] }
+        });
+    });
+    plotly.react(elements.smile, smileTraces, {
+        ...LAYOUT_2D,
+        margin: { t: 10, r: 20, l: 48, b: 40 },
+        xaxis: { title: 'STRIKE', ...AXIS_2D, range: [Math.min(...strikes), Math.max(...strikes)] },
+        yaxis: { title: 'IV (%)', ...AXIS_2D, range: zRange, domain: [0.42, 1] },
+        yaxis2: {
+            title: `error vs quotes, ${shortest}y (vol pts)`, ...AXIS_2D, domain: [0, 0.3],
+            range: [-errorBound * 1.15, errorBound * 1.15], zeroline: true, zerolinecolor: '#E0E6ED', titlefont: { size: 11 }
+        }
+    }, PLOT_CONFIG);
 
     const strikeIdx = [Math.floor(strikes.length * 0.2), Math.floor(strikes.length / 2), Math.floor(strikes.length * 0.8)];
     plotly.react(elements.term,

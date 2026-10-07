@@ -16,9 +16,9 @@ Each quote carries a **status** (`market/MarketDataStatus`):
 
 | Status | Meaning | Tradable (default policy) |
 | :--- | :--- | :--- |
-| `LIVE` | real-time quote with a source timestamp | yes, if under 30 s old |
-| `DELAYED` | delayed or end-of-day price (Polygon, MarketStack, Alpha Vantage outside hours) | yes, if under 30 s old |
-| `STALE` | a LIVE/DELAYED quote whose own timestamp is older than 30 s | never |
+| `LIVE` | real-time quote with a source timestamp | yes, if under 120 s old (it turns STALE after 30 s anyway) |
+| `DELAYED` | delayed price (Finnhub's free quote, Alpha Vantage, Marketstack end-of-day) | yes, if under 120 s old |
+| `STALE` | a LIVE quote older than 30 s, or a DELAYED quote older than 120 s, by its own timestamp | never |
 | `UNAVAILABLE` | no provider answered; there is **no price** (the UI shows `--`) | never |
 | `SIMULATED` | no API key configured; a constructed quote around the configured spot | only with `ALLOW_SIMULATED_DATA=true` |
 

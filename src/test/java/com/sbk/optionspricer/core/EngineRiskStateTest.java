@@ -128,9 +128,9 @@ class EngineRiskStateTest {
         }
         assertEquals(250, node.get("recommendedHedge").asInt(), json);
         assertEquals(12_345.0, node.get("scenarioMargin").asDouble(), 1e-9, json);
-        assertTrue(node.get("optimizedMargin").isNull(), "no optimizer exists, so no optimized margin: " + json);
+        assertTrue(node.get("optimizedMargin").isNull(), "without a spot the hedge analysis cannot be computed: " + json);
         assertTrue(node.get("marginReductionPct").isNull(), json);
-        assertTrue(node.get("l3FillProb").isNull(), "no L3 feed exists: " + json);
-        assertTrue(node.get("sorAllocations").isNull(), "no router allocation exists: " + json);
+        assertFalse(node.has("l3FillProb"), "no L3 feed exists, so the field is not emitted: " + json);
+        assertFalse(node.has("sorAllocations"), "no router exists, so the field is not emitted: " + json);
     }
 }

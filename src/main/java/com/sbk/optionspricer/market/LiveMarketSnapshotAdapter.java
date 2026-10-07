@@ -14,8 +14,14 @@ import java.time.Instant;
  * default and never shown as a price.
  */
 public class LiveMarketSnapshotAdapter implements MarketSnapshotAdapter {
-    /** A quote whose price is older than this is STALE, whatever its provider label says. */
-    static final long STALE_AFTER_MS = 30_000L;
+    /** A LIVE quote whose price is older than this is STALE. */
+    static final long STALE_AFTER_LIVE_MS = 30_000L;
+    /**
+     * A DELAYED source lags the market by design (Finnhub's free quote, end-of-day feeds), so its own timestamp
+     * runs a minute or more behind during trading. It is STALE only beyond this; the order gate uses the same
+     * limit ({@link com.sbk.optionspricer.execution.OrderManager.MarketDataPolicy}).
+     */
+    static final long STALE_AFTER_DELAYED_MS = 120_000L;
     private final LiveSpotProvider liveSpotProvider;
     private final double fallbackSpot;
     /** Spread of the SIMULATED snapshot only; live quotes keep their real book or none. */
@@ -50,7 +56,8 @@ public class LiveMarketSnapshotAdapter implements MarketSnapshotAdapter {
             MarketDataStatus status = quote.status();
             // Freshness is a property of the price's own timestamp, not of the provider label: a DELAYED
             // or end-of-day quote from hours ago is stale, and a quote with no timestamp (0) is as old as it gets.
-            if ((status == MarketDataStatus.LIVE || status == MarketDataStatus.DELAYED) && ageMs > STALE_AFTER_MS) {
+            if ((status == MarketDataStatus.LIVE && ageMs > STALE_AFTER_LIVE_MS)
+                    || (status == MarketDataStatus.DELAYED && ageMs > STALE_AFTER_DELAYED_MS)) {
                 status = MarketDataStatus.STALE;
             }
             boolean hasBook = Double.isFinite(quote.bid()) && Double.isFinite(quote.ask()) && quote.bid() < quote.ask();

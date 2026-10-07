@@ -34,17 +34,20 @@ public class OrderManager {
             }
         }
 
+        /** Oldest quote an order may be based on; matches the adapter's DELAYED freshness window (a LIVE quote is STALE far sooner). */
+        public static final long DEFAULT_MAX_QUOTE_AGE_MS = 120_000L;
+
         public static MarketDataPolicy strict() {
             return new MarketDataPolicy(java.util.EnumSet.of(
                     com.sbk.optionspricer.market.MarketDataStatus.LIVE,
-                    com.sbk.optionspricer.market.MarketDataStatus.DELAYED), 30_000L);
+                    com.sbk.optionspricer.market.MarketDataStatus.DELAYED), DEFAULT_MAX_QUOTE_AGE_MS);
         }
 
         public static MarketDataPolicy allowSimulated() {
             return new MarketDataPolicy(java.util.EnumSet.of(
                     com.sbk.optionspricer.market.MarketDataStatus.LIVE,
                     com.sbk.optionspricer.market.MarketDataStatus.DELAYED,
-                    com.sbk.optionspricer.market.MarketDataStatus.SIMULATED), 30_000L);
+                    com.sbk.optionspricer.market.MarketDataStatus.SIMULATED), DEFAULT_MAX_QUOTE_AGE_MS);
         }
     }
 
