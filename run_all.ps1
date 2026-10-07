@@ -16,6 +16,7 @@ Invoke-Step 'Python script tests' { python -m unittest discover -s scripts -p "t
 Push-Location web-react
 try {
     Invoke-Step 'Frontend lint' { npm run lint }
+    Invoke-Step 'Frontend tests' { npm test }
     Invoke-Step 'Frontend build' { npm run build }
 } finally {
     Pop-Location

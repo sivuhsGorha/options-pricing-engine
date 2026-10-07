@@ -53,13 +53,16 @@ to localhost only, with persistent state. `RUNBOOK.md` maps symptoms to causes. 
 rewrite (one line per event); the current `[TAG] message` lines are greppable and the gain did not justify
 the churn this week.
 
+**Frontend tests** (2026-10-07). Vitest and React Testing Library cover the five components, the API helpers,
+the formatters and the surface provenance badge (29 tests); `npm test` runs in CI and in `run_all.ps1`.
+
 ---
 
 ## Next: deployment readiness (this week, 2026-10-07 to 2026-10-11)
 
 Goal: a reviewer can clone, run, and trust every number on screen.
 
-8. **Frontend tests.** Vitest with React Testing Library for the five components, run in CI.
+All eight deployment-readiness items are done; see the dated entries above.
 
 ---
 

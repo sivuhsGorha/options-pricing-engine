@@ -88,4 +88,6 @@ Fonts: JetBrains Mono / Roboto Mono for numbers, Inter for headers.
 
 `web-react/src/App.jsx` holds state and polling; `components/` holds `LoginForm`, `DataBanner`, `RiskPanel`,
 `ChartPanel`, `ExecutionPanel`; `lib/` holds `api.js` (same-origin fetch under `/api`), `format.js` and
-`surfaceCharts.js` (Plotly layouts). `npm run lint` fails on warnings; CI runs lint and build.
+`surfaceCharts.js` (Plotly layouts) and `surfaceLabel.js` (the provenance badge). Tests sit next to the code
+as `*.test.js(x)` (Vitest, React Testing Library, jsdom); `npm test` runs them. `npm run lint` fails on
+warnings; CI runs lint, tests and build.

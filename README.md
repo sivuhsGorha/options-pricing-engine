@@ -63,7 +63,8 @@ docker compose up --build -d
 [RUNBOOK.md](RUNBOOK.md) covers health, common symptoms and their causes, secrets and upgrades.
 
 Sign in with `OPERATOR_PASSWORD`. The paper-trading panel shows positions and every order with its fill or
-rejection reason. `run_all.ps1` runs the same checks as CI locally.
+rejection reason, with HALT / RESUME and a strategy switch. `run_all.ps1` runs the same checks as CI locally:
+the Java build with 387 tests and the coverage gate, the Python tests, and the frontend lint, 29 tests and build.
 
 ---
 

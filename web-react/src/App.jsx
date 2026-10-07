@@ -3,6 +3,7 @@ import './App.css';
 import { secureFetch, securePost } from './lib/api';
 import { formatNumber } from './lib/format';
 import { renderSurfaceCharts } from './lib/surfaceCharts';
+import { surfaceLabel, surfaceTone } from './lib/surfaceLabel';
 import LoginForm from './components/LoginForm';
 import DataBanner from './components/DataBanner';
 import RiskPanel from './components/RiskPanel';
@@ -15,16 +16,6 @@ const SURFACE_MODELS = [
 ];
 
 const isFresh = (status) => status === 'LIVE' || status === 'DELAYED';
-
-// Provenance of the surface: what it was fitted to and how well. Never show a fitted-looking surface unlabelled.
-const surfaceLabel = (s) => {
-  if (!s) return 'LOADING';
-  if (s.ready === false) return `${s.status}${s.message ? ': ' + String(s.message).slice(0, 80) : ''}`;
-  const rmse = Number.isFinite(s.rmse) ? ` · RMSE ${(s.rmse * 100).toFixed(2)} vol pts` : '';
-  if (s.demo) return `DEMO · ${s.source}${rmse}`;
-  return `FIT · ${s.source} · ${s.quotesUsed} quotes${rmse}`;
-};
-const surfaceTone = (s) => (!s ? '#FF9900' : s.ready === false ? '#FF3D00' : s.demo ? '#FF9900' : '#00E676');
 const providerColor = (status) => (status === 'LIVE' ? '#00E676' : status === 'DELAYED' || status === 'STALE' ? '#FF9900' : '#FF3D00');
 
 function App() {

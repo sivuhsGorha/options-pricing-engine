@@ -90,8 +90,8 @@ credential redaction in logs; client address resolution that trusts `X-Forwarded
 ## 4. CI
 
 `.github/workflows/ci.yml` on every push and pull request: `mvn -B clean verify` (tests + JaCoCo gate),
-Python script tests, Docker build and readiness check, frontend `npm ci && npm run lint && npm run build`,
-and a Gitleaks secret scan (`.gitleaks.toml`). The JaCoCo minimum is ratcheted upward only.
+Python script tests, Docker build and readiness check, frontend `npm ci && npm run lint && npm test &&
+npm run build`, and a Gitleaks secret scan (`.gitleaks.toml`). The JaCoCo minimum is ratcheted upward only.
 
 ---
 
