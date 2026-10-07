@@ -201,6 +201,45 @@ class LiveSpotProviderQuoteTest {
                 LiveSpotProvider.parsePolygonSnapshot("SPY", withNeither).volume(), "no volume field means unknown, not 2000");
     }
 
+    // ---------- 4.7 health: last known status without probing ----------
+
+    @Test
+    void lastKnownFeedStatusReportsEachConfiguredSourceWithoutMakingARequest() {
+        AtomicInteger calls = new AtomicInteger();
+        LiveSpotProvider provider = new LiveSpotProvider("fh", null, "av", null, (url, headers) -> {
+            calls.incrementAndGet();
+            if (url.contains("finnhub")) return "{\"c\":500.00,\"t\":" + System.currentTimeMillis() / 1000 + "}";
+            throw new IOException("down");
+        });
+
+        assertEquals(Map.of("FINNHUB", "NOT_TRIED", "ALPHA_VANTAGE", "NOT_TRIED"), provider.lastKnownFeedStatus());
+        assertEquals(0, calls.get(), "reading the status is not a probe");
+
+        provider.getQuote("SPY");
+        int requestsSoFar = calls.get();
+        Map<String, String> status = provider.lastKnownFeedStatus();
+
+        assertEquals("DELAYED", status.get("FINNHUB"));
+        assertEquals("NOT_TRIED", status.get("ALPHA_VANTAGE"), "Finnhub answered first, so Alpha Vantage was never asked");
+        assertFalse(status.containsKey("POLYGON"), "unconfigured sources are not listed");
+        assertEquals(requestsSoFar, calls.get(), "reading the status made no request");
+    }
+
+    @Test
+    void lastKnownFeedStatusDistinguishesRejectedCredentialsAndThrottlingFromOutages() {
+        LiveSpotProvider rejected = new LiveSpotProvider(null, "pk", null, null, (url, headers) -> { throw new LiveSpotProvider.HttpStatusException(403, 0); });
+        rejected.getQuote("SPY");
+        assertEquals("REJECTED", rejected.lastKnownFeedStatus().get("POLYGON"));
+
+        LiveSpotProvider throttled = new LiveSpotProvider("fh", null, null, null, (url, headers) -> { throw new LiveSpotProvider.HttpStatusException(429, 0); });
+        throttled.getQuote("SPY");
+        assertEquals("RATE_LIMITED", throttled.lastKnownFeedStatus().get("FINNHUB"));
+
+        LiveSpotProvider down = new LiveSpotProvider(null, null, null, "ms", (url, headers) -> { throw new IOException("connect timed out"); });
+        down.getQuote("SPY");
+        assertEquals("UNAVAILABLE", down.lastKnownFeedStatus().get("MARKETSTACK"));
+    }
+
     @Test
     void malformedAndEmptyPayloadsYieldNoQuoteRatherThanAnException() {
         for (String body : new String[]{"", "not json", "{}", "[]", "{\"c\":\"abc\"}", "{\"c\":-5}", "{\"c\":0}"}) {

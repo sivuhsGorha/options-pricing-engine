@@ -94,6 +94,111 @@ public class OptionsDashboardServer {
     }
 
     private volatile com.sbk.optionspricer.execution.OperatorControls operatorControls;
+    private final java.time.Instant startedAt = java.time.Instant.now();
+    /** Last known status per market-data provider, read without probing; null means none is wired in. */
+    private volatile java.util.function.Supplier<java.util.Map<String, String>> feedStatusSource;
+
+    public void setFeedStatusSource(java.util.function.Supplier<java.util.Map<String, String>> source) {
+        this.feedStatusSource = source;
+    }
+
+    /**
+     * Health of each component plus the fields the original snapshot had. {@code status} is {@code down} when
+     * the engine's risk state cannot be read, {@code degraded} when market data is not fresh, the surface
+     * failed or trading is halted, otherwise {@code ok}.
+     */
+    java.util.Map<String, Object> healthBody() {
+        long now = System.currentTimeMillis();
+        String symbol = "SPY";
+        String sourceStatus = "UNAVAILABLE";
+        String source = null;
+        long lastUpdate = 0L;
+        long quoteAge = 0L;
+        boolean tradable = false;
+        if (marketAdapter != null) {
+            MarketSnapshot quote = marketAdapter.getSnapshot(symbol);
+            if (quote != null) {
+                sourceStatus = quote.status().name();
+                source = quote.source();
+                lastUpdate = quote.sourceTimestamp().toEpochMilli();
+                quoteAge = quote.derivedQuoteAgeMs();
+                tradable = quote.status() == com.sbk.optionspricer.market.MarketDataStatus.LIVE && quoteAge <= 30000L;
+            }
+        }
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("symbol", symbol);
+        body.put("sourceStatus", sourceStatus);
+        body.put("lastUpdate", lastUpdate <= 0L ? now : lastUpdate);
+        body.put("quoteAgeMs", quoteAge);
+        body.put("tradable", tradable);
+
+        java.util.Map<String, String> providers = java.util.Map.of();
+        var feeds = feedStatusSource;
+        if (feeds != null) {
+            try {
+                java.util.Map<String, String> known = feeds.get();
+                if (known != null) providers = known;
+            } catch (RuntimeException ignored) {
+                // a status source that fails is reported as no providers, never as an error page
+            }
+        }
+        body.put("providers", providers);
+
+        java.util.Map<String, Object> components = new java.util.LinkedHashMap<>();
+        java.util.Map<String, Object> marketData = new java.util.LinkedHashMap<>();
+        marketData.put("status", sourceStatus);
+        marketData.put("ageMs", quoteAge);
+        marketData.put("source", source);
+        components.put("marketData", marketData);
+
+        boolean riskReadable = false;
+        if (mmapReader != null) {
+            try {
+                mmapReader.readState();
+                riskReadable = true;
+            } catch (RuntimeException unavailable) {
+                riskReadable = false;
+            }
+        }
+        components.put("riskState", java.util.Map.of("status", riskReadable ? "READY" : "UNAVAILABLE"));
+
+        java.util.Map<String, Object> surface = new java.util.LinkedHashMap<>();
+        var surfaces = surfaceSource;
+        if (surfaces == null) {
+            surface.put("status", "DEMO");
+        } else {
+            var status = surfaces.status();
+            surface.put("status", status.state().name());
+            surface.put("message", status.message());
+            surfaces.latest().ifPresent(s -> {
+                surface.put("source", s.source());
+                surface.put("demo", !s.marketData());
+                surface.put("asOf", s.asOf().toEpochMilli());
+            });
+        }
+        components.put("surface", surface);
+
+        java.util.Map<String, Object> trading = new java.util.LinkedHashMap<>();
+        var controls = operatorControls;
+        boolean halted = false;
+        if (controls != null) {
+            var state = controls.state();
+            halted = state.halted();
+            trading.put("halted", state.halted());
+            trading.put("haltReason", state.haltReason());
+            trading.put("strategyEnabled", state.strategyEnabled());
+        } else {
+            trading.put("status", "UNAVAILABLE");
+        }
+        components.put("trading", trading);
+        body.put("components", components);
+
+        boolean marketFresh = "LIVE".equals(sourceStatus) || "DELAYED".equals(sourceStatus);
+        boolean surfaceFailed = "FAILED".equals(surface.get("status"));
+        body.put("status", !riskReadable ? "down" : (marketFresh && !surfaceFailed && !halted) ? "ok" : "degraded");
+        body.put("uptimeSeconds", java.time.Duration.between(startedAt, java.time.Instant.now()).toSeconds());
+        return body;
+    }
     private static final com.fasterxml.jackson.databind.ObjectMapper JSON_IN = new com.fasterxml.jackson.databind.ObjectMapper();
 
     /** Exposes halt/resume and the strategy switch at /api/control. Call before {@link #start()}. */
@@ -369,8 +474,7 @@ public class OptionsDashboardServer {
         server.createContext("/api/health", guarded(exchange -> {
             applySecurityHeaders(exchange, true, isSecureRequest(exchange));
             if (!authorizeApi(exchange)) return;
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            send(exchange, 200, healthSnapshot(marketAdapter));
+            sendJson(exchange, 200, healthBody());
         }));
 
         server.createContext("/api/execution", guarded(exchange -> {

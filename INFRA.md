@@ -17,8 +17,19 @@ build`, output goes to `web/`). `run_all.ps1` runs the Java verify, the Python t
 and build, and exits non-zero on the first failure.
 
 **Docker** (`Dockerfile`): three stages, Node 22 builds the frontend, Maven builds the jar, a JRE 25 Alpine
-image runs it with `-XX:MaxRAMPercentage=75.0`. The container exposes 8080 and has a health check on `/`.
-CI builds the image and confirms an unauthenticated `/api/health` returns 401.
+image runs it as a non-root user with `-XX:MaxRAMPercentage=75.0`. The container exposes 8080 and 8081, has
+a health check on `/`, and keeps its state under `/app/data`. CI builds the image and confirms an
+unauthenticated `/api/health` returns 401. `docker-compose.yml` runs it with your `.env`, publishes the ports
+to `127.0.0.1` only, and keeps `/app/data` (fill ledger, mmap state) in a named volume across restarts.
+
+**Shutdown.** Ctrl+C (SIGTERM) runs `AppCompositionRoot.close()`: the HTTP and WebSocket servers stop first,
+then the surface calibration thread, then the engine, which closes the mmap state. Each step is guarded so
+one failure does not skip the rest.
+
+**Health.** `GET /api/health` (authenticated) reports an overall `status` (`ok`, `degraded`, `down`) and one
+entry per component: market data (status, age, source), engine risk state (readable or not), surface
+calibration (state, message, source, demo flag) and trading (halted, reason, strategy switch), plus the last
+known status of each market-data provider read without probing them. See [RUNBOOK.md](RUNBOOK.md).
 
 ---
 

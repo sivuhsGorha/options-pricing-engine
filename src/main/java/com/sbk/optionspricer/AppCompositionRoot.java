@@ -89,5 +89,32 @@ public class AppCompositionRoot {
                 riskFreeRate, dividendYield, java.time.Duration.ofSeconds(refreshSeconds), java.time.Clock.systemUTC(), engine::recordChainSnapshots);
         dashboard.setSurfaceSource(surfaceService);
         dashboard.setOperatorControls(new com.sbk.optionspricer.core.OperatorConsole(tradingHalt, harness, strategyLoop));
+        dashboard.setFeedStatusSource(spotProvider::lastKnownFeedStatus);
+    }
+
+    /**
+     * Orderly shutdown: stop serving first, then the background calibration, then the engine (which closes the
+     * mmap state). Each step is guarded so one failure does not skip the others. Idempotent.
+     */
+    public synchronized void close() {
+        if (closed) {
+            return;
+        }
+        closed = true;
+        System.out.println("[SHUTDOWN] stopping dashboard, surface calibration and engine");
+        step("dashboard", dashboard::stop);
+        step("surface calibration", surfaceService::close);
+        step("engine", harness::stop);
+        System.out.println("[SHUTDOWN] done");
+    }
+
+    private boolean closed;
+
+    private static void step(String name, Runnable action) {
+        try {
+            action.run();
+        } catch (RuntimeException e) {
+            System.err.println("[SHUTDOWN] " + name + " failed to stop cleanly: " + e);
+        }
     }
 }

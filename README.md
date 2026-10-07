@@ -55,7 +55,12 @@ java --add-modules jdk.incubator.vector -jar target/options-pricing-engine-1.0.0
 
 # Optional: refresh market_data.csv from a real provider (exits with status 2 if none answers)
 python fetch_real_api_data.py
+
+# Or run it in Docker with the same .env (published to localhost only)
+docker compose up --build -d
 ```
+
+[RUNBOOK.md](RUNBOOK.md) covers health, common symptoms and their causes, secrets and upgrades.
 
 Sign in with `OPERATOR_PASSWORD`. The paper-trading panel shows positions and every order with its fill or
 rejection reason. `run_all.ps1` runs the same checks as CI locally.

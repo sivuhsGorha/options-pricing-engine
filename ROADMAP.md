@@ -45,15 +45,20 @@ from the command line and a bad start exits with the messages, not a stack trace
 keys or reach the network, and engine tests use their own state file instead of the running application's.
 JaCoCo gate raised to 75% (measured 81%).
 
+**Operations** (2026-10-07). `/api/health` reports an overall status and each component (market data, risk
+state, surface calibration, trading) plus the last known provider statuses without probing, which also fixes
+the header's provider badges (they read a field the old response never had). Ctrl+C closes the server,
+the calibration thread and the engine in order. `docker-compose.yml` runs the image with `.env`, published
+to localhost only, with persistent state. `RUNBOOK.md` maps symptoms to causes. Not done: a structured-logging
+rewrite (one line per event); the current `[TAG] message` lines are greppable and the gain did not justify
+the churn this week.
+
 ---
 
 ## Next: deployment readiness (this week, 2026-10-07 to 2026-10-11)
 
 Goal: a reviewer can clone, run, and trust every number on screen.
 
-7. **Operations.** Structured logging (one line per event, no banners), `/api/health` with per-component
-   state, graceful shutdown that closes the mmap and ring buffer, a `docker compose` file with the `.env`
-   contract, and a one-page runbook.
 8. **Frontend tests.** Vitest with React Testing Library for the five components, run in CI.
 
 ---

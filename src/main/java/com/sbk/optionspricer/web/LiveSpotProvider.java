@@ -364,16 +364,35 @@ public class LiveSpotProvider {
         });
     }
 
+    /** Outcome of the last attempt per source, for health reporting; never triggers a request. */
+    private final Map<Source, String> lastOutcome = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * Last known status of each configured provider, read from memory: the quote status it last returned
+     * ({@code LIVE}, {@code DELAYED}), {@code UNAVAILABLE}, {@code RATE_LIMITED}, {@code REJECTED} (credentials),
+     * or {@code NOT_TRIED} when an earlier provider answered first. Unlike {@link #getFeedStatus} this makes
+     * no network call, so it is safe to poll.
+     */
+    public Map<String, String> lastKnownFeedStatus() {
+        Map<String, String> status = new java.util.LinkedHashMap<>();
+        if (finnhubKey != null) status.put("FINNHUB", lastOutcome.getOrDefault(Source.FINNHUB, "NOT_TRIED"));
+        if (alphaVantageKey != null) status.put("ALPHA_VANTAGE", lastOutcome.getOrDefault(Source.ALPHA_VANTAGE, "NOT_TRIED"));
+        if (polygonKey != null) status.put("POLYGON", lastOutcome.getOrDefault(Source.POLYGON, "NOT_TRIED"));
+        if (marketstackKey != null) status.put("MARKETSTACK", lastOutcome.getOrDefault(Source.MARKETSTACK, "NOT_TRIED"));
+        return status;
+    }
+
     /** Runs a provider call if its gate admits it; records the outcome and reports failures (credentials redacted). */
     private Quote gated(Source source, Fetch fetch) {
         SourceGate gate = gates.get(source);
         long now = clock.getAsLong();
         if (!gate.admit(now)) {
-            return null;
+            return null; // in back-off: the recorded outcome of the last real attempt stands
         }
         try {
             Quote quote = fetch.run();
             gate.succeeded();
+            lastOutcome.put(source, quote == null ? "UNAVAILABLE" : quote.status().name());
             return quote;
         } catch (HttpStatusException e) {
             long wait;
@@ -381,17 +400,21 @@ public class LiveSpotProvider {
             if (e.status() == 429) {
                 wait = gate.coolDown(now, e.retryAfterSeconds() > 0 ? Math.min(e.retryAfterSeconds(), 3_600L) * 1_000L : 60_000L);
                 reason = "rate limited (HTTP 429)";
+                lastOutcome.put(source, "RATE_LIMITED");
             } else if (e.status() == 401 || e.status() == 403) {
                 wait = gate.coolDown(now, 900_000L);
                 reason = "credentials rejected (HTTP " + e.status() + ")";
+                lastOutcome.put(source, "REJECTED");
             } else {
                 wait = gate.failed(now);
                 reason = "HTTP " + e.status();
+                lastOutcome.put(source, "UNAVAILABLE");
             }
             logFailure(gate, source, reason, wait, now);
             return null;
         } catch (Exception e) {
             long wait = gate.failed(now);
+            lastOutcome.put(source, "UNAVAILABLE");
             logFailure(gate, source, redact(e.toString()), wait, now);
             return null;
         }

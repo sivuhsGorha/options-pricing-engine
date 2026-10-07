@@ -33,8 +33,8 @@ COPY --from=builder /build/target/lib /app/lib
 COPY --from=frontend /fe/web /app/web
 COPY market_data.csv /app/market_data.csv
 
-# Set ownership
-RUN chown -R appuser:appgroup /app
+# Writable state directory (mmap state file, fill ledger); docker-compose mounts a volume here
+RUN mkdir -p /app/data && chown -R appuser:appgroup /app
 
 USER appuser
 

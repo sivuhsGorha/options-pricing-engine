@@ -45,6 +45,13 @@ class ApiResponseHardeningTest {
 
     private void start(MmapStateReader reader, OrderManager orderManager, PositionTracker tracker, MarketSnapshotAdapter adapter,
                        com.sbk.optionspricer.volatility.VolatilitySurfaceSource surfaceSource) throws Exception {
+        start(reader, orderManager, tracker, adapter, surfaceSource, null, null);
+    }
+
+    private void start(MmapStateReader reader, OrderManager orderManager, PositionTracker tracker, MarketSnapshotAdapter adapter,
+                       com.sbk.optionspricer.volatility.VolatilitySurfaceSource surfaceSource,
+                       java.util.function.Supplier<java.util.Map<String, String>> feedStatus,
+                       com.sbk.optionspricer.execution.OperatorControls controls) throws Exception {
         webRoot = Files.createTempDirectory("api-hardening-web");
         server = new OptionsDashboardServer(OptionsDashboardServerTest.TEST_SECRET, OptionsDashboardServerTest.OPERATOR_PASSWORD,
                 OptionsDashboardServerTest.ALLOWED_ORIGIN, "127.0.0.1", 0, 0, reader, webRoot.toString(),
@@ -52,8 +59,66 @@ class ApiResponseHardeningTest {
         if (surfaceSource != null) {
             server.setSurfaceSource(surfaceSource);
         }
+        if (feedStatus != null) {
+            server.setFeedStatusSource(feedStatus);
+        }
+        if (controls != null) {
+            server.setOperatorControls(controls);
+        }
         server.start();
         OptionsDashboardServerTest.waitForWebSocketPort(server);
+    }
+
+    private static com.sbk.optionspricer.execution.OperatorControls fixedControls(boolean halted) {
+        var state = new com.sbk.optionspricer.execution.OperatorControls.ControlState(halted, halted ? "test" : null,
+                halted ? Instant.now() : null, true, "SPY", 0.001, 10);
+        return new com.sbk.optionspricer.execution.OperatorControls() {
+            @Override public ControlState state() { return state; }
+            @Override public ControlState halt(String reason) { return state; }
+            @Override public ControlState resume() { return state; }
+            @Override public ControlState setStrategyEnabled(boolean enabled) { return state; }
+        };
+    }
+
+    @Test
+    void healthReportsEveryComponentAndTheProvidersWithoutProbing() throws Exception {
+        MarketSnapshotAdapter live = symbol -> new MarketSnapshot("SPY", 99.99, 100.01, 100.0, 5000L, Instant.now(), Instant.now(), 0L, "POLYGON", MarketDataStatus.LIVE);
+        var loading = new com.sbk.optionspricer.volatility.VolatilitySurfaceSource.Status(
+                com.sbk.optionspricer.volatility.VolatilitySurfaceSource.State.LOADING, "calibration has not run yet", Instant.now());
+        java.util.concurrent.atomic.AtomicInteger statusReads = new java.util.concurrent.atomic.AtomicInteger();
+        start(reader(() -> new MmapStateReader.RiskState(0, 0, 0, 0)), null, null, live, surfaceSource(null, loading),
+                () -> { statusReads.incrementAndGet(); return java.util.Map.of("FINNHUB", "LIVE", "POLYGON", "UNAVAILABLE"); }, fixedControls(false));
+
+        JsonNode body = MAPPER.readTree(get("/api/health").body());
+
+        assertEquals("ok", body.get("status").asText(), body.toString());
+        assertEquals("LIVE", body.get("providers").get("FINNHUB").asText(), "the header badges read this map");
+        assertEquals("UNAVAILABLE", body.get("providers").get("POLYGON").asText());
+        assertEquals("LIVE", body.get("components").get("marketData").get("status").asText());
+        assertEquals("READY", body.get("components").get("riskState").get("status").asText());
+        assertEquals("LOADING", body.get("components").get("surface").get("status").asText());
+        assertFalse(body.get("components").get("trading").get("halted").asBoolean());
+        assertTrue(body.get("uptimeSeconds").asLong() >= 0);
+        assertEquals(1, statusReads.get(), "one cheap status read per request, no provider probe");
+        // the original fields are still present for older clients
+        assertEquals("LIVE", body.get("sourceStatus").asText());
+        assertTrue(body.get("tradable").asBoolean());
+    }
+
+    @Test
+    void healthIsDownWhenTheRiskStateCannotBeReadAndDegradedWhenTradingIsHalted() throws Exception {
+        start(reader(() -> { throw new IllegalStateException("UNAVAILABLE"); }), null, null, null, null, null, fixedControls(false));
+        JsonNode down = MAPPER.readTree(get("/api/health").body());
+        assertEquals("down", down.get("status").asText(), down.toString());
+        assertEquals("UNAVAILABLE", down.get("components").get("riskState").get("status").asText());
+        server.stop();
+
+        MarketSnapshotAdapter live = symbol -> new MarketSnapshot("SPY", 99.99, 100.01, 100.0, 5000L, Instant.now(), Instant.now(), 0L, "POLYGON", MarketDataStatus.LIVE);
+        start(reader(() -> new MmapStateReader.RiskState(0, 0, 0, 0)), null, null, live, null, null, fixedControls(true));
+        JsonNode halted = MAPPER.readTree(get("/api/health").body());
+        assertEquals("degraded", halted.get("status").asText(), halted.toString());
+        assertTrue(halted.get("components").get("trading").get("halted").asBoolean());
+        assertEquals("DEMO", halted.get("components").get("surface").get("status").asText(), "no calibration service wired in");
     }
 
     private static com.sbk.optionspricer.volatility.VolatilitySurfaceSource surfaceSource(

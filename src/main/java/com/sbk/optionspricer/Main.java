@@ -93,6 +93,7 @@ public class Main {
         System.out.println("\n[SUCCESS] UNIFIED SYSTEM ONLINE AND PROCESSING REAL-TIME MMAP IPC STATE.");
         System.out.println("Options Trading Dashboard Live at: http://127.0.0.1:" + root.dashboard.getPort());
         System.out.println("[SERVER] Press Ctrl+C to terminate.");
+        Runtime.getRuntime().addShutdownHook(new Thread(root::close, "shutdown"));
         while (true) {
             Thread.sleep(1000);
         }

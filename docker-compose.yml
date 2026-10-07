@@ -1,0 +1,23 @@
+# One-command local deployment. Secrets and keys come from .env (copy .env.example; never commit .env).
+#   docker compose up --build -d      # build the frontend and the jar, start on http://127.0.0.1:8080
+#   docker compose logs -f            # engine log (market data status, halts, calibration)
+#   docker compose down               # stop; the fill ledger and state file stay in the named volume
+services:
+  options-engine:
+    build: .
+    image: options-pricing-engine:local
+    env_file: .env
+    environment:
+      # Inside the container the server must listen on all interfaces; the ports below publish it to
+      # localhost only, so nothing outside this machine can reach it without a reverse proxy.
+      BIND_ADDRESS: 0.0.0.0
+      MMAP_STATE_FILE: /app/data/shm_state.dat
+    ports:
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:8081:8081"
+    volumes:
+      - engine-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  engine-data:
