@@ -41,14 +41,16 @@ missing keys and duplicates are errors naming the line; wrong types name the key
 covers the strategy and execution keys and reports every problem at once; `--check-config` does the same
 from the command line and a bad start exits with the messages, not a stack trace.
 
+**Hermetic tests** (2026-10-07). No test constructs a `LiveSpotProvider` that could read the developer's API
+keys or reach the network, and engine tests use their own state file instead of the running application's.
+JaCoCo gate raised to 75% (measured 81%).
+
 ---
 
 ## Next: deployment readiness (this week, 2026-10-07 to 2026-10-11)
 
 Goal: a reviewer can clone, run, and trust every number on screen.
 
-6. **Hermetic tests.** Inject a fake spot provider into the remaining tests that construct `LiveSpotProvider`;
-   ratchet the JaCoCo gate to the measured figure minus five points.
 7. **Operations.** Structured logging (one line per event, no banners), `/api/health` with per-component
    state, graceful shutdown that closes the mmap and ring buffer, a `docker compose` file with the `.env`
    contract, and a one-page runbook.

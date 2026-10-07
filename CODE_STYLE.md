@@ -56,7 +56,8 @@ Outside hot paths, prefer clarity: records for parameter groups, `Optional` for 
 - A test named for behaviour (`producerCannotOverwriteATickTheConsumerIsStillReading`) is preferred to one named
   for a method.
 - Tests must be hermetic: no network, no real API keys, no dependence on the clock beyond injected instants.
-  Older tests that construct `LiveSpotProvider` directly are being migrated.
+  Construct `LiveSpotProvider` only with explicit (null) keys and a stub `HttpGetter`; give anything that
+  opens the mmap state file its own `MMAP_STATE_FILE` under `target/`.
 - Numerical tests state the reference they compare against and why its accuracy exceeds the tolerance.
 
 ---

@@ -152,11 +152,12 @@
                                              Ratchet from here: raise as tests are added, never lower again.
                                              Raised 0.50 -> 0.60 on 2026-10-06 (measured 66%, keeping ~6 points of headroom
                                              for CI platform variance).
-                                             Raised 0.60 -> 0.70 on 2026-10-07 (measured 77%, ~7 points of headroom). -->
+                                             Raised 0.60 -> 0.70 on 2026-10-07 (measured 77%, ~7 points of headroom).
+                                             Raised 0.70 -> 0.75 on 2026-10-07 (measured 81%, ~6 points of headroom). -->
                                         <limit>
                                             <counter>INSTRUCTION</counter>
                                             <value>COVEREDRATIO</value>
-                                            <minimum>0.70</minimum>
+                                            <minimum>0.75</minimum>
                                         </limit>
                                     </limits>
                                 </rule>

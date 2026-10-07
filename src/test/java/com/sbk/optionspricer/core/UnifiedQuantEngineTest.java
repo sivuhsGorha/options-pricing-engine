@@ -38,7 +38,10 @@ public class UnifiedQuantEngineTest {
 
         java.util.concurrent.atomic.AtomicInteger exitCode = new java.util.concurrent.atomic.AtomicInteger(0);
         UnifiedQuantEngine engine = new UnifiedQuantEngine(throwingPublisher, exitCode::set);
-        QuantSimulationHarness harness = new QuantSimulationHarness(engine);
+        // No keys and no network: the default provider would read the developer's API keys and call the providers.
+        com.sbk.optionspricer.web.LiveSpotProvider offline = new com.sbk.optionspricer.web.LiveSpotProvider(
+                null, null, null, null, (url, headers) -> { throw new java.io.IOException("no network in tests"); });
+        QuantSimulationHarness harness = new QuantSimulationHarness(engine, offline);
         harness.start();
 
         for (int i = 0; i < 50; i++) {
