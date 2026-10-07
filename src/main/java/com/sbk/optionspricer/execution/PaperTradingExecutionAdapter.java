@@ -30,12 +30,15 @@ public class PaperTradingExecutionAdapter implements ExchangeTransport {
         }
         String normalizedSymbol = (symbol == null || symbol.isBlank()) ? "UNKNOWN" : symbol.trim().toUpperCase();
 
+        // Fill against the book's far side when there is a book; otherwise against the order's own price.
+        // (An earlier version fell back to a hard-coded 100.0, which booked fictitious fills for any symbol
+        // whose provider publishes no bid/ask.)
         double executionPrice;
         if (order.isBuy()) {
-            double reference = Double.isFinite(ask) && ask > 0.0 ? ask : (Double.isFinite(bid) && bid > 0.0 ? bid : 100.0);
+            double reference = Double.isFinite(ask) && ask > 0.0 ? ask : (Double.isFinite(bid) && bid > 0.0 ? bid : order.price());
             executionPrice = reference * (1.0 + slippageBps / 10_000.0);
         } else {
-            double reference = Double.isFinite(bid) && bid > 0.0 ? bid : (Double.isFinite(ask) && ask > 0.0 ? ask : 100.0);
+            double reference = Double.isFinite(bid) && bid > 0.0 ? bid : (Double.isFinite(ask) && ask > 0.0 ? ask : order.price());
             executionPrice = reference * (1.0 - slippageBps / 10_000.0);
         }
 

@@ -163,6 +163,44 @@ class LiveSpotProviderQuoteTest {
         assertEquals(4321L, quote.volume());
     }
 
+    // ---------- 4.6 no placeholders: a field the provider did not send is unknown ----------
+
+    @Test
+    void finnhubHasNoBookAndNoVolumeSoNoneIsInvented() {
+        LiveSpotProvider.Quote quote = finnhub((url, headers) -> "{\"c\":101.25,\"t\":1700000000}").fetchFinnhub("SPY");
+
+        assertTrue(Double.isNaN(quote.bid()) && Double.isNaN(quote.ask()), "no +/- 1 cent pretend spread");
+        assertEquals(com.sbk.optionspricer.market.MarketSnapshot.VOLUME_UNKNOWN, quote.volume());
+    }
+
+    @Test
+    void alphaVantageReportsItsDailyVolume() {
+        String body = "{\"Global Quote\":{\"01. symbol\":\"SPY\",\"05. price\":\"450.1200\",\"06. volume\":\"61234567\",\"07. latest trading day\":\"2024-01-05\"}}";
+        LiveSpotProvider.Quote quote = new LiveSpotProvider(null, null, "av-key", null, (u, h) -> body).fetchAlphaVantage("SPY");
+
+        assertEquals(61_234_567L, quote.volume());
+        assertTrue(Double.isNaN(quote.bid()), "GLOBAL_QUOTE has no book");
+    }
+
+    @Test
+    void marketstackReportsTheBarVolume() {
+        String body = "{\"data\":[{\"symbol\":\"SPY\",\"close\":450.50,\"volume\":55000000,\"date\":\"2024-01-05T00:00:00+0000\"}]}";
+        LiveSpotProvider.Quote quote = new LiveSpotProvider(null, null, null, "ms-key", (u, h) -> body).fetchMarketstack("SPY");
+
+        assertEquals(55_000_000L, quote.volume());
+        assertTrue(Double.isNaN(quote.ask()), "an end-of-day bar has no book");
+    }
+
+    @Test
+    void polygonFallsBackFromMinuteVolumeToDayVolumeToUnknown() {
+        String withDay = "{\"ticker\":{\"lastQuote\":{\"p\":100.0,\"P\":100.2,\"t\":1700000000123},\"day\":{\"v\":9876543}}}";
+        assertEquals(9_876_543L, LiveSpotProvider.parsePolygonSnapshot("SPY", withDay).volume());
+
+        String withNeither = "{\"ticker\":{\"lastQuote\":{\"p\":100.0,\"P\":100.2,\"t\":1700000000123}}}";
+        assertEquals(com.sbk.optionspricer.market.MarketSnapshot.VOLUME_UNKNOWN,
+                LiveSpotProvider.parsePolygonSnapshot("SPY", withNeither).volume(), "no volume field means unknown, not 2000");
+    }
+
     @Test
     void malformedAndEmptyPayloadsYieldNoQuoteRatherThanAnException() {
         for (String body : new String[]{"", "not json", "{}", "[]", "{\"c\":\"abc\"}", "{\"c\":-5}", "{\"c\":0}"}) {

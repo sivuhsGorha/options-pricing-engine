@@ -27,7 +27,7 @@ class LiveMarketSnapshotAdapterTest {
         assertEquals("POLYGON", snapshot.source());
         assertEquals(MarketDataStatus.LIVE, snapshot.status());
         assertTrue(snapshot.ask() > snapshot.bid());
-        assertTrue(snapshot.volume() > 0L);
+        assertFalse(snapshot.hasVolume(), "this snapshot carries no volume field, so none may be reported");
         assertNotNull(snapshot.timestamp());
     }
 

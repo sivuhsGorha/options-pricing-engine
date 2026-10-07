@@ -1,7 +1,11 @@
 package com.sbk.optionspricer.risk;
 
 /**
- * Simple liquidity guard that flags when a market is too wide or too thin to trade safely.
+ * Liquidity guard: flags a market that is too wide (spread in basis points) or too thin (volume) to trade.
+ *
+ * <p>The two tests are separable so a caller can judge only the fields its data source supplies: a provider
+ * without a book is checked on volume alone, one without volume on spread alone. Absence of data is not
+ * evidence of an illiquid market and is not treated as a failure here; it is the caller's decision.
  */
 public class LiquidityRiskMonitor {
     private final double maxSpreadBps;
@@ -26,12 +30,22 @@ public class LiquidityRiskMonitor {
         return ((ask - bid) / mid) * 10_000.0;
     }
 
-    public boolean isMarketLiquid(double bid, double ask, long volume) {
+    /** Spread test alone; requires a real book. */
+    public boolean isSpreadAcceptable(double bid, double ask) {
+        return calculateSpreadBps(bid, ask) <= maxSpreadBps;
+    }
+
+    /** Volume test alone; requires a known, non-negative volume. */
+    public boolean isVolumeAcceptable(long volume) {
         if (volume < 0L) {
             throw new IllegalArgumentException("volume must be non-negative");
         }
-        double spreadBps = calculateSpreadBps(bid, ask);
-        return spreadBps <= maxSpreadBps && volume >= minimumVolume;
+        return volume >= minimumVolume;
+    }
+
+    /** Both tests; requires a real book and a known volume. */
+    public boolean isMarketLiquid(double bid, double ask, long volume) {
+        return isSpreadAcceptable(bid, ask) && isVolumeAcceptable(volume);
     }
 
     public double getMaxSpreadBps() {

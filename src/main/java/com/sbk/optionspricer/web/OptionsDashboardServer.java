@@ -204,8 +204,12 @@ public class OptionsDashboardServer {
             java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
             body.put("symbol", snapshot.symbol());
             // An unavailable source has no price; the snapshot's placeholder must not be shown as the spot.
-            body.put("spotPrice", snapshot.status() == com.sbk.optionspricer.market.MarketDataStatus.UNAVAILABLE
-                    ? null : Json.round(snapshot.last(), 2));
+            boolean unavailable = snapshot.status() == com.sbk.optionspricer.market.MarketDataStatus.UNAVAILABLE;
+            body.put("spotPrice", unavailable ? null : Json.round(snapshot.last(), 2));
+            // A field the provider did not supply is null, never a placeholder number.
+            body.put("bid", !unavailable && snapshot.hasBook() ? Json.round(snapshot.bid(), 2) : null);
+            body.put("ask", !unavailable && snapshot.hasBook() ? Json.round(snapshot.ask(), 2) : null);
+            body.put("volume", !unavailable && snapshot.hasVolume() ? snapshot.volume() : null);
             body.put("source", snapshot.source());
             body.put("timestamp", snapshot.timestamp().toEpochMilli());
             body.put("status", snapshot.status().name());

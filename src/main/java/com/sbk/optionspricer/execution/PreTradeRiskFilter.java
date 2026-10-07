@@ -118,10 +118,19 @@ public class PreTradeRiskFilter {
             }
         }
 
-        if (liquidityRiskMonitor != null && Double.isFinite(bid) && Double.isFinite(ask) && ask > bid && volume >= 0L) {
-            if (!liquidityRiskMonitor.isMarketLiquid(bid, ask, volume)) {
-                System.err.printf(java.util.Locale.ROOT, "[RISK BLOCK] Liquidity check failed: bid=%.2f ask=%.2f volume=%d%n",
-                        bid, ask, volume);
+        if (liquidityRiskMonitor != null) {
+            // Judge only the fields the data source supplied: a provider without a book is checked on volume
+            // alone, one without volume on spread alone. An unknown field is neither a pass nor a failure.
+            boolean hasBook = Double.isFinite(bid) && Double.isFinite(ask) && bid > 0.0 && ask > bid;
+            boolean hasVolume = volume >= 0L;
+            if (hasBook && !liquidityRiskMonitor.isSpreadAcceptable(bid, ask)) {
+                System.err.printf(java.util.Locale.ROOT, "[RISK BLOCK] Spread too wide: bid=%.2f ask=%.2f (%.1f bps > %.1f)%n",
+                        bid, ask, liquidityRiskMonitor.calculateSpreadBps(bid, ask), liquidityRiskMonitor.getMaxSpreadBps());
+                return false;
+            }
+            if (hasVolume && !liquidityRiskMonitor.isVolumeAcceptable(volume)) {
+                System.err.printf(java.util.Locale.ROOT, "[RISK BLOCK] Volume too thin: %d < %d%n",
+                        volume, liquidityRiskMonitor.getMinimumVolume());
                 return false;
             }
         }

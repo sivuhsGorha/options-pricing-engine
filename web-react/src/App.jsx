@@ -207,6 +207,14 @@ function App() {
           <span className="status-badge" style={{ color: '#FF9900', borderColor: '#FF9900' }}>
             {spotInfo.symbol}: ${spotInfo.spotPrice ? spotInfo.spotPrice.toFixed(2) : '--'} [{spotInfo.source ? spotInfo.source : 'N/A'}]
           </span>
+          {Number.isFinite(spotInfo.bid) && Number.isFinite(spotInfo.ask) && (
+            <span className="status-badge" title="bid / ask from the provider's book">
+              {spotInfo.bid.toFixed(2)} / {spotInfo.ask.toFixed(2)}
+            </span>
+          )}
+          {Number.isFinite(spotInfo.volume) && (
+            <span className="status-badge" title="volume reported by the provider">VOL {spotInfo.volume.toLocaleString()}</span>
+          )}
           <span className="status-badge" style={{ color: isFresh(spotInfo.status) ? '#00E676' : spotInfo.status === 'STALE' ? '#FF9900' : '#FF3D00' }}>
             {spotInfo.status}
           </span>

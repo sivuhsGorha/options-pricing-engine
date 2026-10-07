@@ -51,8 +51,9 @@ public class LiveSpotProvider {
     private static final LocalTime MARKET_CLOSE = LocalTime.of(16, 0);
 
     /**
-     * Bid/ask are real only for sources that publish a book (Polygon); other sources give a last
-     * price and the spread is a nominal +/- 1c around it. Timestamp is epoch millis of the price, or 0 if unknown.
+     * Bid/ask are NaN unless the source publishes a book (Polygon); volume is
+     * {@link com.sbk.optionspricer.market.MarketSnapshot#VOLUME_UNKNOWN} unless the source reports one. Nothing is
+     * filled in. Timestamp is epoch millis of the price, or 0 if unknown.
      */
     public record Quote(String symbol, double bid, double ask, double last, long volume, String source, long timestamp, MarketDataStatus status) {}
 
@@ -281,7 +282,7 @@ public class LiveSpotProvider {
         } catch (Exception ignored) {
             // timed out, interrupted or failed: report unavailable below; the refresh may still land later
         }
-        return new Quote(sym, Double.NaN, Double.NaN, Double.NaN, 0L, "none", 0L, MarketDataStatus.UNAVAILABLE);
+        return new Quote(sym, Double.NaN, Double.NaN, Double.NaN, com.sbk.optionspricer.market.MarketSnapshot.VOLUME_UNKNOWN, "none", 0L, MarketDataStatus.UNAVAILABLE);
     }
 
     /** One refresh per symbol at a time; concurrent callers share it. */
@@ -420,7 +421,26 @@ public class LiveSpotProvider {
 
     // ---------------------------------------------------------------- parsing
 
-    /** Finnhub /quote: {@code c} = current price, {@code t} = time of that price in epoch seconds. */
+    private static final long VOLUME_UNKNOWN = com.sbk.optionspricer.market.MarketSnapshot.VOLUME_UNKNOWN;
+
+    /** A reported volume, or VOLUME_UNKNOWN when the field is absent or not a non-negative number. */
+    private static long volumeOf(JsonNode node) {
+        if (node == null || node.isNull()) {
+            return VOLUME_UNKNOWN;
+        }
+        double v = node.isNumber() ? node.asDouble() : parseDoubleOrNaN(node.asText());
+        return Double.isFinite(v) && v >= 0.0 ? (long) v : VOLUME_UNKNOWN;
+    }
+
+    private static double parseDoubleOrNaN(String text) {
+        try {
+            return Double.parseDouble(text.trim());
+        } catch (RuntimeException notANumber) {
+            return Double.NaN;
+        }
+    }
+
+    /** Finnhub /quote: {@code c} = current price, {@code t} = time of that price in epoch seconds. No book, no volume. */
     static Quote parseFinnhub(String symbol, String body) {
         JsonNode root = parseJson(body);
         Double price = positive(root == null ? null : root.get("c"));
@@ -428,7 +448,7 @@ public class LiveSpotProvider {
             return null;
         }
         long timestamp = normalizeEpochMillis(longValue(root.get("t")));
-        return new Quote(symbol, price - 0.01, price + 0.01, price, 2000L, "FINNHUB", timestamp, MarketDataStatus.DELAYED);
+        return new Quote(symbol, Double.NaN, Double.NaN, price, VOLUME_UNKNOWN, "FINNHUB", timestamp, MarketDataStatus.DELAYED);
     }
 
     /** Alpha Vantage GLOBAL_QUOTE. Rate-limit and error notices arrive as 200 responses without a quote. */
@@ -443,7 +463,7 @@ public class LiveSpotProvider {
             return null;
         }
         long timestamp = closeOfTradingDay(quote.get("07. latest trading day"));
-        return new Quote(symbol, price - 0.01, price + 0.01, price, 2000L, "ALPHA_VANTAGE", timestamp, MarketDataStatus.DELAYED);
+        return new Quote(symbol, Double.NaN, Double.NaN, price, volumeOf(quote.get("06. volume")), "ALPHA_VANTAGE", timestamp, MarketDataStatus.DELAYED);
     }
 
     /** Polygon single-ticker snapshot: real bid/ask from lastQuote, last trade if present, else the midpoint. */
@@ -467,9 +487,13 @@ public class LiveSpotProvider {
         if (last == null) {
             last = (bid + ask) / 2.0; // no trade in the snapshot: the midpoint, not a price that never traded
         }
+        // Minute bar volume if present, else the day's, else unknown.
         JsonNode minute = ticker.get("min");
-        Double minuteVolume = positive(minute == null ? null : minute.get("v"));
-        long volume = minuteVolume != null ? minuteVolume.longValue() : 2000L;
+        JsonNode day = ticker.get("day");
+        long volume = volumeOf(minute == null ? null : minute.get("v"));
+        if (volume == VOLUME_UNKNOWN) {
+            volume = volumeOf(day == null ? null : day.get("v"));
+        }
 
         long timestamp = normalizeEpochMillis(longValue(lastQuote.get("t")));
         if (timestamp == 0L && lastTrade != null) {
@@ -488,7 +512,7 @@ public class LiveSpotProvider {
             return null;
         }
         long timestamp = closeOfTradingDay(bar.get("date"));
-        return new Quote(symbol, price - 0.01, price + 0.01, price, 2000L, "MARKETSTACK", timestamp, MarketDataStatus.DELAYED);
+        return new Quote(symbol, Double.NaN, Double.NaN, price, volumeOf(bar.get("volume")), "MARKETSTACK", timestamp, MarketDataStatus.DELAYED);
     }
 
     private static JsonNode parseJson(String body) {

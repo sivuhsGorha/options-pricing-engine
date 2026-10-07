@@ -25,12 +25,18 @@ Each quote carries a **status** (`market/MarketDataStatus`):
 `market/LiveMarketSnapshotAdapter` turns a quote into the `MarketSnapshot` the order manager checks.
 Freshness is judged on the price's own timestamp, not the provider's label.
 
-### Known limits of the spot feed (fix candidates)
-- **Volume** is a placeholder of 2000 for every provider except Polygon. The liquidity check in the pre-trade
-  filter therefore sees a fabricated volume for most quotes.
-- **Bid/ask** for providers that return only a last price are set to last +/- 1 cent. The spread check sees a
-  nominal spread, not the market's.
-- Free tiers: Finnhub and Alpha Vantage are rate limited; Polygon's free plan returns previous close only.
+### What each provider supplies
+| Provider | Price | Book (bid/ask) | Volume | Status |
+| :--- | :--- | :--- | :--- | :--- |
+| Finnhub `/quote` | last | none | none | DELAYED |
+| Polygon snapshot | last trade (or midpoint) | yes | minute bar, else day, else none | LIVE |
+| Alpha Vantage `GLOBAL_QUOTE` | last | none | daily | DELAYED |
+| Marketstack `eod/latest` | close | none | daily | DELAYED |
+
+A field a provider does not supply is **unknown** (`NaN` book, `MarketSnapshot.VOLUME_UNKNOWN`), shown as
+`null` on `/api/spot` and absent from the header badge. The liquidity gate judges spread only when a book
+exists and volume only when it is known. Paper fills without a book execute against the order's own price.
+Free tiers: Finnhub and Alpha Vantage are rate limited; Polygon's free plan returns previous close only.
 
 ---
 

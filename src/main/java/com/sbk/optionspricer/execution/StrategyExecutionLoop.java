@@ -123,7 +123,7 @@ public class StrategyExecutionLoop {
         if (context == null) {
             context = marketSnapshotAdapter != null
                     ? marketSnapshotAdapter.getSnapshot(symbol)
-                    : new MarketSnapshot(symbol, current * 0.995, current * 1.005, current, 2000L, Instant.now(), Instant.now(), 0L,
+                    : new MarketSnapshot(symbol, current * 0.995, current * 1.005, current, MarketSnapshot.VOLUME_UNKNOWN, Instant.now(), Instant.now(), 0L,
                             "SIMULATED", com.sbk.optionspricer.market.MarketDataStatus.SIMULATED);
         }
 

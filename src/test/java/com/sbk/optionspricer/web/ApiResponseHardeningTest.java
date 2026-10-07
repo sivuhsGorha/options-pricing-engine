@@ -116,6 +116,33 @@ class ApiResponseHardeningTest {
     }
 
     @Test
+    void spotEndpointReportsUnknownBookAndVolumeAsNullNotAsNumbers() throws Exception {
+        MarketSnapshotAdapter noBook = symbol -> new MarketSnapshot("SPY", Double.NaN, Double.NaN, 480.25,
+                MarketSnapshot.VOLUME_UNKNOWN, Instant.now(), Instant.now(), 0L, "FINNHUB", MarketDataStatus.DELAYED);
+        start(reader(() -> new MmapStateReader.RiskState(0, 0, 0, 0)), null, null, noBook);
+
+        JsonNode body = MAPPER.readTree(get("/api/spot").body());
+
+        assertEquals(480.25, body.get("spotPrice").asDouble(), 1e-9);
+        assertTrue(body.get("bid").isNull(), "no book: bid must be null, not a pretend price");
+        assertTrue(body.get("ask").isNull());
+        assertTrue(body.get("volume").isNull(), "no volume: null, not 2000");
+    }
+
+    @Test
+    void spotEndpointReportsARealBookAndVolumeWhenTheProviderHasThem() throws Exception {
+        MarketSnapshotAdapter book = symbol -> new MarketSnapshot("SPY", 480.20, 480.30, 480.25,
+                4321L, Instant.now(), Instant.now(), 0L, "POLYGON", MarketDataStatus.LIVE);
+        start(reader(() -> new MmapStateReader.RiskState(0, 0, 0, 0)), null, null, book);
+
+        JsonNode body = MAPPER.readTree(get("/api/spot").body());
+
+        assertEquals(480.20, body.get("bid").asDouble(), 1e-9);
+        assertEquals(480.30, body.get("ask").asDouble(), 1e-9);
+        assertEquals(4321L, body.get("volume").asLong());
+    }
+
+    @Test
     void positionsEndpointWithoutAnExecutionStackIsEmptyNotAnError() throws Exception {
         start(reader(() -> new MmapStateReader.RiskState(0, 0, 0, 0)), null, null, null);
 
