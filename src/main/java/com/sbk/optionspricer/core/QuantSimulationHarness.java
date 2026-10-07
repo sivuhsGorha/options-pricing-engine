@@ -59,11 +59,21 @@ public class QuantSimulationHarness {
         }
         System.out.println("=========================================================================");
 
-        var feedStatus = spotProvider.getFeedStatus("SPY");
-        System.out.println("[MARKET DATA STATUS] FINNHUB=" + feedStatus.getOrDefault("FINNHUB", "UNAVAILABLE")
-                + " | ALPHA_VANTAGE=" + feedStatus.getOrDefault("ALPHA_VANTAGE", "UNAVAILABLE")
-                + " | POLYGON=" + feedStatus.getOrDefault("POLYGON", "UNAVAILABLE")
-                + " | MARKETSTACK=" + feedStatus.getOrDefault("MARKETSTACK", "UNAVAILABLE"));
+        // A diagnostic only: probing up to four providers over the network can take many seconds, and the
+        // dashboard does not start until start() returns, so it runs on its own thread.
+        Thread feedProbe = new Thread(() -> {
+            try {
+                var feedStatus = spotProvider.getFeedStatus("SPY");
+                System.out.println("[MARKET DATA STATUS] FINNHUB=" + feedStatus.getOrDefault("FINNHUB", "UNAVAILABLE")
+                        + " | ALPHA_VANTAGE=" + feedStatus.getOrDefault("ALPHA_VANTAGE", "UNAVAILABLE")
+                        + " | POLYGON=" + feedStatus.getOrDefault("POLYGON", "UNAVAILABLE")
+                        + " | MARKETSTACK=" + feedStatus.getOrDefault("MARKETSTACK", "UNAVAILABLE"));
+            } catch (RuntimeException e) {
+                System.err.println("[MARKET DATA STATUS] probe failed: " + e);
+            }
+        }, "feed-status-probe");
+        feedProbe.setDaemon(true);
+        feedProbe.start();
 
         engine.initialize();
 

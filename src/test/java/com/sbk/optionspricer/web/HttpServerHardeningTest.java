@@ -124,6 +124,15 @@ class HttpServerHardeningTest {
         assertEquals("no-cache", shell.headers().firstValue("Cache-Control").orElseThrow());
     }
 
+    /** The child JVM writes in the platform code page, so decode without failing on bytes that are not valid UTF-8. */
+    private static String readLogLeniently(Path log) {
+        try {
+            return new String(Files.readAllBytes(log), StandardCharsets.UTF_8);
+        } catch (java.io.IOException e) {
+            return "<log unreadable: " + e + ">";
+        }
+    }
+
     // ---------- 3.4 resources ----------
 
     @Test
@@ -153,20 +162,30 @@ class HttpServerHardeningTest {
         builder.environment().put("PORT", String.valueOf(port));
         builder.environment().put("MMAP_STATE_FILE", "state.dat");
         builder.environment().put("HTTP_REQUEST_TIMEOUT_SECONDS", "2");
+        // Hermetic: a developer machine may export real market-data keys, which would make the app call out at startup.
+        for (String key : new String[]{"FINNHUB_KEY", "POLYGON_API_KEY", "ALPHA_VANTAGE_KEY", "MARKETSTACK_KEY", "FRED_API_KEY"}) {
+            builder.environment().remove(key);
+        }
         builder.redirectErrorStream(true);
         builder.redirectOutput(dir.resolve("app.log").toFile());
         Process app = builder.start();
         try {
             long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(40);
             boolean up = false;
+            // Ready means the HTTP dispatcher answers: a bare TCP connect succeeds as soon as the socket is bound,
+            // which is before the server starts serving.
             while (System.nanoTime() < deadline && app.isAlive() && !up) {
-                try (Socket s = new Socket("127.0.0.1", port)) {
+                try {
+                    java.net.HttpURLConnection probe = (java.net.HttpURLConnection) URI.create("http://127.0.0.1:" + port + "/api/health").toURL().openConnection();
+                    probe.setConnectTimeout(1_000);
+                    probe.setReadTimeout(1_000);
+                    probe.getResponseCode();
                     up = true;
                 } catch (java.io.IOException notYet) {
                     Thread.sleep(200);
                 }
             }
-            assertTrue(up, "the app under test did not start; log: " + Files.readString(dir.resolve("app.log")));
+            assertTrue(up, () -> "the app under test did not start; log: " + readLogLeniently(dir.resolve("app.log")));
 
             try (Socket socket = new Socket("127.0.0.1", port)) {
                 socket.setSoTimeout(12_000);

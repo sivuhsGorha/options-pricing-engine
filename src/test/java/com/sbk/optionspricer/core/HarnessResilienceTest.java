@@ -21,6 +21,34 @@ import static org.junit.jupiter.api.Assertions.*;
 class HarnessResilienceTest {
 
     @Test
+    void startupDoesNotWaitForTheMarketDataProvidersToAnswer() throws Exception {
+        System.setProperty("MMAP_STATE_FILE", "target/harness_startup_state.dat");
+        MmapStatePublisher publisher = new MmapStatePublisher() {
+            @Override
+            public void publishRiskState(double netDelta, double netGamma, double netVega, double scenarioMargin) {
+            }
+        };
+        UnifiedQuantEngine engine = new UnifiedQuantEngine(publisher, code -> fail("engine must not exit: " + code));
+        // Keys are configured and every provider call hangs for 3s: the status probe must not hold up startup.
+        LiveSpotProvider slow = new LiveSpotProvider("fh", "pg", "av", "ms", (url, headers) -> {
+            try {
+                Thread.sleep(3_000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            throw new java.io.IOException("slow");
+        });
+        QuantSimulationHarness harness = new QuantSimulationHarness(engine, slow);
+
+        long started = System.nanoTime();
+        harness.start();
+        long elapsedMs = (System.nanoTime() - started) / 1_000_000L;
+        harness.stop();
+
+        assertTrue(elapsedMs < 1_500, "start() took " + elapsedMs + "ms: it blocked on provider network calls");
+    }
+
+    @Test
     void failingStrategyKeepsTheEngineTickingAndLogsAreThrottled() throws Exception {
         System.setProperty("MMAP_STATE_FILE", "target/harness_resilience_state.dat");
         AtomicInteger publishes = new AtomicInteger();
