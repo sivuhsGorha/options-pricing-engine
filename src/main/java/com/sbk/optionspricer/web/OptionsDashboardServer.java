@@ -404,6 +404,9 @@ public class OptionsDashboardServer {
         body.put("x", x);
         body.put("y", y);
         body.put("z", z);
+        double[] fittedExpiries = new double[fit.fittedExpiries().length];
+        for (int i = 0; i < fittedExpiries.length; i++) fittedExpiries[i] = Json.round(fit.fittedExpiries()[i], 4);
+        body.put("fittedExpiries", fittedExpiries);
         java.util.List<java.util.Map<String, Object>> points = new java.util.ArrayList<>(fit.points().size());
         for (var p : fit.points()) {
             java.util.Map<String, Object> row = new java.util.LinkedHashMap<>();

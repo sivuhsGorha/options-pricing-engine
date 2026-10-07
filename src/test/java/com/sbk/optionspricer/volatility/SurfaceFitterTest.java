@@ -129,6 +129,33 @@ class SurfaceFitterTest {
     }
 
     @Test
+    void densifyAddsRowsBetweenTheFittedExpiriesByTotalVarianceAndKeepsTheFittedRows() {
+        SsviApproximation.SsviParams truth = new SsviApproximation.SsviParams(0.6, 0.3, -0.5);
+        DoubleBinaryOperator vol = (t, k) -> SsviApproximation.impliedVolFromForward(forward(t), k, t, 0.22 - 0.03 * t, truth);
+        List<OptionChain> chains = new ArrayList<>();
+        for (int days : new int[]{30, 90, 180}) chains.add(chainFrom(AS_OF.plusDays(days), range(80, 120, 2.5), vol));
+        SurfaceFitter.Fit fit = SurfaceFitter.fitSsvi(SurfaceFitter.extractPoints(chains, R, Q, AS_OF).points());
+
+        SurfaceFitter.Fit dense = SurfaceFitter.densify(fit, 9);
+
+        assertEquals(3, dense.fittedExpiries().length, "the expiries that carry quotes are reported unchanged");
+        assertTrue(dense.expiries().length >= 9, "rows " + dense.expiries().length);
+        assertArrayEquals(fit.vols()[0], dense.vols()[0], 0.0, "the first fitted row is kept exactly");
+        assertArrayEquals(fit.vols()[2], dense.vols()[dense.expiries().length - 1], 0.0, "the last fitted row is kept exactly");
+        for (int i = 1; i < dense.expiries().length; i++) {
+            assertTrue(dense.expiries()[i] > dense.expiries()[i - 1], "expiries ascend");
+            for (int j = 0; j < dense.strikes().length; j++) {
+                double wPrev = dense.vols()[i - 1][j] * dense.vols()[i - 1][j] * dense.expiries()[i - 1];
+                double wNext = dense.vols()[i][j] * dense.vols()[i][j] * dense.expiries()[i];
+                assertTrue(wNext >= wPrev - 1e-12, "total variance never falls along an interpolated row");
+            }
+        }
+        assertSame(fit.points(), dense.points(), "market points are not interpolated");
+        assertSame(fit, SurfaceFitter.densify(fit, 2), "fewer rows than fitted expiries changes nothing");
+        assertNull(SurfaceFitter.densify(null, 9));
+    }
+
+    @Test
     void aFlatSyntheticChainFitsAFlatSurface() {
         LocalDate today = LocalDate.now();
         OptionChainProvider synthetic = new SyntheticOptionChainProvider(100.0, 0.20, 0.05, 0.0);

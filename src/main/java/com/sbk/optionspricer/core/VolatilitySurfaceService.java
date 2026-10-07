@@ -97,8 +97,9 @@ public final class VolatilitySurfaceService implements VolatilitySurfaceSource, 
 
         SurfaceFitter.Extraction extraction = SurfaceFitter.extractPoints(chains, riskFreeRate, dividendYield, today);
         warnings.addAll(extraction.warnings());
-        SurfaceFitter.Fit ssvi = tryFit("SSVI", () -> SurfaceFitter.fitSsvi(extraction.points()), warnings);
-        SurfaceFitter.Fit sabr = tryFit("SABR", () -> SurfaceFitter.fitSabr(extraction.points()), warnings);
+        // Nine grid rows draw as a sheet; the fitted expiries are kept exactly and reported separately.
+        SurfaceFitter.Fit ssvi = SurfaceFitter.densify(tryFit("SSVI", () -> SurfaceFitter.fitSsvi(extraction.points()), warnings), 9);
+        SurfaceFitter.Fit sabr = SurfaceFitter.densify(tryFit("SABR", () -> SurfaceFitter.fitSabr(extraction.points()), warnings), 9);
         if (ssvi == null && sabr == null) {
             status = new Status(State.FAILED, "could not fit a surface to " + extraction.points().size() + " quotes: " + lastOrEmpty(warnings), now);
             return;

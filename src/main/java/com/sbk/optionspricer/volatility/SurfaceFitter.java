@@ -43,9 +43,51 @@ public final class SurfaceFitter {
 
     public record FittedPoint(double timeToExpiry, double strike, double marketVol, double modelVol) {}
 
+    /**
+     * @param expiries       expiries of the grid rows (may include interpolated rows, see {@link #densify})
+     * @param fittedExpiries the expiries that carry market quotes and were actually fitted
+     */
     public record Fit(String model, double[] strikes, double[] expiries, double[][] vols, List<FittedPoint> points,
                       double rmse, int quotesUsed, Map<String, Double> parameters, boolean noArbitrageConditionsHold,
-                      List<String> warnings) {}
+                      List<String> warnings, double[] fittedExpiries) {}
+
+    /**
+     * Adds grid rows between the fitted expiries so the surface draws as a sheet rather than a few ribbons.
+     * Rows are interpolated linearly in total variance (vol^2 x T) between the two neighbouring fitted expiries,
+     * which is how a surface is interpolated in time in practice; the fitted rows themselves are kept exactly and
+     * the market points are untouched. A fit with a single expiry is returned unchanged.
+     */
+    public static Fit densify(Fit fit, int rows) {
+        if (fit == null || fit.expiries().length < 2 || rows <= fit.expiries().length) {
+            return fit;
+        }
+        double[] src = fit.expiries();
+        double first = src[0], last = src[src.length - 1];
+        java.util.TreeSet<Double> ts = new java.util.TreeSet<>();
+        for (double t : src) ts.add(t);
+        for (int i = 0; i < rows; i++) ts.add(first + (last - first) * i / (rows - 1));
+        double[] expiries = ts.stream().mapToDouble(Double::doubleValue).toArray();
+        double[][] vols = new double[expiries.length][fit.strikes().length];
+        for (int i = 0; i < expiries.length; i++) {
+            double t = expiries[i];
+            int hi = 0;
+            while (hi < src.length - 1 && src[hi] < t) hi++;
+            int lo = Math.max(0, hi - 1);
+            if (src[hi] == t || hi == lo) {
+                int exact = src[hi] == t ? hi : lo;
+                vols[i] = fit.vols()[exact].clone();
+                continue;
+            }
+            double weight = (t - src[lo]) / (src[hi] - src[lo]);
+            for (int j = 0; j < fit.strikes().length; j++) {
+                double wLo = fit.vols()[lo][j] * fit.vols()[lo][j] * src[lo];
+                double wHi = fit.vols()[hi][j] * fit.vols()[hi][j] * src[hi];
+                vols[i][j] = Math.sqrt((wLo + weight * (wHi - wLo)) / t);
+            }
+        }
+        return new Fit(fit.model(), fit.strikes(), expiries, vols, fit.points(), fit.rmse(), fit.quotesUsed(),
+                fit.parameters(), fit.noArbitrageConditionsHold(), fit.warnings(), fit.fittedExpiries());
+    }
 
     public record Extraction(List<MarketPoint> points, int quotesSkipped, List<String> warnings) {}
 
@@ -163,7 +205,7 @@ public final class SurfaceFitter {
         boolean thetaIncreasing = true;
         for (int i = 1; i < theta.length; i++) thetaIncreasing &= theta[i] > theta[i - 1];
         return new Fit("SSVI", strikes, expiries, vols, List.copyOf(fitted), Math.sqrt(sumSq / used.size()), used.size(),
-                parameters, params.satisfiesStaticNoArbitrageConditions() && thetaIncreasing, List.copyOf(warnings));
+                parameters, params.satisfiesStaticNoArbitrageConditions() && thetaIncreasing, List.copyOf(warnings), expiries);
     }
 
     private static double ssviVol(MarketPoint mp, double theta, SsviApproximation.SsviParams params) {
@@ -241,7 +283,7 @@ public final class SurfaceFitter {
         }
         warnings.add("Hagan SABR is an asymptotic expansion with no closed-form no-arbitrage guarantee");
         return new Fit("SABR", strikes, expiries, vols, List.copyOf(fitted), Math.sqrt(sumSq / used.size()), used.size(),
-                parameters, false, List.copyOf(warnings));
+                parameters, false, List.copyOf(warnings), expiries);
     }
 
     /** Unconstrained (a, c, d) to alpha = e^a, rho = tanh(c), nu = e^d. */
