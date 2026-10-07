@@ -25,8 +25,18 @@ CI builds the image and confirms an unauthenticated `/api/health` returns 401.
 ## 2. Configuration
 
 Non-secret settings live in `config.yaml` (copy `config.example.yaml`; the file is git-ignored). The parser
-is a minimal YAML reader: **no inline comments after values**, two-space indentation, scalars and `[a, b]`
-lists only. Unknown top-level sections are rejected.
+is a minimal YAML reader: `section:` headers, two-space indentation, `key: value` scalars (numbers, `true`/
+`false`, quoted or bare strings), inline lists `[a, "b"]`, and `#` comments on their own line or after a value.
+Tabs, block lists (`- item`), lines without a key and duplicate keys are errors that name the line; a value of
+the wrong type is an error that names the key and the value. Check a configuration without starting anything:
+
+```bash
+java -jar target/options-pricing-engine-1.0.0-SNAPSHOT.jar --check-config
+```
+
+It reads `config.yaml` and the environment, lists every problem at once (never printing a secret), says
+which market-data keys are set, and exits 0 when valid, 1 otherwise. A normal start with a bad configuration
+prints the same messages and exits 2 instead of a stack trace.
 
 Secrets and deployment settings come from the environment or a `.env` file in the working directory
 (`config/EnvironmentConfigLoader`); `.env` is git-ignored and must never be committed.

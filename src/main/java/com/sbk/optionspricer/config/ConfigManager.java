@@ -15,9 +15,13 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * Lightweight YAML configuration reader with env-var override support.
- * Intended to centralize market data, risk, and dashboard settings while staying
- * compatible with the existing Java 25 project without extra dependencies.
+ * Minimal YAML configuration reader with environment-variable overrides and no dependencies.
+ *
+ * <p>Supported syntax: {@code section:} headers, two-space indentation, {@code key: value} scalars (numbers,
+ * {@code true}/{@code false}, quoted or bare strings), inline lists {@code [a, "b"]}, and {@code #} comments on
+ * their own line or after a value. Tabs, block lists ({@code - item}), lines without a key and duplicate keys are
+ * errors that name the line; a value of the wrong type is an error that names the key and the value. Earlier
+ * versions silently skipped bad lines and fell back to defaults on an unreadable file, which hid every mistake.
  */
 public final class ConfigManager {
     public static final String DEFAULT_CONFIG_PATH = "config.yaml";
@@ -53,6 +57,10 @@ public final class ConfigManager {
         return new ConfigManager(path);
     }
 
+    public Path path() {
+        return configPath;
+    }
+
     public Map<String, Object> getRoot() {
         return Collections.unmodifiableMap(root);
     }
@@ -66,25 +74,42 @@ public final class ConfigManager {
         return value == null ? defaultValue : String.valueOf(value);
     }
 
+    /** @throws ConfigException when the value is present but not a whole number */
     public int getInt(String key, int defaultValue) {
         Object value = get(key);
         if (value == null) return defaultValue;
-        if (value instanceof Number n) return n.intValue();
-        return Integer.parseInt(String.valueOf(value));
+        if (value instanceof Number n) {
+            if (n.doubleValue() != Math.rint(n.doubleValue())) throw notA(key, value, "whole number");
+            return n.intValue();
+        }
+        try {
+            return Integer.parseInt(String.valueOf(value).trim());
+        } catch (NumberFormatException e) {
+            throw notA(key, value, "whole number");
+        }
     }
 
+    /** @throws ConfigException when the value is present but not a number */
     public double getDouble(String key, double defaultValue) {
         Object value = get(key);
         if (value == null) return defaultValue;
         if (value instanceof Number n) return n.doubleValue();
-        return Double.parseDouble(String.valueOf(value));
+        try {
+            return Double.parseDouble(String.valueOf(value).trim());
+        } catch (NumberFormatException e) {
+            throw notA(key, value, "number");
+        }
     }
 
+    /** @throws ConfigException when the value is present but neither {@code true} nor {@code false} */
     public boolean getBoolean(String key, boolean defaultValue) {
         Object value = get(key);
         if (value == null) return defaultValue;
         if (value instanceof Boolean b) return b;
-        return Boolean.parseBoolean(String.valueOf(value));
+        String text = String.valueOf(value).trim();
+        if (text.equalsIgnoreCase("true")) return true;
+        if (text.equalsIgnoreCase("false")) return false;
+        throw notA(key, value, "boolean (true or false)");
     }
 
     public Map<String, Object> getSection(String key) {
@@ -105,13 +130,23 @@ public final class ConfigManager {
         root.putAll(reloaded);
     }
 
+    private ConfigException notA(String key, Object value, String type) {
+        return new ConfigException(label(configPath) + ": " + key + " = '" + value + "' is not a " + type);
+    }
+
+    private static String label(Path path) {
+        Path name = path.getFileName();
+        return name == null ? path.toString() : name.toString();
+    }
+
     private static Map<String, Object> loadOrDefault(Path configPath) {
         Map<String, Object> loaded;
         if (Files.exists(configPath)) {
             try {
-                loaded = parseYaml(Files.readString(configPath, StandardCharsets.UTF_8));
+                loaded = parseYaml(Files.readString(configPath, StandardCharsets.UTF_8), label(configPath));
             } catch (IOException e) {
-                loaded = defaultConfig();
+                // Defaults in place of a file that exists but cannot be read would run with limits the operator never saw.
+                throw new ConfigException("cannot read " + configPath + ": " + e.getMessage(), e);
             }
         } else {
             loaded = defaultConfig();
@@ -233,37 +268,55 @@ public final class ConfigManager {
         return trimmed;
     }
 
-    private static Map<String, Object> parseYaml(String yaml) {
+    // ------------------------------------------------------------------ parsing
+
+    /** Parses the YAML subset described on the class. Errors name {@code fileLabel} and the 1-based line. */
+    static Map<String, Object> parseYaml(String yaml, String fileLabel) {
         Map<String, Object> root = new LinkedHashMap<>();
         Deque<Map<String, Object>> stack = new ArrayDeque<>();
         Deque<Integer> indentStack = new ArrayDeque<>();
         stack.push(root);
         indentStack.push(-1);
 
+        int lineNumber = 0;
         for (String rawLine : yaml.lines().toList()) {
-            if (rawLine.trim().isEmpty() || rawLine.trim().startsWith("#")) {
+            lineNumber++;
+            String content = stripComment(rawLine);
+            if (content.isBlank()) {
                 continue;
             }
-
-            int indent = countLeadingSpaces(rawLine);
-            String line = rawLine.stripLeading();
+            String where = fileLabel + " line " + lineNumber;
+            int indent = 0;
+            while (indent < content.length() && (content.charAt(indent) == ' ' || content.charAt(indent) == '\t')) {
+                if (content.charAt(indent) == '\t') {
+                    throw new ConfigException(where + ": indent with spaces, not tabs");
+                }
+                indent++;
+            }
+            String line = content.strip();
             while (indent <= indentStack.peek()) {
                 stack.pop();
                 indentStack.pop();
             }
-
-            if (!line.contains(":")) {
-                continue;
+            if (line.startsWith("- ") || line.equals("-")) {
+                throw new ConfigException(where + ": block lists ('- item') are not supported; write the list inline as [a, b]");
             }
-
-            String[] split = line.split(":", 2);
-            String key = split[0].trim();
-            String remainder = split.length > 1 ? split[1].trim() : "";
+            int colon = line.indexOf(':');
+            if (colon < 0) {
+                throw new ConfigException(where + ": expected 'key: value' or 'section:' but found '" + line + "'");
+            }
+            String key = line.substring(0, colon).trim();
+            String remainder = line.substring(colon + 1).trim();
+            if (key.isEmpty()) {
+                throw new ConfigException(where + ": missing key before ':'");
+            }
             Map<String, Object> current = stack.peek();
             if (current == null) {
                 current = root;
             }
-
+            if (current.containsKey(key)) {
+                throw new ConfigException(where + ": duplicate key '" + key + "'");
+            }
             if (remainder.isEmpty()) {
                 Map<String, Object> section = new LinkedHashMap<>();
                 current.put(key, section);
@@ -276,22 +329,38 @@ public final class ConfigManager {
         return root;
     }
 
-    private static int countLeadingSpaces(String line) {
-        int count = 0;
-        while (count < line.length() && line.charAt(count) == ' ') {
-            count++;
+    /** Removes a {@code #} comment that is at the start of the line or preceded by whitespace and not inside quotes. */
+    static String stripComment(String line) {
+        char quote = 0;
+        for (int i = 0; i < line.length(); i++) {
+            char c = line.charAt(i);
+            if (quote != 0) {
+                if (c == quote) quote = 0;
+            } else if (c == '"' || c == '\'') {
+                quote = c;
+            } else if (c == '#' && (i == 0 || Character.isWhitespace(line.charAt(i - 1)))) {
+                return line.substring(0, i);
+            }
         }
-        return count;
+        return line;
     }
 
     private static Object parseScalar(String value) {
         String trimmed = value.trim();
+        if (trimmed.length() >= 2 && (trimmed.charAt(0) == '"' || trimmed.charAt(0) == '\'')
+                && trimmed.charAt(trimmed.length() - 1) == trimmed.charAt(0)) {
+            return trimmed.substring(1, trimmed.length() - 1); // quoted: a string, whatever it looks like
+        }
         if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
             String inner = trimmed.substring(1, trimmed.length() - 1).trim();
             if (inner.isEmpty()) return List.of();
             List<String> items = new ArrayList<>();
             for (String part : inner.split(",")) {
-                items.add(part.trim().replace("\"", ""));
+                String item = part.trim();
+                if (item.length() >= 2 && (item.charAt(0) == '"' || item.charAt(0) == '\'') && item.charAt(item.length() - 1) == item.charAt(0)) {
+                    item = item.substring(1, item.length() - 1);
+                }
+                items.add(item);
             }
             return items;
         }
@@ -301,7 +370,7 @@ public final class ConfigManager {
         if (trimmed.matches("-?\\d+")) {
             return Integer.parseInt(trimmed);
         }
-        if (trimmed.matches("-?\\d+\\.\\d+")) {
+        if (trimmed.matches("-?\\d+\\.\\d+([eE][-+]?\\d+)?") || trimmed.matches("-?\\d+[eE][-+]?\\d+")) {
             return Double.parseDouble(trimmed);
         }
         return trimmed;
@@ -313,6 +382,7 @@ public final class ConfigManager {
         return out.toString();
     }
 
+    @SuppressWarnings("unchecked")
     private static void renderYaml(Map<String, Object> map, int indent, StringBuilder out) {
         for (Map.Entry<String, Object> entry : map.entrySet()) {
             String indentText = "  ".repeat(indent);

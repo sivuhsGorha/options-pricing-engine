@@ -36,14 +36,17 @@ the option-chain network call.
 **Operator controls** (2026-10-07). HALT / RESUME and a strategy ON/OFF switch in the paper-trading panel and
 the command bar, backed by POST-only `/api/control` endpoints that require the session and the page's Origin.
 
+**Configuration you can trust** (2026-10-07). Inline comments and quoted strings parse; tabs, block lists,
+missing keys and duplicates are errors naming the line; wrong types name the key and value; the validator
+covers the strategy and execution keys and reports every problem at once; `--check-config` does the same
+from the command line and a bad start exits with the messages, not a stack trace.
+
 ---
 
 ## Next: deployment readiness (this week, 2026-10-07 to 2026-10-11)
 
 Goal: a reviewer can clone, run, and trust every number on screen.
 
-5. **Config parser hardening.** Inline comments, clear error messages naming the key and line, and a
-   `--check-config` mode.
 6. **Hermetic tests.** Inject a fake spot provider into the remaining tests that construct `LiveSpotProvider`;
    ratchet the JaCoCo gate to the measured figure minus five points.
 7. **Operations.** Structured logging (one line per event, no banners), `/api/health` with per-component

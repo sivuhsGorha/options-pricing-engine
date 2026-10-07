@@ -47,6 +47,9 @@ mvn clean verify
 #   OPERATOR_PASSWORD=<at least 12 characters>
 #   FINNHUB_KEY=...  POLYGON_API_KEY=...  (any provider you have)
 
+# Check the configuration and environment without starting anything (exit 0 = valid)
+java -jar target/options-pricing-engine-1.0.0-SNAPSHOT.jar --check-config
+
 # Run the engine and the dashboard (http://127.0.0.1:8080, WebSocket on port 8081)
 java --add-modules jdk.incubator.vector -jar target/options-pricing-engine-1.0.0-SNAPSHOT.jar
 

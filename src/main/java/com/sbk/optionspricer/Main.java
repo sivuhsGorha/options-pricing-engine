@@ -33,14 +33,34 @@ public class Main {
     }
 
     public static void main(String[] args) throws Exception {
+        if (args.length > 0 && "--check-config".equals(args[0])) {
+            System.exit(com.sbk.optionspricer.config.ConfigCheck.run(java.nio.file.Path.of(ConfigManager.DEFAULT_CONFIG_PATH),
+                    com.sbk.optionspricer.config.EnvironmentConfigLoader::get, System.out));
+            return;
+        }
         System.out.println("=========================================================================");
         System.out.println("      AURA-OPT INSTITUTIONAL OPTIONS PRICING & EXECUTION PLATFORM        ");
         System.out.println("=========================================================================");
 
-        ConfigManager config = new ConfigManager();
-        List<String> validationErrors = ConfigValidator.validate(config);
+        ConfigManager config;
+        List<String> validationErrors;
+        try {
+            config = new ConfigManager();
+            validationErrors = ConfigValidator.validate(config);
+        } catch (com.sbk.optionspricer.config.ConfigException e) {
+            // A configuration mistake is an operator message, not a stack trace.
+            System.err.println("[CONFIG] " + e.getMessage());
+            System.err.println("[CONFIG] Fix " + ConfigManager.DEFAULT_CONFIG_PATH + " and start again; `--check-config` reports every problem at once.");
+            System.exit(2);
+            return;
+        }
         if (!validationErrors.isEmpty()) {
-            throw new IllegalArgumentException("Invalid startup config: " + String.join(", ", validationErrors));
+            System.err.println("[CONFIG] " + ConfigManager.DEFAULT_CONFIG_PATH + " has " + validationErrors.size() + " problem(s):");
+            for (String error : validationErrors) {
+                System.err.println("[CONFIG]   - " + error);
+            }
+            System.exit(2);
+            return;
         }
 
         // 1. Core Mathematical Models

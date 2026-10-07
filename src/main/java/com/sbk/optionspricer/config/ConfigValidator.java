@@ -5,7 +5,9 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Validates essential config keys for market data and dashboard operation.
+ * Validates every configuration key the application reads. Each problem is one message naming the key and
+ * the rule, and a value of the wrong type is reported the same way rather than thrown, so an operator sees
+ * all problems at once.
  */
 public final class ConfigValidator {
     private ConfigValidator() {
@@ -27,20 +29,20 @@ public final class ConfigValidator {
             errors.add("dashboard section missing");
         }
 
-        double refresh = config.getDouble("market_data.refresh_interval_seconds", 900.0);
-        if (refresh <= 0.0 || Double.isNaN(refresh) || Double.isInfinite(refresh)) {
-            errors.add("market_data.refresh_interval_seconds must be positive");
+        number(config, errors, "market_data.refresh_interval_seconds", 900.0,
+                v -> v > 0.0, "must be a positive number of seconds");
+        number(config, errors, "market_data.spot", 100.0, v -> v > 0.0, "must be positive");
+        number(config, errors, "market_data.risk_free_rate", 0.05, v -> v > -1.0 && v < 1.0, "must be a decimal rate such as 0.05");
+        number(config, errors, "market_data.dividend_yield", 0.0, v -> v >= 0.0 && v < 1.0, "must be a decimal yield such as 0.015");
+        try {
+            int port = config.getInt("dashboard.port", 8082);
+            if (port <= 0 || port > 65535) {
+                errors.add("dashboard.port must be in the range 1..65535");
+            }
+        } catch (ConfigException e) {
+            errors.add(e.getMessage());
         }
-
-        int port = config.getInt("dashboard.port", 8082);
-        if (port <= 0 || port > 65535) {
-            errors.add("dashboard.port must be in the range 1..65535");
-        }
-
-        double vol = config.getDouble("volatility.default_volatility", 0.20);
-        if (vol <= 0.0 || vol > 5.0) {
-            errors.add("volatility.default_volatility must be in (0, 5]");
-        }
+        number(config, errors, "volatility.default_volatility", 0.20, v -> v > 0.0 && v <= 5.0, "must be in (0, 5]");
 
         Map<String, Object> risk = config.getSection("risk");
         String[][] legacyKeys = {{"delta_limit", "max_delta"}, {"gamma_limit", "max_gamma"}, {"vega_limit", "max_vega"}};
@@ -51,19 +53,35 @@ public final class ConfigValidator {
             }
         }
         for (String key : new String[]{"max_notional", "max_delta", "max_gamma", "max_vega", "max_position", "max_concentration"}) {
-            if (!risk.containsKey(key)) {
-                continue;
-            }
-            try {
-                double limit = config.getDouble("risk." + key, Double.NaN);
-                if (!Double.isFinite(limit) || limit <= 0.0) {
-                    errors.add("risk." + key + " must be a finite positive number");
-                }
-            } catch (NumberFormatException e) {
-                errors.add("risk." + key + " must be a number");
+            if (risk.containsKey(key)) {
+                number(config, errors, "risk." + key, Double.NaN, v -> Double.isFinite(v) && v > 0.0, "must be a finite positive number");
             }
         }
+
+        number(config, errors, "strategy.trigger_pct", 0.001, v -> v > 0.0 && v < 1.0,
+                "must be between 0 and 1 exclusive (0.001 means a 0.1% move)");
+        number(config, errors, "strategy.base_quantity", 10.0, v -> v >= 1.0 && v == Math.rint(v),
+                "must be a whole number of at least 1");
+        number(config, errors, "execution.contract_multiplier", 1.0, v -> v >= 1.0 && v == Math.rint(v),
+                "must be a whole number of at least 1 (1 for shares, 100 for standard equity options)");
+        number(config, errors, "execution.slippage_bps", 25.0, v -> Double.isFinite(v) && v >= 0.0, "must be zero or positive");
+        String symbol = config.getString("execution.symbol", "SPY");
+        if (symbol == null || symbol.isBlank()) {
+            errors.add("execution.symbol must not be blank");
+        }
         return errors;
+    }
+
+    private static void number(ConfigManager config, List<String> errors, String key, double defaultValue,
+                               java.util.function.DoublePredicate ok, String rule) {
+        try {
+            double value = config.getDouble(key, defaultValue);
+            if (!ok.test(value)) {
+                errors.add(key + " " + rule + " (found " + value + ")");
+            }
+        } catch (ConfigException e) {
+            errors.add(e.getMessage());
+        }
     }
 
     public static List<String> validateCredentials(String apiSecret, String operatorPassword) {
