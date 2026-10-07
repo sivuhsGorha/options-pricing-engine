@@ -32,8 +32,8 @@ This document establishes the operational rules, system constraints, verificatio
                                ▼
 ┌───────────────────────────────────────────────────────────────────────────────────────────┐
 │ 4. Run Build & Verification Test Suite via Terminal Tools                                  │
-│    (javac -d target/classes src/main/java/com/sbk/optionspricer/*.java)                  │
-│    (java -cp target/classes com.sbk.optionspricer.Main)                                   │
+│    (mvn -B clean verify   — tests + JaCoCo gate; the same command CI runs)                 │
+│    (cd web-react && npm run lint && npm run build   — when the frontend changed)           │
 └──────────────────────────────┬────────────────────────────────────────────────────────────┘
                                │
                                ▼

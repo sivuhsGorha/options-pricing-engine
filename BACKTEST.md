@@ -1,75 +1,46 @@
-# High-Fidelity Event-Driven Options Backtest Engine (BACKTEST.md)
+# Backtesting (BACKTEST.md)
 
-This document describes the design and operation of the high-fidelity, event-driven backtesting engine engineered to simulate options strategies with zero look-ahead bias and realistic microstructure modeling.
-
----
-
-## 1. Engine Design & Architecture
-
-```
-┌───────────────────────────────────────────────────────────────────────────────────────────┐
-│                                Historical Tick Storage (Parquet / HDF5)                   │
-│          - Level 3 (L3) Order Book Replay  |  - Full Trade & Quote Messages               │
-└─────────────────────────────────────────────┬─────────────────────────────────────────────┘
-                                              │
-                                              ▼
-┌───────────────────────────────────────────────────────────────────────────────────────────┐
-│                                   Event Loop Dispatcher                                   │
-│            (Dispatches Market Data Events & Order Execution Notifications)                │
-└──────────────────────────────┬──────────────────────────────┬─────────────────────────────┘
-                               │                              │
-                               ▼                              ▼
-┌─────────────────────────────────────────────┐  ┌──────────────────────────────────────────┐
-│             Strategy Logic                  │  │       Microstructure Matching Engine     │
-│   - Signal Generation                       │  │   - Queue Position Simulator             │
-│   - Portfolio Greeks Calculation            │  │   - Exchange Fee & Margin Engine         │
-│   - Dynamic Delta Hedging                   │  │   - Market Impact & Slippage Models      │
-└─────────────────────────────────────────────┘  └──────────────────────────────────────────┘
-```
+What the backtest code does today, with its simplifications stated, and what a serious options backtester
+would still need.
 
 ---
 
-## 2. Realistic Microstructure & Execution Simulation
+## 1. What exists
 
-Options backtesting produces wildly inaccurate results if simple mid-price fill assumptions are used. The engine implements three microstructural realism modules:
+| Class | Role |
+| :--- | :--- |
+| `risk/PortfolioBacktestOrchestrator` | runs `StrategyExecutionLoop` over a list of `OptionSnapshot` mid prices through a real `OrderManager` with the paper adapter and an in-memory `PositionTracker` (`FillRecorder.NONE`, so a backtest can never write to the live fill ledger); reports snapshots processed, signals, accepted and rejected orders, net quantity, total P&L, average slippage and maximum drawdown |
+| `risk/HistoricalReplayBacktester` | turns stored snapshots into the trade-signal sequence and P&L metrics used above |
+| `data/HistoricalDataManager` | append-only in-memory snapshot store; the engine stores a few live-chain quotes into it at startup |
+| `gateways/HistoricalReplayEngine` | replays `market_data.csv` rows as binary ticks into the ring buffer, with the row number in any parse error (the CSV is the synthetic chain written by `fetch_real_api_data.py`) |
+| `risk/EventDrivenBacktester` | two functions: `calculateAlmgrenChrissImpact(orderSize, ADV, dailyVol, executionTimeRatio)` for market impact, and `simulateQueuePosition(orderSize, existingQueueSize)` for passive-fill queue position. They are utilities; the orchestrator does not call them |
 
-### 2.1 Order Book Queue Position Simulator
-When posting passive limit orders, the engine models queue priority:
-- Track trade volume executed at the limit price.
-- Estimate initial queue depth $Q_0$ upon order entry.
-- Fill order only after $Q_0$ shares/contracts at or better than the price have traded.
-
-### 2.2 Market Impact Model (Almgren-Chriss)
-For aggressive sweep orders, execution prices incorporate transient and permanent market impact:
-
-$$\Delta S_{\text{impact}} = \gamma \cdot \text{Sign}(\text{Order}) \cdot \left( \frac{\text{Volume}}{\text{ADV}} \right)^\alpha \cdot \sigma_{\text{daily}}$$
-
-### 2.3 Exchange Fee Schedules & Clearing Costs
-All transactions automatically apply accurate venue fee structures:
-
-| Venue | Contract Type | Exchange Fee / Contract | Clearing Fee (Eurex / LCH) |
-| :--- | :--- | :--- | :--- |
-| **Eurex** | Index Options (FSTX) | €0.20 | €0.05 |
-| **Eurex** | Single Stock Options | €0.15 | €0.03 |
-| **Euronext** | Stock Options (AEX/CAC) | €0.18 | €0.04 |
-| **LSEG** | FTSE 100 Options | £0.16 | £0.04 |
+`Main` runs the orchestrator once at startup over a four-snapshot demo series and prints the summary line.
 
 ---
 
-## 3. Options-Specific Backtest Features
+## 2. Simplifications you must know about
 
-- **Dynamic Volatility Re-calibration**: Volatility surface fits are updated strictly at historical tick timestamps without utilizing future ticks.
-- **Path-Dependent Delta Hedging**: Simulates intraday dynamic delta hedging triggered by spot price movements ($\Delta \ge 2\%$) or fixed time intervals (e.g., hourly / end-of-day).
-- **Pin Risk & Expiry Settlement**: Accurately simulates physical delivery vs. cash settlement on expiration dates, including pin risk for options expiring near-the-money.
-- **Corporate Action Adjustments**: Adjusts historical strikes, contract multipliers, and underlying stock prices seamlessly across historical ex-dates.
+- **Fills**: every accepted order fills in full at the quoted side moved by `execution.slippage_bps`. No
+  partial fills, no queue, no impact (the Almgren-Chriss function exists but is not wired in).
+- **Prices**: the strategy trades the snapshot *mid price* as if it were the underlying spot. Option
+  snapshots are not priced through a model during the backtest.
+- **Mark-to-market**: P&L is computed from execution prices only; there is no end-of-period revaluation of
+  open positions through a pricer.
+- **No fees**, no clearing costs, no borrow, no financing.
+- **No expiry handling**: options never expire or settle inside a backtest.
+- **No look-ahead protection beyond ordering**: snapshots are sorted by timestamp; nothing else is enforced.
+- **Data**: `market_data.csv` is a synthetic chain around a real spot. Backtests on it test the machinery,
+  not a strategy.
 
 ---
 
-## 4. Backtest Metrics & Performance Analytics
+## 3. What a real options backtester needs (not implemented)
 
-Reports generated after each simulation run include:
-
-- **Sharpe & Sortino Ratio** (annualized against ESTER benchmark rate).
-- **Maximum Drawdown (MDD)** and Drawdown Duration.
-- **Greek Drift Statistics**: Portfolio Delta, Gamma, Vega, and Theta exposure over time.
-- **Turnover & Capacity Analysis**: Estimates maximum strategy AUM before market impact degrades alpha.
+- Historical option chains with timestamps (storage, e.g. Parquet; a loader; survivorship-safe symbol master).
+- Pricing and Greeks of every open position at each step, with the volatility surface re-fitted only from
+  data at or before that time.
+- Expiry settlement (cash or physical), pin risk near the money, assignment for American options.
+- Corporate actions: strike and multiplier adjustments across ex-dates and splits.
+- Execution realism: queue position, partial fills, Almgren-Chriss impact, venue fee schedules.
+- Metrics: Sharpe/Sortino against a cash benchmark, drawdown duration, turnover, capacity.

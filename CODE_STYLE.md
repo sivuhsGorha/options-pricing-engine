@@ -1,67 +1,71 @@
-# Code Style Standards & Zero-Allocation Rules (CODE_STYLE.md)
+# Code Style (CODE_STYLE.md)
 
-This document dictates coding conventions, performance anti-patterns, and numerical precision rules for Java, C++, and Python codebase components.
-
----
-
-## 1. Zero-Allocation Java Standards (Hot Path)
-
-The hot execution path includes market data handlers, order book reconstruction, pricing/Greeks calculations, and execution message marshalling.
-
-### 🚫 Forbidden on Hot Path:
-- `new` object instantiations (e.g., `new Double()`, `new String()`, `new ArrayList()`).
-- Auto-boxing / unboxing (`Double` instead of primitive `double`).
-- Java Streams, Lambdas, or Iterator creation.
-- String concatenation (`"Price: " + price`).
-- Dynamic memory resizing or array allocation.
-
-### ✅ Mandatory Patterns:
-- Use **Java Records** for immutable parameter passing outside the hot path, and primitive arrays / off-heap `MemorySegment` buffers on the hot path.
-- Pre-allocate scratch objects / buffers during initialization (in constructors or static setup).
-- Use `final` primitive local variables (`double`, `long`, `int`).
-
-```java
-// BAD: Allocates objects on hot path
-public Double calculateCallPrice(OptionParameters params) {
-    List<Double> results = new ArrayList<>();
-    results.add(params.spot() - params.strike());
-    return results.get(0);
-}
-
-// GOOD: Zero allocation, primitive double on hot path
-public static double calculateCallPrice(double spot, double strike, double timeToExpiry, double rate, double vol) {
-    if (timeToExpiry <= 1e-10) {
-        return Math.max(spot - strike, 0.0);
-    }
-    // Analytical calculations using primitives
-    ...
-}
-```
+Conventions for the Java, Python and JavaScript in this repository. The rules below exist because each one
+has already caught a real defect here.
 
 ---
 
-## 2. Floating-Point & Numerical Precision Rules
+## 1. Correctness rules
 
-1. **IEEE 754 Standards**: Always check for `Double.isNaN()` or `Double.isInfinite()` when operating near boundary conditions ($T \to 0$, $\sigma \to 0$, $S \to 0$).
-2. **Epsilon Comparisons**: Never use exact binary equality `==` on floating-point numbers. Use absolute or relative tolerance:
-   ```java
-   public static final double PRICE_TOLERANCE = 1e-6;
-   if (Math.abs(calculatedPrice - expectedPrice) < PRICE_TOLERANCE) { ... }
-   ```
-3. **Small Number Division**: Prevent division by near-zero values in derivative step calculations (e.g., Vega division in Newton-Raphson). Provide automatic fallback routines.
-
----
-
-## 3. Class & Naming Conventions
-
-- **Class Names**: PascalCase (e.g., `BlackScholesPricer`, `ImpliedVolatilitySolver`).
-- **Method & Variable Names**: camelCase (e.g., `calculateGreeks`, `timeToExpiry`).
-- **Constants**: UPPER_SNAKE_CASE (e.g., `NEAR_ZERO = 1e-10`, `MAX_ITERATIONS = 50`).
-- **Math Symbol Mapping**: Variable names should include mathematical symbol references in comments (e.g., `double spot; // S`, `double strike; // K`).
+1. **Never fabricate a value.** A missing quote is `UNAVAILABLE`, not 100.0; a failed implied-volatility
+   inversion returns empty, not 20%; an unreadable risk state is a 503, not zeros. Placeholders that remain
+   (volume 2000, +/- 1 cent spreads) are documented in DATA.md as defects.
+2. **Label simulations.** A class that simulates a feed, venue or protocol says `SIMULATION` in its header and
+   in its log lines. Documentation says what is implemented and what is not, in separate sections.
+3. **One convention per concept.** Dates become times only through `TimeConventions` (ACT/365F). Prices
+   become wire ticks only through `PriceScale` (HALF_EVEN at 4 decimals). Notional is always
+   `quantity x price x multiplier`.
+4. **Fail loudly on impossible state.** A fill larger than the order, a booking failure or a negative tree
+   probability throws or trips the trading halt. Do not clamp, floor or "repair" and continue.
+5. **Secrets come from the environment** (`EnvironmentConfigLoader`, `.env`). Never in code, config files,
+   tests or logs; log messages redact credentials and never print request URLs with keys.
 
 ---
 
-## 4. Documentation & Docstrings
+## 2. Numerical rules
 
-- Every mathematical function must explicitly state its formula, assumptions, and edge case behaviors in standard Javadoc format.
-- Document maximum absolute error rates for rational polynomial approximations (e.g. Abramowitz & Stegun normal CDF error $\sim 1.5 \times 10^{-7}$).
+- Check `Double.isFinite` at boundaries (T -> 0, sigma -> 0, S -> 0, deep in/out of the money) and reject or
+  return empty rather than produce NaN.
+- Compare floating-point values with a tolerance that is justified in a comment (and in the test).
+- Document the accuracy of every approximation with a measured bound (see `FastMath`), and do not use a
+  low-precision approximation where the value feeds a price or a risk number.
+- Prefer formulations that keep relative accuracy in tails (erfc, not 1 - Phi; log-space grids for the PDE).
+- Convergence criteria are on the quantity being solved for (volatility step), not on a proxy (price error).
+
+---
+
+## 3. Performance rules
+
+Hot paths are the engine tick, ring-buffer producer and consumer, the PDE and tree inner loops. In them:
+
+- Avoid allocation: reuse pre-allocated primitive arrays, pass primitives, no boxing, no streams or lambdas.
+- Do not add synchronisation without a reason; where it is needed (seqlock writer, order manager) it is explicit.
+- Measure before claiming. No latency or throughput figure goes into documentation without a committed
+  benchmark that produced it.
+
+Outside hot paths, prefer clarity: records for parameter groups, `Optional` for absent results, small classes.
+
+---
+
+## 4. Tests
+
+- Tests live under `src/test` and are committed with the change they cover. CI enforces a JaCoCo coverage
+  minimum that only ratchets upward; never lower it, disable a test, or loosen an assertion to get a build green.
+- Write the test first and watch it fail against the old code where feasible; a test that never failed has
+  not proven anything.
+- A test named for behaviour (`producerCannotOverwriteATickTheConsumerIsStillReading`) is preferred to one named
+  for a method.
+- Tests must be hermetic: no network, no real API keys, no dependence on the clock beyond injected instants.
+  Older tests that construct `LiveSpotProvider` directly are being migrated.
+- Numerical tests state the reference they compare against and why its accuracy exceeds the tolerance.
+
+---
+
+## 5. Naming and documentation
+
+- Java: PascalCase classes, camelCase members, UPPER_SNAKE_CASE constants. Python: PEP 8. JavaScript: the
+  oxlint configuration in `web-react/`, with warnings treated as errors.
+- Every mathematical method's Javadoc states the formula, assumptions and edge-case behaviour. Where a method
+  replaces a defective earlier version, the Javadoc says what was wrong, so the reason is not lost.
+- Commit messages say what changed and why in the body, in plain language.
+- Line endings: files are committed with LF; Git normalises on Windows checkouts.

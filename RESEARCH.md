@@ -1,73 +1,103 @@
-# Academic Foundations & Quantitative Research (RESEARCH.md)
+# Models and Numerical Methods (RESEARCH.md)
 
-This document details the quantitative models, stochastic partial differential equations (PDEs), numerical methods, and academic research foundations underlying the engine.
-
----
-
-## 1. Stochastic Volatility Models
-
-While Black-Scholes-Merton assumes constant volatility $\sigma$, real options markets exhibit strong volatility smiles and skews. The platform implements three advanced stochastic volatility models for pricing and risk:
-
-### 1.1 The Heston Stochastic Volatility Model
-Asset price $S_t$ and variance $v_t$ follow coupled stochastic differential equations (SDEs):
-
-$$dS_t = (r - q) S_t dt + \sqrt{v_t} S_t dW_t^S$$
-
-$$dv_t = \kappa (\theta - v_t) dt + \xi \sqrt{v_t} dW_t^v$$
-
-$$\text{Corr}(dW_t^S, dW_t^v) = \rho dt$$
-
-where:
-- $\kappa$: Rate of mean reversion.
-- $\theta$: Long-term variance mean.
-- $\xi$: Volatility of volatility (vol-of-vol).
-- $\rho$: Correlation between asset returns and volatility shocks (captures leverage effect/skew).
-
-**Analytical Solution**: Solved via characteristic function integration using Gauss-Legendre quadrature.
+The mathematics behind each implemented class, with the limits of each method stated. Section 6 lists models
+that are discussed in the literature but not implemented here.
 
 ---
 
-### 1.2 The SABR Model (Hagan et al. 2002)
-Used extensively for calibrating option smile dynamics across individual maturities:
+## 1. Black-Scholes-Merton and Greeks
 
-$$dF_t = \alpha_t F_t^\beta dW_t^1$$
+`BlackScholesPricer` prices European calls and puts with continuous dividend yield q. Put-call parity
+`C - P = S e^{-qT} - K e^{-rT}` is checked in tests to ~1e-14. `Greeks` gives delta, gamma, vega, theta and
+rho; `risk/greeks/AnalyticalHigherGreeks` gives vanna, volga, charm, speed and color in closed form.
 
-$$d\alpha_t = \nu \alpha_t dW_t^2$$
+`NormalDistribution.cdf` is computed from erfc so the lower tail keeps relative accuracy: a series for
+|z| < 2 and a continued fraction for |z| >= 2, each accurate to a few ulps. `FastMath` holds low-precision
+approximations (exp ~1.6e-7 relative, log ~1.1e-6, A&S 26.2.17 CDF ~7.4e-8) with measured error bounds; they
+are not used where a value feeds a price. `VectorBlackScholesPricer` and `SimdMath` use the incubator Vector
+API for element-wise arithmetic; exp and log are not vectorised.
 
-$$\text{Corr}(dW_t^1, dW_t^2) = \rho dt$$
+**Implied volatility** (`ImpliedVolatilitySolver`): the price is monotone in volatility, so the root is
+bracketed in [1e-6, 5] and found by safeguarded Newton (bisect when a Newton step leaves the bracket).
+Convergence is judged on volatility (step < 1e-13), not on price, because a price tolerance leaves an error of
+tolerance / vega, which is large for short-dated and far-out-of-the-money options. Prices outside the
+no-arbitrage bounds return no result. It is a European model: American prices fed to it would attribute the
+early-exercise premium to volatility.
 
----
-
-## 2. American Option Pricing & Numerical PDE Solvers
-
-American options allow exercise at any time $t \le T$. Because no closed-form analytical solution exists, two high-performance numerical schemes are implemented:
-
-### 2.1 Trinomial Tree Framework
-Constructs a discrete-time recombination tree matching the first two moments of log-asset returns. At each tree node $(i, j)$:
-
-$$V_{i,j} = \max\left( \text{IntrinsicValue}_{i,j}, \; e^{-r \Delta t} \left( p_u V_{i+1, j+1} + p_m V_{i+1, j} + p_d V_{i+1, j-1} \right) \right)$$
-
-### 2.2 Crank-Nicolson Finite Difference PDE Solver
-Solves the Black-Scholes PDE subject to early exercise boundary conditions:
-
-$$\frac{\partial V}{\partial t} + \frac{1}{2} \sigma^2 S^2 \frac{\partial^2 V}{\partial S^2} + (r - q) S \frac{\partial V}{\partial S} - r V = 0$$
-
-Using the implicit/explicit Crank-Nicolson scheme results in a tridiagonal matrix equation solved via the Thomas Algorithm in $\mathcal{O}(N)$ time per step.
+**Monte Carlo** (`MonteCarloPricer`): terminal GBM sampling with standard error; it exists as an independent
+cross-check of the closed form, and tests require agreement within the confidence interval.
 
 ---
 
-## 3. Longstaff-Schwartz Monte Carlo (LSMC)
+## 2. American options
 
-For high-dimensional path-dependent options (e.g. Bermudan basket options), early exercise boundaries are estimated by cross-sectional regression:
+**Trinomial tree** (`models/tree/AmericanTreePricer`, `TrinomialTreeParameters`): recombining tree matching
+the first two moments of log returns with spacing `dx = sigma sqrt(3 dt)`,
+`V_ij = max(intrinsic, e^{-r dt}(p_u V_{i+1,j+1} + p_m V_{i+1,j} + p_d V_{i+1,j-1}))`. Parameters that give a
+negative probability (large drift, low vol, few steps) are rejected rather than priced. Memory is O(steps).
+Continuous dividend yield only.
 
-$$\mathbb{E}[V_{t+1} \mid S_t] \approx \sum_{k=0}^M a_k L_k(S_t)$$
-
-where $L_k(S_t)$ are orthogonal Laguerre polynomials fitted via least-squares across simulated paths at each exercise date.
+**Finite differences** (`models/pde/DiscreteDividendPricer`; `CrankNicolsonPricer` is a deprecated alias):
+the single PDE solver. Black-Scholes in x = ln S, `V_tau = 1/2 sigma^2 V_xx + nu V_x - r V`,
+`nu = r - q - sigma^2/2`, on a uniform grid with the strike on a node and the domain covering spot and strike
++/- 4.5 standard deviations plus drift. Crank-Nicolson time stepping with **Rannacher start-up** (four fully
+implicit half-steps after maturity and after each dividend) to damp the oscillations CN produces on a kinked
+payoff. **American exercise** by the Brennan-Schwartz projected Thomas elimination inside the linear solve
+(exact for the one-sided LCP). **Discrete cash dividends** at exact ex-dates: the time axis is split at each
+date and `V(t-, S) = V(t+, S - D)` is applied, with the grid widened so `S - D` stays on it. Boundaries are
+floored at zero and net of dividends still to come. The spot price is read by cubic interpolation.
+`ThomasAlgorithm` is the allocation-free tridiagonal solver. `ParallelPdeBatchSolver` prices many strikes
+with the scalar solver (it is not vectorised, despite the name). Tests compare against a
+Richardson-extrapolated reference to 2e-4.
 
 ---
 
-## 4. Machine Learning Implied Volatility Surface Prediction
+## 3. Volatility surfaces
 
-Research branch exploring neural network approximations:
-- **Neural SVI**: Deep neural networks trained on historical tick surfaces to predict intraday SSVI parameter shifts $(\theta, \rho, \eta, \gamma)$ $500 \text{ ms}$ ahead.
-- **Physics-Informed Neural Networks (PINNs)**: Neural network pricing models enforced with strict Black-Scholes PDE loss penalties to guarantee arbitrage-free outputs.
+**SVI** (`volatility/SviModel`, Gatheral 2004 raw form): `w(k) = a + b(rho (k - m) + sqrt((k - m)^2 + s^2))`.
+Parameter checks guarantee non-negative total variance; they do not by themselves exclude butterfly or
+calendar arbitrage.
+
+**SSVI** (`volatility/SsviApproximation`, Gatheral and Jacquier 2014):
+`w(k, theta) = theta/2 (1 + rho phi(theta) k + sqrt((phi(theta) k + rho)^2 + 1 - rho^2))` with
+`phi(theta) = eta / (theta^gamma (1 + theta)^(1 - gamma))` and k the log-moneyness against the forward. The
+class evaluates the paper's sufficient conditions for no butterfly arbitrage in closed form and validates
+calendar monotonicity; it reports violations rather than silently "enforcing" anything.
+
+**SABR** (`volatility/SabrModel`, Hagan et al. 2002): `dF = alpha F^beta dW1`, `d alpha = nu alpha dW2`,
+`corr = rho`, with the standard asymptotic expansion for Black implied volatility. Known limits of the formula:
+it is asymptotic in maturity, inaccurate for long expiries and very low strikes, and can imply negative
+density in the wings. `SabrFreeBoundaryModel` is a deprecated alias: the earlier "free-boundary" version was a
+clamped Hagan formula, not the Hagan 2014 density correction, and has been removed.
+
+**Local and stochastic-local volatility** (`volatility/SlvApproximation`): Dupire local volatility from an
+implied surface, `sigma_loc^2 = (dw/dT) / (1 - k/w dw/dk + 1/4(-1/4 - 1/w + k^2/w^2)(dw/dk)^2 + 1/2 d^2w/dk^2)`
+in total-variance form, including the dividend yield. Dupire is only defined for an arbitrage-free surface;
+the class detects a negative numerator or denominator and reports it. Heston-parameter structures (`SlvParams`)
+are used by the Monte Carlo VaR simulation.
+
+---
+
+## 4. Rates
+
+See [DATA.md](DATA.md) section 3: log-linear discount curve, schedule-aware par bootstrap, par-yield
+treatment of FRED series, and the single ACT/365F day count.
+
+---
+
+## 5. Risk measures
+
+Historical VaR and expected shortfall from a P&L vector; Monte Carlo VaR from Heston-simulated spot paths and
+a delta-gamma-vega P&L expansion; a four-corner spot/vol stress as a margin proxy. Definitions and limits are
+in [RISK.md](RISK.md) section 4.
+
+---
+
+## 6. Discussed, not implemented
+
+- **Heston pricing**: the Heston SDE `dv = kappa(theta - v)dt + xi sqrt(v) dW` is used only to simulate paths
+  for VaR. There is no characteristic-function pricer or calibration.
+- **Longstaff-Schwartz Monte Carlo** for Bermudan or path-dependent options.
+- **Arbitrage-free SABR** (Hagan 2014 free-boundary density, or a PDE for the SABR density).
+- **Full SLV calibration** via the Fokker-Planck equation to recover European prices exactly.
+- **Machine-learned surfaces** (neural SVI, physics-informed networks).

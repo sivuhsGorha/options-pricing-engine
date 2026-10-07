@@ -1,73 +1,82 @@
-# Low-Latency Execution & Exchange Gateway Protocols (EXECUTION.md)
+# Execution (EXECUTION.md)
 
-> **Status: design target, not implemented.** The only working execution path is the paper-trading adapter (`execution/PaperTradingExecutionAdapter`) behind `OrderManager`. The exchange protocol layouts, venue routing, kernel bypass and co-location described below are plans or simulations (`gateways/`, `execution/SmartOrderRouter`); there is no connection to any exchange.
-
-
-This document details the high-frequency execution architecture, exchange binary protocol handlers, Smart Order Routing (SOR) algorithms, and Direct Market Access (DMA) co-location setups across European derivatives markets.
+How an order moves from signal to booked position. The only live execution path is paper trading; the
+exchange-protocol code in `gateways/` is simulation and is marked as such in every class header.
 
 ---
 
-## 1. Native Exchange Protocol Integration
-
-To minimize latency, the engine bypasses generic FIX gateways in favor of direct native binary exchange interfaces:
+## 1. Components
 
 ```
-┌───────────────────────────────────────────────────────────────────────────────────────────┐
-│                                   Order Generator Strategy                                │
-└─────────────────────────────────────────────┬─────────────────────────────────────────────┘
-                                              │ Sub-microsecond Event Pass
-                                              ▼
-┌───────────────────────────────────────────────────────────────────────────────────────────┐
-│                             Smart Order Router (SOR) & Pre-Trade Risk                     │
-└──────────────┬──────────────────────────────┬──────────────────────────────┬──────────────┘
-               │                              │                              │
-               ▼                              ▼                              ▼
-┌────────────────────────────┐  ┌───────────────────────────┐  ┌────────────────────────────┐
-│      Eurex T7 ETI          │  │    Euronext Optiq OEG    │  │       LSEG SOLA            │
-│  - Binary TCP/IP Sockets   │  │  - Binary SBE Messaging   │  │  - Binary Native Format    │
-│  - Session Management      │  │  - High-Speed Mass Quotes │  │  - Mass Cancel / Quote     │
-└──────────────┬─────────────┘  └─────────────┬─────────────┘  └─────────────┬──────────────┘
-               │                              │                              │
-               ▼                              ▼                              ▼
-┌───────────────────────────────────────────────────────────────────────────────────────────┐
-│                       Solarflare OpenOnload / Kernel Bypass (Onload/EF_VI)                │
-└───────────────────────────────────────────────────────────────────────────────────────────┘
+StrategyExecutionLoop ──> OrderManager.submit(order, marketSnapshot)
+                              │  1 TradingHalt
+                              │  2 MarketDataPolicy (status + age)
+                              │  3 PortfolioRiskAdmission
+                              │  4 PreTradeRiskFilter (incl. concentration, liquidity, rate)
+                              ▼
+                     ExchangeTransport.transmit ──> PaperTradingExecutionAdapter (full fill, slippage)
+                              │
+                              ▼  fill validated (0 <= filled <= requested)
+                     PositionTracker.applyFill(symbol, signedQty, multiplier, price)
+                              │
+                              ├─> ConcentrationLimitManager.recordFill
+                              ├─> audit trail (bounded, /api/execution)
+                              └─> FillRecorder (FillLedger in live mode, NONE in backtests)
 ```
 
-### Protocol Gateway Matrix
+**Order** is a record: client id, side, quantity, limit price. **OrderStatus**: `NEW`, `ACCEPTED`, `REJECTED`,
+`PARTIALLY_FILLED`, `FILLED`, `CANCELLED`. `OrderManager` keeps open orders and a bounded status map (10,000
+most recent) and supports `cancel(orderId)` for the unfilled remainder of a working order (local state only:
+`ExchangeTransport` has no cancel operation yet).
 
-| Exchange | Trading Protocol | Message Encoding | Latency Profile | Key Features Supported |
-| :--- | :--- | :--- | :--- | :--- |
-| **Eurex (Deutsche Börse)** | ETI (Enhanced Trading Interface) | Native Binary | $< 5.2 \; \mu\text{s}$ | Mass Quote, Cancel-On-Disconnect, Lean Orders |
-| **Euronext** | Optiq OEG | Simple Binary Encoding (SBE) | $< 6.1 \; \mu\text{s}$ | Mass Quote, Bulk Cancellation, Fill Notifications |
-| **LSEG** | SOLA Native | Native Binary Structs | $< 7.5 \; \mu\text{s}$ | Mass Order Entry, Trade Confirmation |
-| **SIX Swiss** | OTI | FIX / Binary | $< 8.0 \; \mu\text{s}$ | Quote Injection, Drop Copy |
+**Money and prices.** Notional is `quantity x price x contractMultiplier` everywhere (risk filter,
+admission, concentration, booking). Prices crossing the wire are converted with `execution/PriceScale` to
+exact decimal ticks of 0.0001 (HALF_EVEN), never by truncating `price * 10000`.
 
----
+**Paper fills** (`PaperTradingExecutionAdapter`): a buy fills at the ask (or bid if no ask) moved up by
+`execution.slippage_bps`; a sell at the bid moved down. Quantity always fills in full.
 
-## 2. Smart Order Router (SOR) & Liquidity Aggregation
+**Market data policy.** `strict()` (default) accepts LIVE and DELAYED quotes under 30 s old.
+`allowSimulated()` (`ALLOW_SIMULATED_DATA=true`) adds SIMULATED. STALE and UNAVAILABLE are never tradable and
+the policy constructor refuses to make them so.
 
-When executing hedging orders across correlated instruments (e.g., EURO STOXX 50 futures on Eurex vs CAC 40 futures on Euronext):
-
-1. **Latency-Equalized Routing**: Sends sub-orders with calibrated delay offsets so that orders hit separate exchange matching engines simultaneously.
-2. **Probability of Fill Allocation**: Allocates order sizes across venues weighted by level-1 liquidity depth and queue velocity.
-3. **Anti-Internalization / Self-Match Prevention (SMP)**: Enforces exchange SMP IDs on all active quotes to avoid self-crossing rules.
-
----
-
-## 3. High-Frequency Passive Quoting Algorithms
-
-- **Two-Sided Market Making**: Continuously injects mass quotes across option chains.
-- **Dynamic Quote Refresh Rate**: Refresh signals are throttled at $\le 100 \; \mu\text{s}$ per contract to comply with exchange quote-to-trade ratio (QTR) limits.
-- **Auto-Pull / Cancel-On-Disconnect (COD)**: If the execution gateway loses heartbeat contact with the exchange for $> 50 \text{ ms}$, the exchange matching engine automatically purges all resting quotes.
+**Failure handling.** An impossible fill quantity, or a fill that cannot be booked, trips `TradingHalt`;
+the order is marked and every later order is rejected until an operator resumes. The audit trail records
+accepted and rejected orders with the data status and the rejection reason.
 
 ---
 
-## 4. Hardware Co-Location & Kernel Bypass
+## 2. API
 
-Production deployment relies on co-located bare-metal servers installed in exchange data centers:
+| Endpoint | Returns |
+| :--- | :--- |
+| `GET /api/execution` | the audit trail: order id, accepted, source data status, rejection reason, fill price, quantity, time |
+| `GET /api/positions` | `halted`, `haltReason`, and positions (symbol, quantity, multiplier, notional) |
+| `GET /api/risk` | engine risk state (from the mmap file) plus the execution book's exposure; 503 while the engine state is unavailable |
 
-- **Equinix FR2 (Frankfurt)**: Primary co-location for Eurex (T7) trading.
-- **Equinix LD4 (Slough, UK)**: Primary co-location for LSEG & Euronext secondary nodes.
-- **Interxion Zurich**: Co-location for SIX Swiss Exchange.
-- **Solarflare EF_VI Network Stack**: Direct user-space ring buffer network access bypassing Linux TCP/IP stack overhead entirely.
+All endpoints require a session cookie or HMAC-signed request and set security headers (see INFRA.md).
+
+---
+
+## 3. Simulations in `gateways/` and `execution/SmartOrderRouter`
+
+| Class | What it really is |
+| :--- | :--- |
+| `execution/SmartOrderRouter` | writes a fixed-layout binary payload loosely modelled on Eurex ETI into a buffer and passes it to the transport. No venue, no routing between venues |
+| `gateways/EobiDecoder` | decodes a made-up 37-byte EOBI-like packet layout into `OrderBookTick`s on the ring buffer |
+| `gateways/EobiMarketDataHandler` | generates random packets in that layout on a thread; opens no socket |
+| `gateways/FixMessageEncoder` | formats FIX 4.4-style New Order Single strings; no session, no counterparty |
+| `gateways/HistoricalReplayEngine` | replays `market_data.csv` into the same ring buffer |
+| `gateways/TwapExecutionAlgo`, `QueuePositionEstimator`, `OrderTicket`, `OrderState` | schedule slicing and queue estimates on paper; not connected to the order manager |
+
+These exist to exercise the decoder and ring buffer. Nothing in this repository connects to Eurex, Euronext,
+LSEG, SIX or Nasdaq, and no latency figure has been measured.
+
+---
+
+## 4. What a real transport would need
+
+An `ExchangeTransport` implementation with: session management and heartbeats, order acknowledgement and
+execution reports (partial fills), cancel and replace, cancel-on-disconnect, reconciliation of positions against
+venue drop-copy, and certification against the venue's test environment. The order manager's fill validation
+and halt-on-mismatch are designed with that in mind, but nothing has been tested against a real venue.

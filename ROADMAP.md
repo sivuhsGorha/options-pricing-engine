@@ -1,71 +1,71 @@
-# Multi-Phase Engineering Roadmap (ROADMAP.md)
+# Roadmap (ROADMAP.md)
 
-> **Status:** this is a wish list. Items are not committed work, and none of the low-latency or multi-venue items exist yet.
-
-
-This document outlines the strategic engineering phases, feature milestones, and scalability goals for expanding the Options Pricing & Quantitative Execution Engine into a global multi-asset platform.
+Dated 2026-10-07. "Done" means merged to `main` with tests and CI green. Everything else is proposed work with
+an honest estimate; nothing below is a promise of a trading venue connection or a performance figure.
 
 ---
 
-## 📅 Roadmap Overview
+## Done
 
-```
-Phase 1 (Completed)          Phase 2 (Q4 2026)            Phase 3 (Q1-Q2 2027)         Phase 4 (Q3-Q4 2027)
-┌───────────────────────┐   ┌───────────────────────┐   ┌───────────────────────┐   ┌───────────────────────┐
-│ Core Analytical Engine│   │ Low-Latency Gateways  │   │ Advanced Derivatives  │   │ Hardware Acceleration │
-│  - Black-Scholes-Merton│  │  - Eurex T7 Binary    │   │  - American Tree/PDE  │   │  - CUDA GPU MonteCarlo│
-│  - Monte Carlo Check  │ ──>  - Euronext Optiq    │ ──>  - SABR/SSVI Surface  │ ──>  - FPGA FIX Parser    │
-│  - Newton-Raphson Vol │   │  - LSEG SOLA / GTP    │   │  - Eurex Prisma Margin│   │  - ML Vol Forecasting │
-│  - Basic Greeks       │   │  - LMAX Disruptor Ring│   │  - Auto Delta Hedging │   │  - Global Multi-Venue │
-└───────────────────────┘   └───────────────────────┘   └───────────────────────┘   └───────────────────────┘
-```
+**Pricing and models.** Black-Scholes-Merton with dividend yield; accurate normal CDF; safeguarded-Newton
+implied volatility; first-, second- and third-order Greeks; Monte Carlo cross-check; trinomial tree;
+Crank-Nicolson PDE with Rannacher start-up, Brennan-Schwartz American exercise and discrete cash dividends;
+SVI, SSVI (closed-form no-arbitrage conditions), SABR (Hagan), Dupire local volatility; OIS/par-yield
+bootstrap with schedules; ACT/365F.
 
----
+**Execution and risk.** Order manager with ordered gates (halt, data policy, portfolio admission, pre-trade
+filter), contract multiplier, exact decimal ticks, bounded audit trail; paper-trading adapter; position
+tracker with fill ledger; Greek alerts with hysteresis that trip a trading halt; historical and Monte Carlo
+VaR, expected shortfall, margin approximation and optimizer.
 
-## 🎯 Detailed Phase Breakdowns
+**Platform.** Spot providers with gates and budgets; data-status model (LIVE/DELAYED/STALE/UNAVAILABLE/
+SIMULATED); mmap shared state with seqlock and correct lifecycle; SPSC ring buffer with correct slot
+release; dashboard with login, sessions, HMAC, CSP, risk, surface and paper-trading panels; CI with tests,
+coverage gate, Docker readiness, frontend lint/build and secret scanning; 336 Java tests, 11 Python tests.
 
-### Phase 1: Core Numerical Engine & Baseline Architecture (Completed)
-- [x] High-precision closed-form Black-Scholes-Merton model with continuous dividend yield ($q$).
-- [x] Independent Monte Carlo cross-validation with standard error and 95% confidence intervals.
-- [x] Hybrid Newton-Raphson / Bisection implied volatility solver with Vega-instability fallback.
-- [x] First-order ($\Delta, \text{Vega}, \Theta, \text{Rho}$) and second-order ($\Gamma$) Greeks.
-- [x] Zero-dependency Java 21 compilation and zero-allocation primitive benchmark.
+**Honesty pass.** Dead code removed, simulations labelled, documentation rewritten to match the code.
 
 ---
 
-### Phase 2: High-Performance Execution & Exchange Connectors (Q4 2026)
-- [ ] **Native Exchange Gateways**:
-  - Implement Eurex T7 ETI (Enhanced Trading Interface) binary socket client.
-  - Implement Euronext Optiq OEG (Order Entry Gateway) binary protocol.
-  - Implement LSEG SOLA binary interface.
-- [ ] **Market Data Engine**:
-  - Eurex EOBI (Enhanced Order Book Interface) parser with L3 order book construction.
-  - Euronext Optiq MDG FAST/FIX unmarshaller.
-- [ ] **Low-Latency Messaging Infrastructure**:
-  - Integrate LMAX Disruptor zero-copy ring buffers for ultra-low latency IPC.
-  - Implement Java 21 `MemorySegment` off-heap memory management to eliminate Garbage Collection pauses.
+## Next: deployment readiness (this week, 2026-10-07 to 2026-10-11)
+
+Goal: a reviewer can clone, run, and trust every number on screen.
+
+1. **Real market data in every field.** Replace the placeholder volume (2000) and +/- 1 cent spreads with
+   provider values where available and `UNAVAILABLE` where not; make the liquidity check skip rather than pass
+   on missing data. Tests for each provider's mapping.
+2. **Surface from the live chain.** Calibrate SSVI (and SABR per expiry) to the loaded option chain with
+   `VolatilitySurfaceCalibrator` and show the fitted surface, the quotes, and the fit error; label the surface
+   `DEMO` whenever the chain is synthetic.
+3. **Non-blocking startup.** Move the option-chain load off the startup path (dashboard up first, chain
+   loads in the background with a status badge), as was done for the feed probe.
+4. **Operator controls in the UI.** Halt / resume trading (authenticated POST), strategy on/off, and the
+   current trigger and size shown in the paper-trading panel.
+5. **Config parser hardening.** Inline comments, clear error messages naming the key and line, and a
+   `--check-config` mode.
+6. **Hermetic tests.** Inject a fake spot provider into the remaining tests that construct `LiveSpotProvider`;
+   ratchet the JaCoCo gate to the measured figure minus five points.
+7. **Operations.** Structured logging (one line per event, no banners), `/api/health` with per-component
+   state, graceful shutdown that closes the mmap and ring buffer, a `docker compose` file with the `.env`
+   contract, and a one-page runbook.
+8. **Frontend tests.** Vitest with React Testing Library for the five components, run in CI.
 
 ---
 
-### Phase 3: Advanced Pricing Models & Enterprise Risk (Q1 - Q2 2027)
-- [ ] **American & Exotic Option Pricing**:
-  - Trinomial Tree / Finite Difference PDE solver for American early exercise options.
-  - Longstaff-Schwartz Monte Carlo (LSMC) for path-dependent Bermudan/American options.
-- [ ] **Arbitrage-Free Volatility Surface**:
-  - Real-time SVI / SSVI parametric volatility surface fitting.
-  - SABR model calibration for equity/index option chains.
-- [ ] **Real-Time Enterprise Risk & Margin**:
-  - Continuous calculation of second/third order Greeks ($\text{Vanna}, \text{Volga}, \text{Charm}, \text{Speed}, \text{Color}$).
-  - Eurex Prisma & SPAN initial margin replication engine.
-  - Hardware/Software Kill Switch triggering automated session drop (COD) and futures delta hedging.
+## Later (one to three months)
+
+- Mark-to-market and Greeks of open positions through the pricer each tick; theta and rho aggregation.
+- Backtester with historical chains (Parquet), expiry settlement, fees, partial fills and impact; Sharpe,
+  Sortino, drawdown duration.
+- A broker paper-trading API as the first real `ExchangeTransport` (acknowledgements, partial fills, cancel),
+  with reconciliation against the broker's positions.
+- Persistent storage for fills and snapshots (SQLite or Postgres) replacing the in-memory stores.
+- Benchmarks (JMH) committed with results before any performance claim is written down.
 
 ---
 
-### Phase 4: Hardware Acceleration & AI-Driven Volatility (Q3 - Q4 2027)
-- [ ] **FPGA Offloading & Co-Location**:
-  - Solarflare EF_VI / OpenOnload bypass integration for sub-microsecond tick-to-trade.
-  - FPGA-accelerated FIX/FAST message decoding and pre-trade risk checks.
-- [ ] **GPU-Accelerated Monte Carlo Engine**:
-  - CUDA / OpenCL kernels pricing 100,000,000 Monte Carlo paths per second.
-- [ ] **Deep Learning Volatility Forecasting**:
-  - LSTM / Transformer neural networks for microsecond implied volatility surface skew prediction.
+## Ideas (no date)
+
+Arbitrage-free SABR, Heston pricing and calibration, Longstaff-Schwartz, full SLV calibration, multi-symbol
+chains and dispersion strategies, exchange connectivity, kernel bypass and CPU isolation (only after a measured
+need), GPU Monte Carlo, learned volatility surfaces.

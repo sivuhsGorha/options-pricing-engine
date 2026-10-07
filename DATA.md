@@ -1,114 +1,94 @@
-# Market Data Infrastructure & Volatility Surface Pipeline (DATA.md)
+# Market Data (DATA.md)
 
-This document specifies the market data ingestion pipeline, real-time tick processing architecture, yield curve bootstrapping, and volatility surface calibration models supporting European derivative venues.
-
----
-
-## 1. Exchange Market Data Integration
-
-The platform consumes raw multicast binary market data directly from co-located exchange network feeds:
-
-```
-┌───────────────────────────────────────────────────────────────────────────────────────────┐
-│                                Exchange Network Multicast Feeds                           │
-│  - Deutsche Börse: Eurex EOBI (Enhanced Order Book Interface)                             │
-│  - Euronext: Optiq MDG (Market Data Gateway - FAST/FIX)                                   │
-│  - LSEG: GTP (Group Ticker Plant)                                                         │
-│  - SIX Swiss: QDF (Quick Data Feed)                                                       │
-└─────────────────────────────────────────────┬─────────────────────────────────────────────┘
-                                              │ Solarflare EF_VI / DPDK
-                                              ▼
-┌───────────────────────────────────────────────────────────────────────────────────────────┐
-│                               Direct NIC Off-Heap Ring Buffer                             │
-└─────────────────────────────────────────────┬─────────────────────────────────────────────┘
-                                              │
-                                              ▼
-┌───────────────────────────────────────────────────────────────────────────────────────────┐
-│                        L3 Order Book Reconstruction & Normalizer                          │
-│     (Decodes ITCH/EOBI messages -> updates zero-copy off-heap limit order book)           │
-└─────────────────────────────────────────────┬─────────────────────────────────────────────┘
-                                              │
-                                              ▼
-┌───────────────────────────────────────────────────────────────────────────────────────────┐
-│                       Real-Time Volatility Surface Calibration                             │
-│          (Continuous non-linear least squares fit for SABR & SSVI parameters)             │
-└───────────────────────────────────────────────────────────────────────────────────────────┘
-```
+Where every number on screen comes from, how fresh it is, and which numbers are not market data at all.
 
 ---
 
-## 2. Volatility Surface Calibration Engine
+## 1. Spot prices
 
-To ensure price consistency and prevent arbitrage across strikes and expirations, the engine continuously fits parametric models to option chain bid/ask mid-prices.
+`web/LiveSpotProvider` queries, in order, Finnhub (real-time quote), Polygon (previous close), Alpha Vantage
+(global quote) and MarketStack (end-of-day), for the configured symbol. Each provider has its own gate: a
+failure or rejection suspends it for a back-off period (5 s for a timeout, 60 s for rate limiting, 15 min for
+rejected credentials), and a request budget stops the app burning a free-tier quota. Refreshes run on a
+background thread; a request never blocks startup or an engine tick.
 
-### 2.1 SSVI (Surface Stochastic Volatility Inspired)
-The SSVI model guarantees absence of static calendar and butterfly arbitrage across the entire volatility surface:
+Each quote carries a **status** (`market/MarketDataStatus`):
 
-$$w(k, \theta_t) = \frac{\theta_t}{2} \left( 1 + \rho \phi(\theta_t) k + \sqrt{(\phi(\theta_t) k + \rho)^2 + (1 - \rho^2)} \right)$$
-
-where:
-- $k = \ln(K / F_T)$ is the log-moneyness.
-- $\theta_t$ is the total ATM variance for maturity $T$.
-- $\rho \in (-1, 1)$ governs the skew angle.
-- $\phi(\theta_t) = \frac{\eta}{\theta_t^\gamma (1 + \theta_t)^{1-\gamma}}$ controls smooth smile curvature.
-
-### 2.2 SABR Model Calibration
-For individual option maturities, the SABR model fits forward volatility dynamics:
-
-$$\sigma_{\text{SABR}}(F, K, T, \alpha, \beta, \rho, \nu)$$
-
-- $\alpha$: Initial volatility.
-- $\beta$: CEV exponent (fixed at 0.5 for equities/indexes or 1.0 for log-normal).
-- $\rho$: Correlation between asset price and volatility.
-- $\nu$: Volatility of volatility (vol-of-vol).
-
-**Fitting Objective**:
-$$\min_{\alpha, \rho, \nu} \sum_{i=1}^M w_i \left( \sigma_{\text{market}}^{(i)} - \sigma_{\text{SABR}}(K_i, \alpha, \rho, \nu) \right)^2$$
-
----
-
-## 3. Interest Rate Curves & Yield Bootstrapping
-
-European options require precise multi-currency discount curves:
-
-| Currency | Rate Benchmark | Curve Construction Method |
+| Status | Meaning | Tradable (default policy) |
 | :--- | :--- | :--- |
-| **EUR** | ESTER (€STR) | OIS Bootstrapping with Monotone Convex Interpolation |
-| **GBP** | SONIA | OIS Bootstrapping with Cubic Spline Interpolation |
-| **CHF** | SARON | Swiss Money Market Swap Curve Bootstrapping |
-| **SEK / NOK** | STIBOR / NIBOR | Deposit & FRA/Futures Swap Curve |
+| `LIVE` | real-time quote with a source timestamp | yes, if under 30 s old |
+| `DELAYED` | delayed or end-of-day price (Polygon, MarketStack, Alpha Vantage outside hours) | yes, if under 30 s old |
+| `STALE` | a LIVE/DELAYED quote whose own timestamp is older than 30 s | never |
+| `UNAVAILABLE` | no provider answered; there is **no price** (the UI shows `--`) | never |
+| `SIMULATED` | no API key configured; a constructed quote around the configured spot | only with `ALLOW_SIMULATED_DATA=true` |
+
+`market/LiveMarketSnapshotAdapter` turns a quote into the `MarketSnapshot` the order manager checks.
+Freshness is judged on the price's own timestamp, not the provider's label.
+
+### Known limits of the spot feed (fix candidates)
+- **Volume** is a placeholder of 2000 for every provider except Polygon. The liquidity check in the pre-trade
+  filter therefore sees a fabricated volume for most quotes.
+- **Bid/ask** for providers that return only a last price are set to last +/- 1 cent. The spread check sees a
+  nominal spread, not the market's.
+- Free tiers: Finnhub and Alpha Vantage are rate limited; Polygon's free plan returns previous close only.
 
 ---
 
-## 4. Corporate Actions & Discrete Dividend Pipeline
+## 2. Option chains
 
-Unlike index options which assume continuous dividend yield ($q$), single-stock European options require discrete dividend adjustment:
+`UnifiedQuantEngine` loads an option chain through `CompositeOptionChainProvider`: `YahooFinanceOptionChain`
+(unofficial endpoint, best effort) for sources listed in `market_data.sources`, then always
+`SyntheticOptionChainProvider` as the fallback. **If Yahoo fails, the chain is synthetic**: Black-Scholes prices
+around `market_data.spot` (default 100) at `volatility.default_volatility`. The startup log line
+`[LIVE MARKET DATA] SPY spot=100.0 | strikes=14` is that fallback. Quotes that are inverted to implied
+volatility use `VolatilitySurfaceCalibrator`, which returns no value rather than a made-up one when a price
+cannot be inverted.
 
-- **Dividend Schedule Ingestion**: Automated ingestion of verified corporate action announcements via market data vendor APIs (Refinitiv / Bloomberg / Exchange Notices).
-- **Forward Price Adjustment**:
-  $$F_T = \left( S_0 - \sum_{i=1}^n D_i e^{-r t_i} \right) e^{r T}$$
-  where $D_i$ is the discrete dividend paid at time $t_i \le T$.
-- **Ex-Date Stock Adjustments**: Automatic adjustment of historical tick databases during stock splits, reverse splits, spin-offs, and rights issues.
+The dashboard's 3D surface does **not** use the chain: `/api/surface3d` evaluates SSVI or SABR with fixed
+parameters at spot 100 (see [DESIGN.md](DESIGN.md)).
 
 ---
 
-## 5. Multi-API Real-Time Ingestion Pipeline
+## 3. Rates and day count
 
-The quantitative engine includes a multi-tiered python market data ingestion pipeline ([`fetch_real_api_data.py`](fetch_real_api_data.py)) connecting to major financial data APIs:
+- `TimeConventions`: one day count, ACT/365 Fixed, used everywhere a date becomes a time.
+- `rates/YieldCurve`: discount factors with log-linear interpolation (piecewise-constant forwards), flat
+  extrapolation of the zero rate before the first pillar and of the forward after the last.
+- `rates/OisCurveBootstrapper`: bootstraps par swap or par yield quotes with a real payment schedule, solving
+  each pillar numerically so interpolated payment dates are consistent.
+- `rates/FredYieldCurve`: US Treasury constant-maturity **par yields** (semiannual bond-equivalent),
+  bootstrapped as coupon bonds; needs `FRED_API_KEY`.
+- `rates/EsterRateProvider`: **only the overnight €STR anchor is market data.** The rest of the curve is a
+  generated shape, `isMarketData()` is false, and it must not be used for anything that matters.
 
-1. **Finnhub.io**: Primary real-time stock quote API (`/v1/quote`).
-2. **Polygon.io**: Secondary fallback previous close & aggregate REST API (`/v2/aggs`).
-3. **Alpha Vantage**: Global quote API (`GLOBAL_QUOTE`).
-4. **MarketStack**: End-of-day market API (`/v1/eod/latest`).
+The engine itself prices with the flat `market_data.risk_free_rate` from config; the curve classes are
+available but not wired into the live pricing path.
 
-```bash
-# Execute market data fetch and generate option chain around live spot
-python fetch_real_api_data.py
-```
+---
 
-The script fetches the current equity spot price (e.g., SPY) and generates a **synthetic** Black-Scholes call/put chain around it, saved to [`market_data.csv`](market_data.csv) for gateway tick replay. Only the spot is real: the option prices are model output, not market quotes.
+## 4. Dividends
 
-- Providers without a configured key are skipped; each request has a 5 second timeout; credentials are never printed.
-- Polygon (previous close) and Marketstack (end-of-day) are not live prices, and the script says so when it uses them.
-- If no provider returns a usable price the script exits with status 2 and leaves `market_data.csv` untouched. It never invents a spot. Pass `--synthetic --spot N` to generate fully synthetic data deliberately.
-- The file is replaced atomically, so a reader never sees a half-written chain.
+`data/YahooDividendProvider` fetches dividend history from an unofficial Yahoo endpoint (cached for hours,
+symbol validated, URL never logged). `data/DividendForecaster` projects each past dividend one year forward
+with the same amount: a naive model that treats special dividends as recurring. The PDE pricer
+(`models/pde/DiscreteDividendPricer`) accepts discrete cash dividends at exact ex-dates; the live engine uses
+the continuous `market_data.dividend_yield`.
+
+---
+
+## 5. The Python fetch script
+
+[`fetch_real_api_data.py`](fetch_real_api_data.py) fetches the current spot from the same four providers
+(keys from `.env` or the environment, 5 s timeouts, credentials never printed) and writes a **synthetic**
+Black-Scholes call/put chain around it to [`market_data.csv`](market_data.csv) for the replay engine. Only
+the spot is real. If no provider answers it exits with status 2 and leaves the file untouched; `--synthetic
+--spot N` generates fully synthetic data on purpose. The file is replaced atomically. Tests:
+`python -m unittest discover -s scripts -p "test_*.py"`.
+
+---
+
+## 6. Not implemented
+
+Exchange multicast feeds (EOBI, Optiq MDG, GTP, ITCH), L3 order book reconstruction, continuous surface
+calibration to live chains, multi-currency curve construction (SONIA, SARON, STIBOR), and a corporate-actions
+feed. The `gateways/` package contains simulations of a binary feed decoder only.
