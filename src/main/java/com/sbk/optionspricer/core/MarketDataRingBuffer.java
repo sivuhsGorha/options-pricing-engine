@@ -24,6 +24,8 @@ public class MarketDataRingBuffer {
     private long p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, p15;
     
     private volatile long consumerSequence = 0;
+    /** Consumer-thread only: true while the tick returned by the last poll() is still being read. */
+    private boolean slotHeld;
     
     @SuppressWarnings("unused")
     private long c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15;
@@ -93,24 +95,37 @@ public class MarketDataRingBuffer {
 
     /**
      * Consumer: Polls for the next available tick.
+     *
+     * <p>The returned tick is a view of a ring slot and stays valid only until the next call to
+     * {@code poll()}: that call is what releases the slot back to the producer. (Releasing it before
+     * returning let the producer overwrite the tick while the caller was still reading it.)
+     * Copy anything needed beyond that point.
+     *
      * @return the tick, or null if empty
      */
     public OrderBookTick poll() {
         long currentConsumerSeq = (long) CONSUMER_SEQ.getOpaque(this);
+        if (slotHeld) {
+            currentConsumerSeq++;
+            CONSUMER_SEQ.setRelease(this, currentConsumerSeq);
+            slotHeld = false;
+        }
         long currentProducerSeq = (long) PRODUCER_SEQ.getAcquire(this);
-        
+
         if (currentProducerSeq > currentConsumerSeq) {
-            OrderBookTick tick = ticks[(int)(currentConsumerSeq & mask)];
-            CONSUMER_SEQ.setRelease(this, currentConsumerSeq + 1);
-            return tick;
+            slotHeld = true;
+            return ticks[(int)(currentConsumerSeq & mask)];
         }
         return null;
     }
 
     /**
-     * Safely closes the underlying off-heap memory arena.
+     * Closes the off-heap memory arena. Safe to call more than once. Stop the producer and consumer first:
+     * touching a tick after this throws.
      */
     public void shutdown() {
-        arena.close();
+        if (arena.scope().isAlive()) {
+            arena.close();
+        }
     }
 }

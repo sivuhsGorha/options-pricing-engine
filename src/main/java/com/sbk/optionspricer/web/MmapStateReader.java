@@ -54,8 +54,9 @@ public class MmapStateReader {
                     this.mappedSegment = channel.map(FileChannel.MapMode.READ_ONLY, 0, FILE_SIZE, arena);
                 }
             }
-        } catch (IOException e) {
-            throw new IllegalStateException("UNAVAILABLE", e);
+        } catch (IOException | RuntimeException e) {
+            arena.close();
+            throw e instanceof IllegalStateException ? (IllegalStateException) e : new IllegalStateException("UNAVAILABLE", e);
         }
     }
 
@@ -103,6 +104,8 @@ public class MmapStateReader {
     }
 
     public void close() {
-        arena.close();
+        if (arena.scope().isAlive()) {
+            arena.close();
+        }
     }
 }

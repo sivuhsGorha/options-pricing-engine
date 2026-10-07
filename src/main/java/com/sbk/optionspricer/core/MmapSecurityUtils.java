@@ -4,7 +4,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.*;
-import java.util.Collections;
+import java.util.ArrayList;
 import java.util.List;
 
 public class MmapSecurityUtils {
@@ -29,7 +29,19 @@ public class MmapSecurityUtils {
                             AclEntryPermission.SYNCHRONIZE
                     )
                     .build();
-            aclView.setAcl(Collections.singletonList(entry));
+            // Keep SYSTEM and Administrators so backup, antivirus and admin cleanup still work; nobody else gets in.
+            List<AclEntry> acl = new ArrayList<>();
+            acl.add(entry);
+            for (String name : new String[]{"NT AUTHORITY\\SYSTEM", "BUILTIN\\Administrators"}) {
+                try {
+                    UserPrincipal principal = path.getFileSystem().getUserPrincipalLookupService().lookupPrincipalByName(name);
+                    acl.add(AclEntry.newBuilder().setType(AclEntryType.ALLOW).setPrincipal(principal)
+                            .setPermissions(AclEntryPermission.values()).build());
+                } catch (IOException | UnsupportedOperationException unavailable) {
+                    // principal not present on this system: owner-only is still safe
+                }
+            }
+            aclView.setAcl(acl);
         } else {
             PosixFileAttributeView posixView = Files.getFileAttributeView(path, PosixFileAttributeView.class);
             if (posixView != null) {

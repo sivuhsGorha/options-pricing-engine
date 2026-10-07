@@ -54,7 +54,8 @@ public class MmapStatePublisher {
             VH_LONG.setVolatile(mappedSegment, 0L, 0L); // Sequence
             VH_LONG.setVolatile(mappedSegment, 8L, MAGIC_VERSION);
             
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
+            arena.close(); // do not leak the arena (and the mapping) when initialization fails
             throw new RuntimeException("Failed to initialize mmap state file", e);
         }
     }
@@ -62,7 +63,7 @@ public class MmapStatePublisher {
     /**
      * Writes risk metrics directly to off-heap memory using a Seqlock for zero torn reads.
      */
-    public void publishRiskState(double netDelta, double netGamma, double netVega, double scenarioMargin) {
+    public synchronized void publishRiskState(double netDelta, double netGamma, double netVega, double scenarioMargin) {
         long seq = (long) VH_LONG.getOpaque(mappedSegment, 0L);
         seq++; // make it odd to signal write in progress
         VH_LONG.setRelease(mappedSegment, 0L, seq);
