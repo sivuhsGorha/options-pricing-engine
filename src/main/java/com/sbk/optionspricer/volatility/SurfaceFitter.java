@@ -208,6 +208,46 @@ public final class SurfaceFitter {
                 parameters, params.satisfiesStaticNoArbitrageConditions() && thetaIncreasing, List.copyOf(warnings), expiries);
     }
 
+    /**
+     * Volatility of a fit at a strike on the fitted slice whose expiry is within {@code sliceMatchDays} of {@code t},
+     * interpolated linearly across the strike grid and clamped at its edges. Empty when no slice matches.
+     */
+    public static java.util.OptionalDouble volAt(Fit fit, double t, double strike, double sliceMatchDays) {
+        if (fit == null || fit.fittedExpiries() == null) {
+            return java.util.OptionalDouble.empty();
+        }
+        int slice = -1;
+        for (int i = 0; i < fit.fittedExpiries().length; i++) {
+            if (Math.abs(fit.fittedExpiries()[i] - t) * TimeConventions.DAYS_PER_YEAR <= sliceMatchDays) {
+                slice = i;
+                break;
+            }
+        }
+        if (slice < 0) {
+            return java.util.OptionalDouble.empty();
+        }
+        int row = -1;
+        for (int i = 0; i < fit.expiries().length; i++) {
+            if (fit.expiries()[i] == fit.fittedExpiries()[slice]) {
+                row = i;
+                break;
+            }
+        }
+        if (row < 0) {
+            return java.util.OptionalDouble.empty();
+        }
+        double[] xs = fit.strikes();
+        double[] ys = fit.vols()[row];
+        if (strike <= xs[0]) return java.util.OptionalDouble.of(ys[0]);
+        for (int j = 1; j < xs.length; j++) {
+            if (strike <= xs[j]) {
+                double w = (strike - xs[j - 1]) / (xs[j] - xs[j - 1]);
+                return java.util.OptionalDouble.of(ys[j - 1] + w * (ys[j] - ys[j - 1]));
+            }
+        }
+        return java.util.OptionalDouble.of(ys[ys.length - 1]);
+    }
+
     private static double ssviVol(MarketPoint mp, double theta, SsviApproximation.SsviParams params) {
         double k = Math.log(mp.strike() / mp.forward());
         return Math.sqrt(SsviApproximation.totalVariance(k, theta, params) / mp.timeToExpiry());

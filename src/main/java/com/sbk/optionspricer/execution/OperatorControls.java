@@ -8,8 +8,12 @@ import java.time.Instant;
  */
 public interface OperatorControls {
 
+    /**
+     * @param mode {@code momentum} (shares on a price move) or {@code vol_spread} (front-month straddle against the surface)
+     * @param note the strategy's latest decision in its own words, or null before it has run
+     */
     record ControlState(boolean halted, String haltReason, Instant haltedAt, boolean strategyEnabled,
-                        String symbol, double triggerPct, int baseQuantity) {}
+                        String symbol, double triggerPct, int baseQuantity, String mode, String note) {}
 
     ControlState state();
 

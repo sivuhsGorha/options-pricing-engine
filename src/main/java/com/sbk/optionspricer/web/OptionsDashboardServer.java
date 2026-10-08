@@ -278,6 +278,8 @@ public class OptionsDashboardServer {
         body.put("symbol", s.symbol());
         body.put("triggerPct", Double.isFinite(s.triggerPct()) ? s.triggerPct() : null);
         body.put("baseQuantity", s.baseQuantity());
+        body.put("mode", s.mode());
+        body.put("note", s.note());
         return body;
     }
 

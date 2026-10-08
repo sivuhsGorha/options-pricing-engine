@@ -62,6 +62,27 @@ public final class ConfigValidator {
                 "must be between 0 and 1 exclusive (0.001 means a 0.1% move)");
         number(config, errors, "strategy.base_quantity", 10.0, v -> v >= 1.0 && v == Math.rint(v),
                 "must be a whole number of at least 1");
+        String mode = config.getString("strategy.mode", "vol_spread");
+        if (!"momentum".equals(mode) && !"vol_spread".equals(mode)) {
+            errors.add("strategy.mode must be momentum or vol_spread (found " + mode + ")");
+        }
+        number(config, errors, "strategy.vol_edge", 0.01, v -> v > 0.0 && v < 0.5, "must be a vol fraction between 0 and 0.5 (0.01 is one point)");
+        number(config, errors, "strategy.hedge_band", 50.0, v -> v >= 0.0, "must be zero or positive (net delta in shares)");
+        number(config, errors, "strategy.max_days_to_expiry", 7.0, v -> v >= 0.0 && v == Math.rint(v), "must be a whole number of days");
+        number(config, errors, "strategy.min_days_to_expiry", 14.0, v -> v >= 1.0 && v == Math.rint(v), "must be a whole number of days");
+        number(config, errors, "strategy.contracts", 1.0, v -> v >= 1.0 && v == Math.rint(v), "must be a whole number of at least 1");
+        number(config, errors, "strategy.option_interval_seconds", 30.0, v -> v >= 1.0, "must be at least 1 second");
+        String reference = config.getString("strategy.reference_model", "SSVI");
+        if (!"SSVI".equalsIgnoreCase(reference) && !"SVI".equalsIgnoreCase(reference)) {
+            errors.add("strategy.reference_model must be SSVI or SVI (found " + reference + ")");
+        }
+        try {
+            if (config.getDouble("strategy.min_days_to_expiry", 14.0) <= config.getDouble("strategy.max_days_to_expiry", 7.0)) {
+                errors.add("strategy.min_days_to_expiry must exceed strategy.max_days_to_expiry, or a straddle would open and close at once");
+            }
+        } catch (ConfigException alreadyReported) {
+            // the individual checks above named the bad value
+        }
         number(config, errors, "execution.contract_multiplier", 1.0, v -> v >= 1.0 && v == Math.rint(v),
                 "must be a whole number of at least 1 (1 for shares, 100 for standard equity options)");
         number(config, errors, "execution.slippage_bps", 25.0, v -> Double.isFinite(v) && v >= 0.0, "must be zero or positive");

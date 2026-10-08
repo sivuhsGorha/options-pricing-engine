@@ -27,8 +27,8 @@ public final class SyntheticOptionChainProvider implements OptionChainProvider {
         this(spot, volatility, riskFreeRate, dividendYield, Clock.systemDefaultZone());
     }
 
-    /** Package-private: lets tests fix "today". */
-    SyntheticOptionChainProvider(double spot, double volatility, double riskFreeRate, double dividendYield, Clock clock) {
+    /** Lets tests and replays fix "today". */
+    public SyntheticOptionChainProvider(double spot, double volatility, double riskFreeRate, double dividendYield, Clock clock) {
         if (!Double.isFinite(spot) || spot <= 0.0) {
             throw new IllegalArgumentException("spot must be finite and positive");
         }

@@ -32,9 +32,16 @@ describe('ExecutionPanel', () => {
         render(<ExecutionPanel positions={noPositions} orders={[]} control={activeControl} valuation={noValuation} onHalt={() => {}} onResume={() => {}} onToggleStrategy={onToggle} />);
 
         expect(screen.getByText('ON')).toBeInTheDocument();
-        expect(screen.getByText(/trigger 0\.100% · size 10/)).toBeInTheDocument();
+        expect(screen.getByText(/MOMENTUM · SPY · trigger 0\.100% · size 10/)).toBeInTheDocument();
         fireEvent.click(screen.getByRole('button', { name: 'STRATEGY OFF' }));
         expect(onToggle).toHaveBeenCalledTimes(1);
+    });
+
+    it('shows the options strategy mode with its latest decision', () => {
+        const volSpread = { ...activeControl, mode: 'vol_spread', note: 'HOLD 2026-11-20 775: market 18.2% vs ref 17.4% (edge +0.80 pts) - edge within the 1.00-point band' };
+        render(<ExecutionPanel positions={noPositions} orders={[]} control={volSpread} valuation={noValuation} onHalt={() => {}} onResume={() => {}} onToggleStrategy={() => {}} />);
+
+        expect(screen.getByText(/VOL SPREAD · SPY · HOLD 2026-11-20 775: market 18\.2% vs ref 17\.4%/)).toBeInTheDocument();
     });
 
     it('lists positions with notional and orders with their fill or rejection reason, newest first', () => {

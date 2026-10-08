@@ -114,6 +114,8 @@ class OperatorControlsApiTest {
         assertEquals("SPY", initial.get("symbol").asText());
         assertEquals(0.001, initial.get("triggerPct").asDouble(), 1e-12);
         assertEquals(10, initial.get("baseQuantity").asInt());
+        assertEquals("momentum", initial.get("mode").asText(), "the console's default mode until a harness reports one");
+        assertTrue(initial.get("note").isNull(), "no strategy decision yet");
 
         HttpResponse<String> halted = call("POST", "/api/control/halt", "{\"reason\":\"manual check\"}", cookie, origin);
         assertEquals(200, halted.statusCode(), halted.body());

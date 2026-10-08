@@ -1,14 +1,39 @@
 # Strategy (STRATEGY.md)
 
-This document describes the one strategy that is implemented and how its signals become paper orders.
-Ideas that are not implemented are listed separately at the end so nobody mistakes them for features.
+This document describes the two strategies that are implemented, how their signals become paper orders, and
+what each one does not do. Ideas that are not implemented are listed separately at the end so nobody mistakes
+them for features. `strategy.mode` selects which one runs; the operator switch stops either.
 
 ---
 
-## 1. The implemented strategy: threshold momentum
+## 1. Vol spread (default): the front-month straddle against the fitted surface
 
-`execution/StrategyExecutionLoop` is the only strategy in the codebase. It is deliberately simple; its job is
-to exercise the order path end to end, not to make money.
+`execution/VolSpreadStrategy`, stepped by the harness every `strategy.option_interval_seconds` (30 s).
+
+- **Signal**: the market implied volatility of the front-month at-the-money straddle (the call and put mids
+  inverted and averaged; the front month is the nearest loaded expiry at least `min_days_to_expiry` out, the
+  strike the one nearest the forward) against the fitted **reference surface** at the same strike and expiry.
+  The reference is the global SSVI fit (`strategy.reference_model`, `SSVI` or `SVI`): a per-slice SVI fit sits on
+  the quotes it was fitted to and carries no signal about them, whereas the three-parameter global surface is a
+  smoothed value the market deviates from. `edge = market IV - reference IV`.
+- **Entry**: edge above `vol_edge` (default 1 vol point) sells `contracts` straddles; below `-vol_edge` buys.
+  One straddle at a time. The second leg is never sent if the first is refused by the order gates.
+- **Exit**: the edge back inside half the band (or through zero), or the expiry within `max_days_to_expiry`.
+- **Hedge**: whenever the valuation's net delta exceeds `hedge_band` shares, shares are traded to flatten it,
+  before the straddle logic runs; after a close this flattens the hedge too.
+- **Honesty**: the quotes are Cboe's 15-minute-delayed feed, so part of any "edge" is staleness; the band must
+  exceed that noise. Every decision (`WAIT`, `HOLD`, `BUY_STRADDLE`, `SELL_STRADDLE`, `CLOSE`, `*_REJECTED`) is
+  recorded with the market and reference vols, the edge and the orders sent or refused, and shown on the
+  paper-trading panel and in the log as `[VOL SPREAD] ...`. Positions go through the same gates as any order;
+  a generated (synthetic) chain yields SIMULATED quotes that the default policy will not trade.
+
+Configuration (defaults): `vol_edge 0.01`, `reference_model SSVI`, `hedge_band 50`, `min_days_to_expiry 14`,
+`max_days_to_expiry 7`, `contracts 1`, `option_interval_seconds 30`.
+
+## 2. Momentum (`strategy.mode: momentum`): shares on a price move
+
+`execution/StrategyExecutionLoop`. It is deliberately simple; its job is to exercise the order path end to
+end, not to make money.
 
 - **Input**: the latest spot price for one symbol (`execution.symbol`, default `SPY`), fed every engine tick
   (10 ms) from `core/QuantSimulationHarness`.
@@ -41,7 +66,7 @@ strategy:
 
 ---
 
-## 2. Backtesting the strategy
+## 3. Backtesting the momentum strategy
 
 `risk/PortfolioBacktestOrchestrator` runs the same loop over a list of `OptionSnapshot` mid prices and reports
 signals, accepted and rejected orders, net quantity, P&L, average slippage and maximum drawdown. `Main` runs it
@@ -49,13 +74,13 @@ once at startup over a four-snapshot demo series. See [BACKTEST.md](BACKTEST.md)
 
 ---
 
-## 3. Research backlog (not implemented)
+## 4. Research backlog (not implemented)
 
 These are candidate strategies, kept here as notes. None has code, tests or data behind it.
 
 - **Volatility arbitrage / skew trading**: trade the gap between market implied volatility and a fitted
   parametric surface (the SSVI and SABR models in `volatility/` would be the fitted side). Needs a real option
-  chain feed with timestamps and a calibration step; the current dashboard surface uses fixed demo parameters.
+  chain feed with timestamps and a calibration step; the vol-spread strategy above is a first, single-strike version of this.
 - **Delta-neutral market making** with an Avellaneda-Stoikov style quote width
   `half-spread = (gamma/2) sigma^2 (T - t) + (1/gamma) ln(1 + gamma/kappa)` and inventory skew. Needs quoting
   and cancel support in a transport; the paper adapter fills every order in full.

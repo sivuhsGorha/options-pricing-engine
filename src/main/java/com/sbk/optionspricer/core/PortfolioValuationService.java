@@ -213,41 +213,9 @@ public final class PortfolioValuationService implements ValuationSource, AutoClo
                 avg, pnl, vol, volSource, delta, gamma, vega, theta, rho, false, null);
     }
 
-    /** Volatility from the fitted slice whose expiry matches the contract's, interpolated linearly in strike (clamped at the grid edges). */
+    /** Volatility from the fitted slice whose expiry matches the contract's, interpolated in strike. */
     static OptionalDouble surfaceVol(SurfaceFitter.Fit fit, double t, double strike) {
-        if (fit == null || fit.fittedExpiries() == null) {
-            return OptionalDouble.empty();
-        }
-        int slice = -1;
-        for (int i = 0; i < fit.fittedExpiries().length; i++) {
-            if (Math.abs(fit.fittedExpiries()[i] - t) * TimeConventions.DAYS_PER_YEAR <= SLICE_MATCH_DAYS) {
-                slice = i;
-                break;
-            }
-        }
-        if (slice < 0) {
-            return OptionalDouble.empty();
-        }
-        int row = -1;
-        for (int i = 0; i < fit.expiries().length; i++) {
-            if (fit.expiries()[i] == fit.fittedExpiries()[slice]) {
-                row = i;
-                break;
-            }
-        }
-        if (row < 0) {
-            return OptionalDouble.empty();
-        }
-        double[] xs = fit.strikes();
-        double[] ys = fit.vols()[row];
-        if (strike <= xs[0]) return OptionalDouble.of(ys[0]);
-        for (int j = 1; j < xs.length; j++) {
-            if (strike <= xs[j]) {
-                double w = (strike - xs[j - 1]) / (xs[j] - xs[j - 1]);
-                return OptionalDouble.of(ys[j - 1] + w * (ys[j] - ys[j - 1]));
-            }
-        }
-        return OptionalDouble.of(ys[ys.length - 1]);
+        return SurfaceFitter.volAt(fit, t, strike, SLICE_MATCH_DAYS);
     }
 
     public synchronized void start() {

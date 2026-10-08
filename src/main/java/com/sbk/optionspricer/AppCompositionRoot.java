@@ -29,6 +29,7 @@ public class AppCompositionRoot {
     public final OptionsDashboardServer dashboard;
     public final com.sbk.optionspricer.core.VolatilitySurfaceService surfaceService;
     public final com.sbk.optionspricer.core.PortfolioValuationService valuationService;
+    public final com.sbk.optionspricer.execution.VolSpreadStrategy volSpreadStrategy;
 
     public AppCompositionRoot() throws Exception {
         this.config = new ConfigManager();
@@ -89,13 +90,27 @@ public class AppCompositionRoot {
         this.surfaceService = new com.sbk.optionspricer.core.VolatilitySurfaceService(engine.getOptionChainProvider(), symbol,
                 riskFreeRate, dividendYield, java.time.Duration.ofSeconds(refreshSeconds), java.time.Clock.systemUTC(), engine::recordChainSnapshots);
         dashboard.setSurfaceSource(surfaceService);
-        dashboard.setOperatorControls(new com.sbk.optionspricer.core.OperatorConsole(tradingHalt, harness, strategyLoop));
+        com.sbk.optionspricer.core.OperatorConsole console = new com.sbk.optionspricer.core.OperatorConsole(tradingHalt, harness, strategyLoop);
+        dashboard.setOperatorControls(console);
         dashboard.setFeedStatusSource(spotProvider::lastKnownFeedStatus);
 
         // Marks the book every few seconds: option Greeks from the fitted surface, P&L against average cost.
         this.valuationService = new com.sbk.optionspricer.core.PortfolioValuationService(positionTracker, surfaceService, surfaceService,
                 () -> marketAdapter.getSnapshot(symbol), riskFreeRate, dividendYield, java.time.Duration.ofSeconds(5), java.time.Clock.systemUTC());
         dashboard.setValuationSource(valuationService);
+
+        // The options strategy: front-month ATM straddle against the fitted surface, hedged with shares.
+        String strategyMode = config.getString("strategy.mode", "vol_spread");
+        com.sbk.optionspricer.execution.VolSpreadStrategy.Params strategyParams = new com.sbk.optionspricer.execution.VolSpreadStrategy.Params(
+                config.getDouble("strategy.vol_edge", 0.01), config.getDouble("strategy.hedge_band", 50.0),
+                (int) config.getDouble("strategy.max_days_to_expiry", 7.0), (int) config.getDouble("strategy.min_days_to_expiry", 14.0),
+                (int) config.getDouble("strategy.contracts", 1.0), config.getString("strategy.reference_model", "SSVI"));
+        this.volSpreadStrategy = new com.sbk.optionspricer.execution.VolSpreadStrategy(orderManager, surfaceService, surfaceService, valuationService,
+                () -> marketAdapter.getSnapshot(symbol), positionTracker, symbol, riskFreeRate, dividendYield, strategyParams, java.time.Clock.systemUTC());
+        harness.setStrategyMode(strategyMode);
+        harness.setOptionStrategy(volSpreadStrategy::step, java.time.Duration.ofSeconds((long) config.getDouble("strategy.option_interval_seconds", 30.0)));
+        console.describeStrategy(harness::getStrategyMode,
+                () -> volSpreadStrategy.lastDecision().map(com.sbk.optionspricer.execution.VolSpreadStrategy.Decision::summary).orElse(null));
     }
 
     /**

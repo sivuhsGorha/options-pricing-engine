@@ -23,6 +23,16 @@ execution:
   slippage_bps: 25                   # paper fills move this far against you
   contract_multiplier: 1             # 100 for standard equity options
 strategy:
+  mode: vol_spread                   # vol_spread: front-month ATM straddle vs the fitted surface; momentum: shares on a price move
+  # vol_spread parameters
+  vol_edge: 0.01                     # open when the straddle's market IV is more than 1 vol point from the reference
+  reference_model: SSVI              # the smoothed global surface (an SVI slice sits on the quotes and carries no signal)
+  hedge_band: 50                     # hedge with shares when |net delta| exceeds this many shares
+  min_days_to_expiry: 14             # never open on an expiry closer than this
+  max_days_to_expiry: 7              # close an open straddle when its expiry is this close
+  contracts: 1                       # straddle size per leg
+  option_interval_seconds: 30        # how often the straddle is evaluated (quotes refresh every few minutes anyway)
+  # momentum parameters
   base_quantity: 10
   trigger_pct: 0.001                 # 0.1% move between two quotes fires one signal
 dashboard:

@@ -82,7 +82,7 @@ class ApiResponseHardeningTest {
 
     private static com.sbk.optionspricer.execution.OperatorControls fixedControls(boolean halted) {
         var state = new com.sbk.optionspricer.execution.OperatorControls.ControlState(halted, halted ? "test" : null,
-                halted ? Instant.now() : null, true, "SPY", 0.001, 10);
+                halted ? Instant.now() : null, true, "SPY", 0.001, 10, "momentum", null);
         return new com.sbk.optionspricer.execution.OperatorControls() {
             @Override public ControlState state() { return state; }
             @Override public ControlState halt(String reason) { return state; }

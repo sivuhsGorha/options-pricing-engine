@@ -13,6 +13,14 @@ public final class OperatorConsole implements OperatorControls {
     private final TradingHalt tradingHalt;
     private final StrategySwitch strategySwitch;
     private final StrategyExecutionLoop strategyLoop;
+    private volatile java.util.function.Supplier<String> modeSupplier = () -> "momentum";
+    private volatile java.util.function.Supplier<String> noteSupplier = () -> null;
+
+    /** Where the mode and the strategy's latest decision come from (the harness and the options strategy). */
+    public void describeStrategy(java.util.function.Supplier<String> mode, java.util.function.Supplier<String> note) {
+        this.modeSupplier = mode == null ? () -> "momentum" : mode;
+        this.noteSupplier = note == null ? () -> null : note;
+    }
 
     public OperatorConsole(TradingHalt tradingHalt, StrategySwitch strategySwitch, StrategyExecutionLoop strategyLoop) {
         if (tradingHalt == null || strategySwitch == null) {
@@ -33,7 +41,9 @@ public final class OperatorConsole implements OperatorControls {
                 strategySwitch.isStrategyEnabled(),
                 strategyLoop == null ? null : strategyLoop.symbol(),
                 strategyLoop == null ? Double.NaN : strategyLoop.triggerPct(),
-                strategyLoop == null ? 0 : strategyLoop.baseQuantity());
+                strategyLoop == null ? 0 : strategyLoop.baseQuantity(),
+                modeSupplier.get(),
+                noteSupplier.get());
     }
 
     @Override

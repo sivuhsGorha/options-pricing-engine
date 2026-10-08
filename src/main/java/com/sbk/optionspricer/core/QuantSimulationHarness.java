@@ -21,6 +21,46 @@ public class QuantSimulationHarness implements com.sbk.optionspricer.execution.S
     private boolean isRunning = false;
     /** Operator switch: when off, prices are still processed for risk but the strategy generates no orders. */
     private volatile boolean strategyEnabled = true;
+    /** {@code momentum} runs the share strategy on every tick; {@code vol_spread} steps the options strategy on its interval. */
+    private volatile String strategyMode = "momentum";
+    private Runnable optionStrategyStep;
+    private long optionStepIntervalMs;
+    private long lastOptionStepMs;
+
+    /** Installs the options strategy, stepped at most every {@code interval} while the switch is on and the mode is {@code vol_spread}. */
+    public synchronized void setOptionStrategy(Runnable step, java.time.Duration interval) {
+        if (step == null || interval == null || interval.isZero() || interval.isNegative()) {
+            throw new IllegalArgumentException("step and a positive interval are required");
+        }
+        this.optionStrategyStep = step;
+        this.optionStepIntervalMs = interval.toMillis();
+        this.lastOptionStepMs = Long.MIN_VALUE / 2; // the first step is due immediately
+    }
+
+    public void setStrategyMode(String mode) {
+        if (mode == null || !(mode.equals("momentum") || mode.equals("vol_spread"))) {
+            throw new IllegalArgumentException("strategy mode must be momentum or vol_spread");
+        }
+        this.strategyMode = mode;
+    }
+
+    public String getStrategyMode() {
+        return strategyMode;
+    }
+
+    /** Runs the options strategy now if it is installed, enabled, selected and due. Returns true when it ran. */
+    public boolean stepOptionStrategyIfDue(long nowMs) {
+        Runnable step;
+        synchronized (this) {
+            step = optionStrategyStep;
+            if (step == null || !strategyEnabled || !"vol_spread".equals(strategyMode) || nowMs - lastOptionStepMs < optionStepIntervalMs) {
+                return false;
+            }
+            lastOptionStepMs = nowMs;
+        }
+        step.run();
+        return true;
+    }
     
     // NaN until a real price arrives: nothing downstream may be fed an invented spot.
     private double currentSpot = Double.NaN;
@@ -118,9 +158,10 @@ public class QuantSimulationHarness implements com.sbk.optionspricer.execution.S
                 // processTick handles its own fatal path; stop the scheduler instead of ticking no-ops.
                 throw new IllegalStateException("Engine stopped fatally, halting scheduler.");
             }
-            if (strategyLoop != null && strategyEnabled) {
+            if (strategyLoop != null && strategyEnabled && "momentum".equals(strategyMode)) {
                 runStrategyStep(spot);
             }
+            stepOptionStrategyIfDue(System.currentTimeMillis());
         } catch (RuntimeException e) {
             if (engine.getState() == UnifiedQuantEngine.EngineState.STOPPED_FATAL) {
                 throw e;

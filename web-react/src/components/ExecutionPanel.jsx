@@ -36,9 +36,12 @@ export default function ExecutionPanel({ positions, orders, control, valuation, 
                 display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap',
                 padding: '6px 8px', fontSize: '12px', borderBottom: '1px solid #1C232D', color: '#9EC1FF'
             }}>
-                <span>
+                <span title={control.note || ''}>
                     STRATEGY <span style={{ color: control.strategyEnabled ? '#00E676' : '#FF9900', fontWeight: 'bold' }}>{control.strategyEnabled ? 'ON' : 'OFF'}</span>
-                    {' · '}{control.symbol || '--'} · trigger {triggerText} · size {control.baseQuantity || '--'}
+                    {' · '}{(control.mode || 'momentum').toUpperCase().replace('_', ' ')} · {control.symbol || '--'}
+                    {control.mode === 'vol_spread'
+                        ? (control.note ? ` · ${control.note}` : ' · waiting for the first evaluation')
+                        : ` · trigger ${triggerText} · size ${control.baseQuantity || '--'}`}
                 </span>
                 <button type="button" className="fkey" onClick={onToggleStrategy}>
                     {control.strategyEnabled ? 'STRATEGY OFF' : 'STRATEGY ON'}
