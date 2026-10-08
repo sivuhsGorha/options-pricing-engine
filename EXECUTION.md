@@ -63,6 +63,7 @@ accepted and rejected orders with the data status and the rejection reason.
 | `POST /api/control/halt` | body `{"reason": "..."}` (optional); trips `TradingHalt`, returns the new state |
 | `POST /api/control/resume` | clears the halt, returns the new state |
 | `POST /api/control/strategy` | body `{"enabled": true\|false}`; switches order generation, returns the new state |
+| `GET /api/valuation` | the mark-to-market of the book: per position mark and its source, average cost, unrealised P&L, implied vol and its source, delta/gamma/vega/theta/rho; portfolio totals; or `ready: false` with the reason |
 
 All endpoints require a session cookie or HMAC-signed request and set security headers (see INFRA.md). The
 state-changing endpoints accept POST only, and a cookie-bearing request must also carry an allowed `Origin`

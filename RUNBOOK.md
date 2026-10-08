@@ -47,8 +47,12 @@ background and the panel badge shows `LOADING` until it does.
 | Surface badge `FIT · CBOE_DELAYED` | normal: the surface is fitted to Cboe's 15-minute-delayed quotes | nothing |
 | Surface badge `FAILED: ...` | fewer than three usable quotes per expiry, or a provider error | the message names the cause |
 | `TRADING HALTED — ...` | an operator pressed HALT, a CRITICAL Greek alert fired, or a fill could not be booked | read the reason; RESUME only after you understand it |
-| No orders for a long time | the strategy fires only on a move of `strategy.trigger_pct` between two quotes | expected with delayed data; lower the trigger in `config.yaml` to exercise the path |
+| No orders for a long time | vol-spread mode trades only when the straddle edge exceeds `strategy.vol_edge` (the strategy row shows the edge); momentum mode only on a move of `strategy.trigger_pct` between two quotes | expected with delayed data; narrow the band or the trigger in `config.yaml` to exercise the path |
 | Startup prints `[CONFIG] ...` and exits 2 | configuration error | the message names the line or key; `--check-config` lists all of them |
+| Strategy row says `WAIT - no loaded expiry at least 14 days out` | the chains have not loaded yet, or every loaded expiry is too close | wait for calibration (the surface badge turns FIT) |
+| Strategy row says `WAIT - ... SIMULATED` or `... disagrees with the live spot` | the chain is the synthetic fallback; the strategy will not trade a generated chain | the surface service retries Cboe within a minute; check `cdn.cboe.com` is reachable |
+| Strategy row says `WAIT - ... quote STALE` | the Cboe document is older than two minutes (outside US hours this is normal) | wait for market hours |
+| Strategy row says `HOLD ... edge within the band` | normal: the market is within `strategy.vol_edge` of the reference surface | nothing; the edge is shown so you can judge the band |
 
 ## Secrets
 

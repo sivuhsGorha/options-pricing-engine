@@ -1,6 +1,9 @@
 import { formatNumber, formatCurrency } from '../lib/format';
 
-export default function RiskPanel({ metrics, displayedRisk, logs }) {
+const timeOf = (ms) => (ms ? new Date(ms).toLocaleTimeString() : '--');
+
+export default function RiskPanel({ metrics, displayedRisk, logs, valuation }) {
+    const valued = valuation && valuation.ready;
     return (
         <div className="panel risk-panel">
             <div className="panel-header">
@@ -28,9 +31,20 @@ export default function RiskPanel({ metrics, displayedRisk, logs }) {
                             <td className="val-amber">NET VEGA</td>
                             <td className="align-right mono val-white" id="val-vega">{formatNumber(displayedRisk.netVega)}</td>
                         </tr>
+                        <tr id="row-theta" title="per year, from the valuation service">
+                            <td className="val-amber">NET THETA</td>
+                            <td className="align-right mono val-white" id="val-theta">{valued ? formatNumber(valuation.netTheta) : '--'}</td>
+                        </tr>
+                        <tr id="row-rho" title="per 1.0 of rate, from the valuation service">
+                            <td className="val-amber">NET RHO</td>
+                            <td className="align-right mono val-white" id="val-rho">{valued ? formatNumber(valuation.netRho) : '--'}</td>
+                        </tr>
                     </tbody>
                 </table>
 
+                <div style={{ color: '#5C6B73', fontSize: '11px', padding: '2px 0 6px' }}>
+                    {valued ? `Greeks from the pricer, valued ${timeOf(valuation.asOf)} at spot ${formatNumber(valuation.spot)}` : 'Greeks: linear until the first valuation'}
+                </div>
                 <div className="margin-block" id="margin-block">
                     <div className="margin-label">SCENARIO MARGIN</div>
                     <div className="margin-value mono" id="val-margin">{formatCurrency(metrics.scenarioMargin)}</div>

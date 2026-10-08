@@ -24,7 +24,8 @@ headers). No latency figure is measured or claimed.
 | Volatility | SVI, SSVI with no-arbitrage conditions and validation, SABR (Hagan), Dupire local vol; a background service fits SSVI and SABR to the option chain (Nelder-Mead least squares) and the dashboard shows the fit's source, quotes, RMSE and parameters |
 | Rates | OIS / par-yield curve bootstrap, ACT/365F day count, optional FRED and ESTR providers |
 | Greeks and risk | First, second and higher-order Greeks, portfolio aggregation, limit alerts that halt trading, margin approximation (not an exchange margin model) |
-| Execution | `OrderManager` (halt check, data-quality policy, portfolio admission, pre-trade limits, order state machine, audit trail), `PositionTracker`, paper-trading fills, contract multiplier, exact decimal ticks |
+| Execution | `OrderManager` (halt check, data-quality policy, portfolio admission, pre-trade limits, order state machine, audit trail), `PositionTracker` with average cost and realised P&L, paper-trading fills, option contracts booked per OCC symbol with their multiplier, exact decimal ticks |
+| Strategy and valuation | Vol-spread strategy: the front-month ATM straddle against the fitted surface, delta-hedged, every decision recorded; a share momentum strategy as the alternative mode. A valuation service marks the book every few seconds with Black-Scholes Greeks at the surface's vol and feeds them to the risk engine, whose alerts use the configured limits |
 | Dashboard | Embedded HTTP API and a Jetty WebSocket feed, HMAC request signing, browser sessions, React frontend with risk, volatility-surface and paper-trading panels |
 | IPC | Engine state published through a memory-mapped file (seqlock) and read by the web layer |
 

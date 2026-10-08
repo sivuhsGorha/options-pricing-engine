@@ -21,6 +21,14 @@ describe('RiskPanel', () => {
         expect(screen.queryByText(/NaN/)).not.toBeInTheDocument();
     });
 
+    it('shows theta and rho from the valuation once the book has been marked', () => {
+        render(<RiskPanel metrics={{}} displayedRisk={{}} logs={[]} valuation={{ ready: true, asOf: 1, spot: 777.2, netTheta: -1234.5, netRho: 56.78 }} />);
+
+        expect(screen.getByText('-1,234.50')).toBeInTheDocument();
+        expect(screen.getByText('56.78')).toBeInTheDocument();
+        expect(screen.getByText(/valued .* at spot 777\.20/)).toBeInTheDocument();
+    });
+
     it('renders the event log entries with their time', () => {
         render(<RiskPanel metrics={{}} displayedRisk={{}} logs={[{ time: '09:00:00', msg: 'OPERATOR: trading halted.' }]} />);
 

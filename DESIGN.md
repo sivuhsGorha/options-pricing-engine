@@ -18,7 +18,8 @@ form says so. The session is a secure, same-site cookie; SIGN OUT ends it.
 (symbol, price, source, status, time), and one badge per market-data provider with its status from
 `/api/health`.
 
-**Left: Portfolio Risk Matrix.** Net delta, gamma, vega (execution book first, engine state as fallback),
+**Left: Portfolio Risk Matrix.** Net delta, gamma, vega (execution book first, engine state as fallback), theta
+and rho from the valuation service with the time and spot they were computed at,
 scenario margin, execution-book notional, the margin optimizer's suggested hedge and reduction, and the
 terminal event log (last 8 lines).
 
@@ -36,8 +37,10 @@ five-parameter fit visibly differ. Warnings (too few quotes, calendar arbitrage 
 the badge tooltip. Each chart has EXPAND / SHRINK.
 
 **Right: Paper Trading.** Trading status (ACTIVE with a HALT button, or HALTED with the reason and a RESUME
-button), the strategy row (ON/OFF switch, symbol, trigger percentage, order size), the position table (symbol,
-quantity, multiplier, notional) and the last 25 orders (time, id, quantity, fill price, `FILLED (<data
+button), the strategy row (ON/OFF switch, mode, and in vol-spread mode the strategy's latest decision in its own words,
+e.g. `HOLD 2026-11-20 775: market 18.2% vs ref 17.4% (edge +0.80 pts) - edge within the 1.00-point band`), the
+valuation line (time, spot and its source, unrealised and realised P&L), the position table (contract such as
+`SPY 20 Nov 26 780 C`, quantity, multiplier, mark with its source in the tooltip, unrealised P&L, notional) and the last 25 orders (time, id, quantity, fill price, `FILLED (<data
 status>)` or `REJECTED: <reason>`), from `/api/positions`, `/api/control` and `/api/execution`. The buttons
 call POST endpoints that require the session cookie and the page's own Origin (see EXECUTION.md); every
 action is written to the event log with its outcome.

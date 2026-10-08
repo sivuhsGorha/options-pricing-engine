@@ -277,7 +277,7 @@ function App() {
       </header>
 
       <div className="layout-grid">
-        <RiskPanel metrics={metrics} displayedRisk={displayedRisk} logs={logs} />
+        <RiskPanel metrics={metrics} displayedRisk={displayedRisk} logs={logs} valuation={valuation} />
 
         <div className="middle-column">
           <ChartPanel
