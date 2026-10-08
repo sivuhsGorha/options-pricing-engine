@@ -63,6 +63,7 @@ Secrets and deployment settings come from the environment or a `.env` file in th
 | `COOKIE_SECURE` | no | force the `Secure` cookie flag when TLS terminates upstream |
 | `HTTP_REQUEST_TIMEOUT_SECONDS` | no | per-request timeout for the dashboard server |
 | `MMAP_STATE_FILE` | no (`data/shm_state.dat`) | engine-to-web shared state file |
+| `DATA_DIR` | no (`data`) | fill ledger (`fills.csv`) and other state that must survive a restart |
 | `ALLOW_SIMULATED_DATA` | no (false) | lets SIMULATED quotes back paper orders |
 | `FINNHUB_KEY`, `POLYGON_API_KEY`, `ALPHA_VANTAGE_KEY`, `MARKETSTACK_KEY` | at least one for live data | spot providers |
 | `FRED_API_KEY` | no | enables the US Treasury par-yield curve |

@@ -42,9 +42,34 @@ public class PositionTracker {
     private double realizedPnl;
     private final FillRecorder fillRecorder;
 
-    /** Live tracker: fills are recorded to the authoritative {@link FillLedger}. */
+    /** In-memory tracker (nothing is recorded); the application passes a {@link FillLedger} and restores from it. */
     public PositionTracker() {
-        this(FillRecorder.LEDGER);
+        this(FillRecorder.NONE);
+    }
+
+    /** A tracker that records to {@code ledger} with its book rebuilt from the ledger's existing fills. */
+    public static PositionTracker restore(FillLedger ledger) {
+        if (ledger == null) {
+            throw new IllegalArgumentException("ledger must not be null");
+        }
+        PositionTracker tracker = new PositionTracker(ledger);
+        tracker.replay(ledger.readAll());
+        return tracker;
+    }
+
+    /** Books past fills without recording them again; used to rebuild the book from a ledger. */
+    public synchronized void replay(java.util.List<FillLedger.Fill> fills) {
+        for (FillLedger.Fill fill : fills) {
+            book(new ExecutionFill(fill.symbol(), fill.quantity(), fill.multiplier(), fill.price()), false);
+        }
+        replayedFills += fills.size();
+    }
+
+    private int replayedFills;
+
+    /** Number of fills rebuilt from the ledger at start. */
+    public synchronized int replayedFills() {
+        return replayedFills;
     }
 
     public PositionTracker(FillRecorder fillRecorder) {
@@ -63,19 +88,25 @@ public class PositionTracker {
         if (fill == null) {
             throw new IllegalArgumentException("fill must not be null");
         }
+        book(fill, true);
+    }
 
+    private void book(ExecutionFill fill, boolean record) {
         String symbol = fill.symbol().trim().toUpperCase();
         PortfolioPosition position = positions.get(symbol);
+        if (position != null && position.getMultiplier() != fill.multiplier()) {
+            throw new IllegalArgumentException("fill multiplier does not match existing position multiplier");
+        }
+        if (record) {
+            // Record first: if the ledger write fails the book is left unchanged, so memory never runs ahead of the record.
+            fillRecorder.record(symbol, fill.quantity(), fill.multiplier(), fill.executionPrice());
+        }
         if (position == null) {
-            position = new PortfolioPosition(symbol, 0, fill.multiplier(), fillRecorder);
+            position = new PortfolioPosition(symbol, 0, fill.multiplier());
             // Linear underlying exposure until a pricer supplies instrument Greeks:
             // +1 delta per unit, no gamma or vega. Exposure then scales as quantity * multiplier * delta.
             position.updateGreeks(1.0, 0.0, 0.0);
             positions.put(symbol, position);
-        }
-
-        if (position.getMultiplier() != fill.multiplier()) {
-            throw new IllegalArgumentException("fill multiplier does not match existing position multiplier");
         }
 
         int before = position.getQuantity();

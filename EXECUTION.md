@@ -21,7 +21,8 @@ StrategyExecutionLoop ──> OrderManager.submit(order, marketSnapshot)
                               │
                               ├─> ConcentrationLimitManager.recordFill
                               ├─> audit trail (bounded, /api/execution)
-                              └─> FillRecorder (FillLedger in live mode, NONE in backtests)
+                              └─> FillRecorder, written before the book changes (FillLedger under DATA_DIR in live mode,
+                                  NONE in backtests); the book is rebuilt from it at start
 ```
 
 **Order** is a record: client id, side, quantity, limit price. **OrderStatus**: `NEW`, `ACCEPTED`, `REJECTED`,

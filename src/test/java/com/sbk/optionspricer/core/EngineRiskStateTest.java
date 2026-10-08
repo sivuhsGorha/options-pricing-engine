@@ -104,7 +104,7 @@ class EngineRiskStateTest {
 
     @Test
     void marginOverloadMatchesTheAggregatorVersion() {
-        PortfolioPosition position = new PortfolioPosition("SPY", 10, 100, FillRecorder.NONE);
+        PortfolioPosition position = new PortfolioPosition("SPY", 10, 100);
         position.updateGreeks(0.5, 0.02, 40.0);
         GreekAggregator aggregator = new GreekAggregator(1e9, 1e9);
         aggregator.addPosition(position);

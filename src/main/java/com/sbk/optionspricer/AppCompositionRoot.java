@@ -47,7 +47,12 @@ public class AppCompositionRoot {
         double triggerPct = config.getDouble("strategy.trigger_pct", 0.001);
         int contractMultiplier = (int) config.getDouble("execution.contract_multiplier", 1.0);
 
-        this.positionTracker = new PositionTracker();
+        // The book is rebuilt from the append-only fill ledger, so positions, cost and realised P&L survive a restart.
+        java.nio.file.Path dataDir = java.nio.file.Path.of(com.sbk.optionspricer.config.EnvironmentConfigLoader.getOrDefault("DATA_DIR", "data"));
+        com.sbk.optionspricer.risk.FillLedger fillLedger = new com.sbk.optionspricer.risk.FillLedger(dataDir.resolve("fills.csv"));
+        this.positionTracker = PositionTracker.restore(fillLedger);
+        System.out.println("[LEDGER] " + fillLedger.path() + ": " + positionTracker.replayedFills() + " fills replayed, "
+                + positionTracker.getPositions().values().stream().filter(p -> p.getQuantity() != 0).count() + " open positions");
         engine.setExposureSource(positionTracker::snapshotExposure);
         this.spotProvider = new LiveSpotProvider();
         this.marketAdapter = new LiveMarketSnapshotAdapter(spotProvider);

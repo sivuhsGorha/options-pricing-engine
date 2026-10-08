@@ -1,17 +1,14 @@
 package com.sbk.optionspricer.risk;
 
 /**
- * Destination for executed fills. Live trading records to the authoritative {@link FillLedger};
- * backtests and simulations use {@link #NONE} so they can never write to it.
+ * Destination for executed fills. The live tracker records to a {@link FillLedger}; backtests, simulations and
+ * tests use {@link #NONE} so they can never write to it.
  */
 @FunctionalInterface
 public interface FillRecorder {
+    /** Called before the fill is booked in memory, so the record never lags what the book shows. */
+    void record(String symbol, int executedQty, int multiplier, double price);
 
-    void record(String symbol, int executedQty, int multiplier);
-
-    /** The authoritative append-only ledger. */
-    FillRecorder LEDGER = FillLedger::recordFill;
-
-    /** Discards fills; for backtests and simulations. */
-    FillRecorder NONE = (symbol, executedQty, multiplier) -> { };
+    /** Discards fills; for backtests, simulations and tests. */
+    FillRecorder NONE = (symbol, executedQty, multiplier, price) -> { };
 }

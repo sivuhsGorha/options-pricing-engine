@@ -12,6 +12,7 @@ services:
       # localhost only, so nothing outside this machine can reach it without a reverse proxy.
       BIND_ADDRESS: 0.0.0.0
       MMAP_STATE_FILE: /app/data/shm_state.dat
+      DATA_DIR: /app/data
     ports:
       - "127.0.0.1:8080:8080"
       - "127.0.0.1:8081:8081"

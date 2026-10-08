@@ -62,8 +62,10 @@ or the logs ever prints a secret; if one leaks (pasted output, screenshot), rota
 
 ## Data
 
-`data/` holds the fill ledger and the mmap state file (`MMAP_STATE_FILE`). It is git-ignored; back it up if
-you care about the paper-trading history. Deleting it loses the ledger and nothing else.
+`DATA_DIR` (default `data/`) holds the fill ledger (`fills.csv`: one row per fill with its price, the record the
+book is rebuilt from at start; the startup log says how many fills were replayed) and the mmap state file
+(`MMAP_STATE_FILE`). It is git-ignored; back it up if you care about the paper-trading history. Deleting
+`fills.csv` starts the book flat. A row the ledger cannot parse stops startup naming the line, on purpose.
 
 ## Upgrade
 

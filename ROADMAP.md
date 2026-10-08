@@ -101,7 +101,7 @@ wider than that noise and the docs must say so.
 
 | # | Task | Done when |
 | :-- | :--- | :--- |
-| C1 | Move the fill ledger out of `target/` (which `mvn clean` deletes) into `data/`, SQLite via the JDK-free `sqlite-jdbc` dependency, with positions rebuilt from it at start | stop, start, and the positions table is unchanged |
+| C1 (done 2026-10-08) | The fill ledger lives under `DATA_DIR` (default `data/`, never `target/`), records the price, and the book (positions, average cost, realised P&L) is rebuilt from it at start. Kept JDK-only (append-only CSV) rather than adding a SQLite dependency: no reviewer-visible gain, and a new download on an unreliable network is a build risk | stop, start, and the positions table is unchanged |
 | C2 | Persist surface snapshots (parameters, RMSE, quotes used) so the surface history can be charted | a "surface history" chart of ATM vol and skew over the day |
 | C3 | Daily P&L and drawdown from the ledger on the dashboard | the risk panel shows realised and unrealised P&L since start |
 

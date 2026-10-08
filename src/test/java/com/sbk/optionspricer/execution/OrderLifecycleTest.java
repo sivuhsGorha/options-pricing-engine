@@ -93,7 +93,7 @@ class OrderLifecycleTest {
 
     @Test
     void bookingFailureAfterExecutionHaltsTradingInsteadOfThrowing() {
-        PositionTracker tracker = new PositionTracker((symbol, qty, multiplier) -> {
+        PositionTracker tracker = new PositionTracker((symbol, qty, multiplier, price) -> {
             throw new RuntimeException("disk full");
         });
         TradingHalt halt = new TradingHalt();
