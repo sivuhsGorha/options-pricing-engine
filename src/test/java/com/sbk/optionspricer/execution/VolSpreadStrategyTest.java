@@ -92,7 +92,31 @@ class VolSpreadStrategyTest {
     }
 
     private static VolSpreadStrategy strategy(PositionTracker tracker, OptionMarketData market, double referenceVol, ValuationSource valuation, Clock clock) {
-        return new VolSpreadStrategy(manager(tracker), market, referenceSurface(referenceVol), valuation, VolSpreadStrategyTest::spot, tracker, "SPY", R, Q, params(), clock);
+        VolSpreadStrategy s = new VolSpreadStrategy(manager(tracker), market, referenceSurface(referenceVol), valuation, VolSpreadStrategyTest::spot, tracker, "SPY", R, Q, params(), clock);
+        s.allowSimulatedChains(true); // these tests drive the strategy with generated chains on purpose
+        return s;
+    }
+
+    @Test
+    void refusesAGeneratedChainAndOneWhoseSpotDisagreesWithTheLiveSpot() {
+        PositionTracker tracker = new PositionTracker(FillRecorder.NONE);
+        VolSpreadStrategy live = new VolSpreadStrategy(manager(tracker), new FlatChains(0.23, TODAY), referenceSurface(0.20), null,
+                VolSpreadStrategyTest::spot, tracker, "SPY", R, Q, params(), Clock.fixed(NOW, ZoneOffset.UTC));
+
+        VolSpreadStrategy.Decision d = live.step();
+
+        assertEquals("WAIT", d.action(), d.summary());
+        assertTrue(d.reason().contains("SIMULATED"), d.reason());
+        assertTrue(tracker.getPositions().isEmpty());
+
+        // a chain built around 100 while the live spot is 777 (the synthetic fallback seen in production)
+        MarketSnapshot farSpot = new MarketSnapshot("SPY", 776.99, 777.01, 777.0, 5000L, NOW, NOW, 0L, "TEST", MarketDataStatus.LIVE);
+        VolSpreadStrategy mismatched = new VolSpreadStrategy(manager(tracker), new FlatChains(0.23, TODAY), referenceSurface(0.20), null,
+                () -> farSpot, tracker, "SPY", R, Q, params(), Clock.fixed(NOW, ZoneOffset.UTC));
+        mismatched.allowSimulatedChains(true);
+        VolSpreadStrategy.Decision m = mismatched.step();
+        assertEquals("WAIT", m.action(), m.summary());
+        assertTrue(m.reason().contains("disagrees with the live spot"), m.reason());
     }
 
     /** The strategy's front month: the first loaded expiry at least min_days_to_expiry (14) out. */
@@ -123,6 +147,7 @@ class VolSpreadStrategyTest {
         // the same book now sees quotes at 20%: the edge is gone
         VolSpreadStrategy reverted = new VolSpreadStrategy(manager(tracker), new FlatChains(0.20, TODAY), referenceSurface(0.20), null,
                 VolSpreadStrategyTest::spot, tracker, "SPY", R, Q, params(), Clock.fixed(NOW, ZoneOffset.UTC));
+        reverted.allowSimulatedChains(true);
         // adopt the open straddle: a fresh strategy object has no memory, so open one through it first
         assertEquals("HOLD", reverted.step().action(), "flat book, no edge: nothing to do");
 
@@ -182,6 +207,7 @@ class VolSpreadStrategyTest {
         PositionTracker tracker = new PositionTracker(FillRecorder.NONE);
         VolSpreadStrategy noSpot = new VolSpreadStrategy(manager(tracker), new FlatChains(0.23, TODAY), referenceSurface(0.20), null,
                 () -> null, tracker, "SPY", R, Q, params(), Clock.fixed(NOW, ZoneOffset.UTC));
+        noSpot.allowSimulatedChains(true);
         assertEquals("WAIT", noSpot.step().action());
 
         TradingHalt halt = new TradingHalt();
@@ -191,6 +217,7 @@ class VolSpreadStrategyTest {
                 tracker, OrderManager.MarketDataPolicy.allowSimulated(), halt, null, 1);
         VolSpreadStrategy refused = new VolSpreadStrategy(haltedManager, new FlatChains(0.23, TODAY), referenceSurface(0.20), null,
                 VolSpreadStrategyTest::spot, tracker, "SPY", R, Q, params(), Clock.fixed(NOW, ZoneOffset.UTC));
+        refused.allowSimulatedChains(true);
 
         VolSpreadStrategy.Decision d = refused.step();
 

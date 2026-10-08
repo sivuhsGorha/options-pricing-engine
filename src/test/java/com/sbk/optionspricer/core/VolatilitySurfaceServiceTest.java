@@ -151,6 +151,53 @@ class VolatilitySurfaceServiceTest {
     }
 
     @Test
+    void aSyntheticFallbackForOneExpiryIsDroppedRatherThanMixedWithMarketChains() {
+        // A venue that serves three expiries at spot 100 but fails on the second one.
+        OptionChainProvider flaky = new OptionChainProvider() {
+            private final SyntheticOptionChainProvider inner = new SyntheticOptionChainProvider(100.0, 0.2, 0.05, 0.0);
+            private int calls;
+
+            @Override
+            public OptionChain getOptionChain(String symbol, LocalDate expiry) {
+                if (++calls == 2) throw new RuntimeException("Cboe returned HTTP 502");
+                return inner.getOptionChain(symbol, expiry);
+            }
+
+            @Override
+            public String sourceName() {
+                return "FAKE_VENUE";
+            }
+        };
+        VolatilitySurfaceService service = service(new CompositeOptionChainProvider(List.of(flaky, new SyntheticOptionChainProvider(55.0, 0.2, 0.05, 0.0))), null);
+
+        service.refresh();
+
+        VolatilitySurfaceSource.Snapshot s = service.latest().orElseThrow();
+        assertEquals("FAKE_VENUE", s.source(), "the synthetic chain is not part of the surface's provenance");
+        assertTrue(s.marketData());
+        assertEquals(100.0, s.spot(), "the spot is the venue's, never the fallback's 55");
+        assertEquals(3, service.loadedExpiries().size(), "the failed expiry is absent, not replaced by a generated one");
+        assertTrue(s.warnings().stream().anyMatch(w -> w.contains("fallback dropped")), s.warnings().toString());
+        assertTrue(s.warnings().stream().anyMatch(w -> w.contains("HTTP 502")), "and the venue failure itself is still reported");
+    }
+
+    @Test
+    void theWorkerRetriesSoonWhileItHasNoMarketDataSurface() {
+        VolatilitySurfaceService failing = service(FAILING, null);
+        assertEquals(VolatilitySurfaceService.RETRY_WHEN_DEGRADED, failing.nextDelay(), "nothing fitted yet: retry soon");
+        failing.refresh();
+        assertEquals(VolatilitySurfaceService.RETRY_WHEN_DEGRADED, failing.nextDelay(), "failed: retry soon");
+
+        VolatilitySurfaceService synthetic = service(new SyntheticOptionChainProvider(), null);
+        synthetic.refresh();
+        assertEquals(VolatilitySurfaceService.RETRY_WHEN_DEGRADED, synthetic.nextDelay(), "a DEMO surface is a fallback: keep trying for market data");
+
+        VolatilitySurfaceService market = service(new CompositeOptionChainProvider(List.of(FAKE_VENUE, new SyntheticOptionChainProvider())), null);
+        market.refresh();
+        assertEquals(Duration.ofMinutes(15), market.nextDelay(), "a market-data surface waits the full interval");
+    }
+
+    @Test
     void theWorkerCalibratesInTheBackgroundAndStops() throws Exception {
         VolatilitySurfaceService service = service(new SyntheticOptionChainProvider(), null);
         service.start();

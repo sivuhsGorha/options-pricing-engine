@@ -50,8 +50,10 @@ valued is reported as such, not as zero. `/api/valuation` returns it; before the
 
 ## 3. Alerts and the trading halt
 
-`risk/GreekAlertManager` compares aggregate delta, gamma and vega with a WARNING and a CRITICAL threshold
-each. State changes fire listeners; a metric de-escalates only after falling below a fraction of its threshold
+`risk/GreekAlertManager` compares aggregate delta, gamma and vega with a WARNING threshold (80% of the
+configured `risk.max_delta`, `risk.max_gamma`, `risk.max_vega`) and a CRITICAL one (the limit itself), the
+same limits the portfolio admission gate enforces. The aggregates are the pricer-derived Greeks the valuation
+service writes into each position, so an options book that breaches a limit halts trading. State changes fire listeners; a metric de-escalates only after falling below a fraction of its threshold
 (hysteresis), so a value oscillating around a limit does not spam alerts. `execution/TradingHalt` is wired to
 the manager at startup: any CRITICAL alert trips the halt, after which every order is rejected until an
 operator calls `resume()`. The halt state and reason are exposed on `/api/positions` and shown in the dashboard.

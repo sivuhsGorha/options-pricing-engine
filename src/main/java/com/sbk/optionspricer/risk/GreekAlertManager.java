@@ -45,6 +45,13 @@ public class GreekAlertManager {
         this.vegaThresholdCritical = vegaCrit;
     }
 
+    public double deltaWarning() { return deltaThresholdWarning; }
+    public double deltaCritical() { return deltaThresholdCritical; }
+    public double gammaWarning() { return gammaThresholdWarning; }
+    public double gammaCritical() { return gammaThresholdCritical; }
+    public double vegaWarning() { return vegaThresholdWarning; }
+    public double vegaCritical() { return vegaThresholdCritical; }
+
     public void addAlertListener(Consumer<GreekAlert> listener) {
         this.alertListeners.add(listener);
     }

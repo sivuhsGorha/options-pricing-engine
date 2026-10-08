@@ -37,8 +37,29 @@ public final class UnifiedQuantEngine {
     private double scenarioMargin = 0.0;
     private volatile java.util.function.Supplier<com.sbk.optionspricer.execution.PositionTracker.PortfolioExposure> exposureSource =
             () -> new com.sbk.optionspricer.execution.PositionTracker.PortfolioExposure(0.0, 0.0, 0.0, 0.0);
-    private final com.sbk.optionspricer.risk.GreekAlertManager greekAlertManager =
-            new com.sbk.optionspricer.risk.GreekAlertManager(50000, 100000, 5000, 10000, 300000, 600000);
+    /** Fraction of a limit at which a WARNING is raised; the CRITICAL alert (which halts trading) fires at the limit itself. */
+    public static final double WARNING_FRACTION = 0.8;
+    private volatile com.sbk.optionspricer.risk.GreekAlertManager greekAlertManager =
+            alertsFor(com.sbk.optionspricer.config.ConfigManager.DEFAULT_MAX_DELTA,
+                    com.sbk.optionspricer.config.ConfigManager.DEFAULT_MAX_GAMMA,
+                    com.sbk.optionspricer.config.ConfigManager.DEFAULT_MAX_VEGA);
+
+    private static com.sbk.optionspricer.risk.GreekAlertManager alertsFor(double maxDelta, double maxGamma, double maxVega) {
+        return new com.sbk.optionspricer.risk.GreekAlertManager(WARNING_FRACTION * maxDelta, maxDelta,
+                WARNING_FRACTION * maxGamma, maxGamma, WARNING_FRACTION * maxVega, maxVega);
+    }
+
+    /**
+     * Sets the Greek alert thresholds from the configured limits: WARNING at {@link #WARNING_FRACTION} of each,
+     * CRITICAL (halt) at the limit, the same numbers the portfolio admission gate enforces. Call before attaching
+     * listeners; it replaces the manager.
+     */
+    public void configureGreekAlerts(double maxDelta, double maxGamma, double maxVega) {
+        if (!(maxDelta > 0.0) || !(maxGamma > 0.0) || !(maxVega > 0.0)) {
+            throw new IllegalArgumentException("alert limits must be positive");
+        }
+        this.greekAlertManager = alertsFor(maxDelta, maxGamma, maxVega);
+    }
 
     /** Supplies the portfolio exposure the engine publishes and monitors (normally {@code PositionTracker::snapshotExposure}). */
     public void setExposureSource(java.util.function.Supplier<com.sbk.optionspricer.execution.PositionTracker.PortfolioExposure> source) {
@@ -87,6 +108,11 @@ public final class UnifiedQuantEngine {
     }
 
     public static UnifiedQuantEngine fromConfig(ConfigManager config, MmapStatePublisher publisher) {
+        return fromConfig(config, publisher, System::exit);
+    }
+
+    /** As {@link #fromConfig(ConfigManager, MmapStatePublisher)} with an injectable fatal-exit handler, for tests. */
+    static UnifiedQuantEngine fromConfig(ConfigManager config, MmapStatePublisher publisher, java.util.function.IntConsumer exitHandler) {
         if (config == null) {
             throw new IllegalArgumentException("config must not be null");
         }
@@ -113,12 +139,18 @@ public final class UnifiedQuantEngine {
         // Always append SyntheticOptionChainProvider as a fallback if real APIs fail
         providers.add(new SyntheticOptionChainProvider(spot, volatility, riskFreeRate, dividendYield));
 
-        return new UnifiedQuantEngine(
+        UnifiedQuantEngine engine = new UnifiedQuantEngine(
                 publisher,
                 new CompositeOptionChainProvider(providers),
                 new HistoricalDataManager(Path.of("data", "historical")),
-                System::exit
+                exitHandler
         );
+        // The alerts that halt trading use the same limits the admission gate enforces, not separate constants.
+        engine.configureGreekAlerts(
+                config.getDouble("risk.max_delta", ConfigManager.DEFAULT_MAX_DELTA),
+                config.getDouble("risk.max_gamma", ConfigManager.DEFAULT_MAX_GAMMA),
+                config.getDouble("risk.max_vega", ConfigManager.DEFAULT_MAX_VEGA));
+        return engine;
     }
 
     public EngineState getState() { return engineState; }

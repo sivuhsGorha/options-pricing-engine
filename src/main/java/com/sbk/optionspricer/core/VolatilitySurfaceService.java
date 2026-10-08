@@ -26,6 +26,16 @@ import java.util.function.Supplier;
  */
 public final class VolatilitySurfaceService implements VolatilitySurfaceSource, com.sbk.optionspricer.market.OptionMarketData, AutoCloseable {
 
+    /** After a failed refresh or a synthetic fallback the worker retries this soon, not after the full interval. */
+    static final Duration RETRY_WHEN_DEGRADED = Duration.ofSeconds(60);
+
+    /** How long the worker waits before the next refresh: the full interval only once a market-data surface exists. */
+    Duration nextDelay() {
+        Snapshot current = latest;
+        boolean healthy = status.state() == State.READY && current != null && current.marketData();
+        return healthy ? refreshInterval : (refreshInterval.compareTo(RETRY_WHEN_DEGRADED) < 0 ? refreshInterval : RETRY_WHEN_DEGRADED);
+    }
+
     /** Target tenors in days; the listed expiry nearest to each is used, without duplicates. */
     static final int[] TARGET_TENOR_DAYS = {30, 60, 90, 180};
     static final int MIN_DAYS_TO_EXPIRY = 7;
@@ -94,6 +104,21 @@ public final class VolatilitySurfaceService implements VolatilitySurfaceSource, 
                 warnings.add("expiry " + expiry + ": " + rootMessage(e));
             }
         }
+        // Never fit across a generated chain and market chains: a synthetic fallback is built around a nominal
+        // price (100), so one of them among real chains at 777 makes the surface, the spot and every quote wrong.
+        if (sourcedChains.stream().anyMatch(OptionChainProvider.SourcedChain::marketData)
+                && sourcedChains.stream().anyMatch(s -> !s.marketData())) {
+            for (OptionChainProvider.SourcedChain dropped : sourcedChains.stream().filter(s -> !s.marketData()).toList()) {
+                warnings.add("expiry " + dropped.chain().expiry() + ": " + dropped.source()
+                        + " fallback dropped because the other expiries have market data");
+            }
+            sourcedChains.removeIf(s -> !s.marketData());
+            chains.clear();
+            sourcedChains.forEach(s -> chains.add(s.chain()));
+            sources.clear();
+            sourcedChains.forEach(s -> sources.add(s.source()));
+            marketData = true;
+        }
         if (chains.isEmpty()) {
             status = new Status(State.FAILED, "no option chain for " + symbol + (warnings.isEmpty() ? "" : ": " + warnings.iterator().next()), now);
             return;
@@ -129,7 +154,7 @@ public final class VolatilitySurfaceService implements VolatilitySurfaceSource, 
                     status = new Status(State.FAILED, "calibration failed: " + rootMessage(t), clock.instant());
                 }
                 try {
-                    Thread.sleep(refreshInterval.toMillis());
+                    Thread.sleep(nextDelay().toMillis());
                 } catch (InterruptedException interrupted) {
                     Thread.currentThread().interrupt();
                     return;

@@ -86,6 +86,15 @@ public final class VolSpreadStrategy {
     private final Params params;
     private volatile Clock clock;
 
+    /** The chain's own underlying price may differ from the live spot by at most this fraction before the chain is distrusted. */
+    static final double MAX_SPOT_DISAGREEMENT = 0.10;
+    /** Lets tests drive the strategy with generated chains; the live wiring leaves it false. */
+    private volatile boolean allowSimulated;
+
+    void allowSimulatedChains(boolean allow) {
+        this.allowSimulated = allow;
+    }
+
     private String openCall;
     private String openPut;
     private LocalDate openExpiry;
@@ -229,7 +238,14 @@ public final class VolSpreadStrategy {
         }
         double t = TimeConventions.yearFraction(today, front);
         double forward = spot.last() * Math.exp((riskFreeRate - dividendYield) * t);
-        OptionalDouble atm = chains.chain(front).map(c -> nearestStrike(c, forward)).orElse(OptionalDouble.empty());
+        Optional<OptionChain> chain = chains.chain(front);
+        if (chain.isPresent() && Math.abs(chain.get().spot() - spot.last()) > MAX_SPOT_DISAGREEMENT * spot.last()) {
+            // A generated fallback chain is built around a nominal price; its strikes mean nothing against the live spot.
+            return record(new Decision(now, "WAIT", String.format(Locale.ROOT,
+                    "chain underlying price %.2f disagrees with the live spot %.2f; not a usable chain", chain.get().spot(), spot.last()),
+                    front, Double.NaN, Double.NaN, Double.NaN, Double.NaN, 0, orders));
+        }
+        OptionalDouble atm = chain.map(c -> nearestStrike(c, forward)).orElse(OptionalDouble.empty());
         if (atm.isEmpty()) {
             return record(new Decision(now, "WAIT", "no strikes in the " + front + " chain", front, Double.NaN, Double.NaN, Double.NaN, Double.NaN, 0, orders));
         }
@@ -300,6 +316,10 @@ public final class VolSpreadStrategy {
             }
             if (quote.status() == MarketDataStatus.STALE || quote.status() == MarketDataStatus.UNAVAILABLE) {
                 lastEdgeProblem = leg + ": quote " + quote.status();
+                return null;
+            }
+            if (quote.status() == MarketDataStatus.SIMULATED && !allowSimulated) {
+                lastEdgeProblem = leg + ": the chain is generated (SIMULATED), not market data; not trading on it";
                 return null;
             }
             OptionalDouble iv = VolatilitySurfaceCalibrator.impliedVolatility(spot, strike, t, riskFreeRate, dividendYield,
