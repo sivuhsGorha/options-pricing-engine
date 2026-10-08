@@ -110,7 +110,7 @@ wider than that noise and the docs must say so.
 | # | Task | Done when |
 | :-- | :--- | :--- |
 | D1 | `docs/dashboard.png` captured by you; README header image and a 30-second "what you are looking at" caption | the GitHub landing page shows the fitted surface |
-| D2 | README "How it works" diagram: Cboe chain -> fitter -> surface -> strategy -> order gates -> paper fills -> risk | one picture a reviewer can follow |
+| D2 (done 2026-10-08) | README "How it works": a Mermaid flow (GitHub renders it) from the Cboe chain through the fitter, surface, strategy, order gates, paper fills, ledger, valuation and risk engine to the dashboard, with a six-step walk-through | one picture a reviewer can follow |
 | D3 | Tag `v1.0.0` with release notes generated from this file | the release page lists what is and is not implemented |
 
 ### Your actions

@@ -21,7 +21,7 @@ headers). No latency figure is measured or claimed.
 | Closed-form pricing | Black-Scholes-Merton with continuous dividend yield; accurate normal CDF; safeguarded Newton implied-volatility solver |
 | Early exercise | Trinomial tree; Crank-Nicolson PDE (Rannacher start, Brennan-Schwartz) in log-spot; discrete-dividend PDE pricer |
 | Monte Carlo | European Monte Carlo pricer used as a cross-check for the closed form; VaR / expected shortfall calculators |
-| Volatility | SVI, SSVI with no-arbitrage conditions and validation, SABR (Hagan), Dupire local vol; a background service fits SSVI and SABR to the option chain (Nelder-Mead least squares) and the dashboard shows the fit's source, quotes, RMSE and parameters |
+| Volatility | SVI, SSVI with no-arbitrage conditions and validation, SABR (Hagan), Dupire local vol; a background service fits SSVI, raw SVI and SABR to the same option-chain quotes (Nelder-Mead least squares) and the dashboard shows the fit's source, quotes, RMSE and parameters |
 | Rates | OIS / par-yield curve bootstrap, ACT/365F day count, optional FRED and ESTR providers |
 | Greeks and risk | First, second and higher-order Greeks, portfolio aggregation, limit alerts that halt trading, margin approximation (not an exchange margin model) |
 | Execution | `OrderManager` (halt check, data-quality policy, portfolio admission, pre-trade limits, order state machine, audit trail), `PositionTracker` with average cost and realised P&L, paper-trading fills, option contracts booked per OCC symbol with their multiplier, exact decimal ticks |
@@ -37,12 +37,79 @@ placeholder. See [DATA.md](DATA.md).
 
 ---
 
+## How it works
+
+One pass through the system, from a quote to a risk number. Every box is a class you can open; nothing in
+the picture is a placeholder.
+
+```mermaid
+flowchart LR
+    subgraph feeds [Market data]
+        CBOE[Cboe delayed option chain<br/>CboeOptionChain]
+        SPOT[Spot providers<br/>LiveSpotProvider]
+    end
+    subgraph surface [Surface]
+        FIT[SurfaceFitter<br/>SSVI / SVI / SABR by Nelder-Mead]
+        SVC[VolatilitySurfaceService<br/>refits on a schedule, labels provenance]
+    end
+    subgraph trading [Paper trading]
+        STRAT[VolSpreadStrategy<br/>front-month ATM straddle vs the fitted surface]
+        OM[OrderManager<br/>halt, data policy, admission, pre-trade limits]
+        PAPER[PaperTradingExecutionAdapter<br/>simulated fill with slippage]
+        BOOK[PositionTracker<br/>average cost, realised PnL]
+    end
+    subgraph risk [Risk]
+        VAL[PortfolioValuationService<br/>marks every 5 s, Greeks from the surface]
+        ENG[UnifiedQuantEngine<br/>limits, alerts, halt]
+    end
+    subgraph disk [data/ survives a restart]
+        LEDGER[(fills.csv)]
+        PNL[(pnl_history.csv)]
+        SHIST[(surface_history.csv)]
+    end
+    UI[Dashboard<br/>React + HTTP API + WebSocket]
+
+    CBOE --> FIT --> SVC
+    SVC --> STRAT
+    SPOT --> STRAT
+    STRAT -->|orders| OM --> PAPER -->|fills| BOOK
+    BOOK <-->|record first, rebuild at start| LEDGER
+    BOOK --> VAL
+    SVC --> VAL
+    VAL --> ENG
+    VAL -->|sampled| PNL
+    SVC -->|each calibration| SHIST
+    ENG -->|critical alert| OM
+    SVC & VAL & ENG & BOOK & PNL & SHIST --> UI
+```
+
+1. **Chain in.** The Cboe delayed feed supplies every listed expiry of the symbol; the service picks the
+   expiries nearest 1, 2, 3 and 6 months, inverts the out-of-the-money two-sided quotes to implied volatility,
+   and fits three surfaces to the same points. Each fit reports its RMSE and parameters, and the result says
+   where the chains came from. A synthetic fallback is labelled `DEMO` and is never mixed with market chains.
+2. **Strategy.** Every 30 s the vol-spread strategy compares the front-month ATM straddle's market vol with the
+   SSVI reference. Outside the edge band it sells or buys the straddle and hedges the delta with shares; it
+   refuses stale or simulated quotes and records every decision with its reason.
+3. **Order gates.** An order passes the halt check, the data-quality policy (fresh LIVE or DELAYED quotes
+   only), portfolio admission (projected Greeks against the limits), the pre-trade filter (size, notional,
+   concentration, liquidity), and only then the paper adapter, which fills with slippage.
+4. **Book.** A fill is written to the ledger before the book changes, so memory never runs ahead of the record;
+   at start the book, average cost and realised P&L are rebuilt from the ledger.
+5. **Risk.** The valuation service marks each position at its quote mid (or model price) with Greeks from the
+   fitted surface, pushes them into the positions, and samples P&L for the day's figure and drawdown. The risk
+   engine checks the limits and a critical breach halts trading.
+6. **Dashboard.** The surface (shape and fit error), smile and term structure, the surface's ATM vol and skew
+   over the day, the strategy's last decision, the order tape, positions with marks and P&L, and the operator
+   controls (halt, resume, strategy on/off).
+
+---
+
 ## Quick start
 
 Prerequisites: JDK 25, Maven 3.9+, and Node 22 only if you rebuild the frontend.
 
 ```bash
-# Build and test (336 tests, JaCoCo coverage gate)
+# Build and test (447 tests, JaCoCo coverage gate)
 mvn clean verify
 
 # Configuration: copy config.example.yaml to config.yaml, and put secrets in .env (never committed):
@@ -67,7 +134,7 @@ docker compose up --build -d
 
 Sign in with `OPERATOR_PASSWORD`. The paper-trading panel shows positions and every order with its fill or
 rejection reason, with HALT / RESUME and a strategy switch. `run_all.ps1` runs the same checks as CI locally:
-the Java build with 387 tests and the coverage gate, the Python tests, and the frontend lint, 29 tests and build.
+the Java build with 447 tests and the coverage gate, the Python tests, and the frontend lint, 47 tests and build.
 
 ---
 
