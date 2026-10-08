@@ -95,6 +95,11 @@ public class AppCompositionRoot {
         this.surfaceService = new com.sbk.optionspricer.core.VolatilitySurfaceService(engine.getOptionChainProvider(), symbol,
                 riskFreeRate, dividendYield, java.time.Duration.ofSeconds(refreshSeconds), java.time.Clock.systemUTC(), engine::recordChainSnapshots);
         dashboard.setSurfaceSource(surfaceService);
+        // Every calibration is recorded so ATM vol and skew can be charted over the day, across restarts.
+        com.sbk.optionspricer.volatility.SurfaceHistory surfaceHistory = new com.sbk.optionspricer.volatility.SurfaceHistory(dataDir.resolve("surface_history.csv"));
+        surfaceService.setSnapshotListener(surfaceHistory);
+        dashboard.setSurfaceHistory(surfaceHistory);
+        System.out.println("[SURFACE HISTORY] " + surfaceHistory.path() + ": " + surfaceHistory.size() + " model calibrations on file");
         com.sbk.optionspricer.core.OperatorConsole console = new com.sbk.optionspricer.core.OperatorConsole(tradingHalt, harness, strategyLoop);
         dashboard.setOperatorControls(console);
         dashboard.setFeedStatusSource(spotProvider::lastKnownFeedStatus);
@@ -103,6 +108,11 @@ public class AppCompositionRoot {
         this.valuationService = new com.sbk.optionspricer.core.PortfolioValuationService(positionTracker, surfaceService, surfaceService,
                 () -> marketAdapter.getSnapshot(symbol), riskFreeRate, dividendYield, java.time.Duration.ofSeconds(5), java.time.Clock.systemUTC());
         dashboard.setValuationSource(valuationService);
+        // The valuation is sampled once a minute (and whenever realised P&L changes) for the day's P&L and drawdown.
+        com.sbk.optionspricer.execution.PnlHistory pnlHistory = new com.sbk.optionspricer.execution.PnlHistory(dataDir.resolve("pnl_history.csv"), java.time.Duration.ofSeconds(60));
+        valuationService.setValuationListener(pnlHistory);
+        dashboard.setPnlHistory(pnlHistory);
+        System.out.println("[PNL HISTORY] " + pnlHistory.path() + ": " + pnlHistory.size() + " samples on file");
 
         // The options strategy: front-month ATM straddle against the fitted surface, hedged with shares.
         String strategyMode = config.getString("strategy.mode", "vol_spread");

@@ -345,7 +345,7 @@
   flex: 1;
 }
 
-#volatilityChart3D, #volatilityChartSmile, #volatilityChartTerm {
+#volatilityChart3D, #volatilityChartSmile, #volatilityChartTerm, #volatilityChartHistory {
   width: 100%;
   height: 100%;
 }

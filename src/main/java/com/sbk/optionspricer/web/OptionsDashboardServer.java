@@ -101,6 +101,126 @@ public class OptionsDashboardServer {
         this.valuationSource = source;
     }
 
+    private volatile com.sbk.optionspricer.volatility.SurfaceHistory surfaceHistory;
+    private volatile com.sbk.optionspricer.execution.PnlHistory pnlHistory;
+
+    /** Supplies the calibration record for /api/surface/history. Call before {@link #start()}. */
+    public void setSurfaceHistory(com.sbk.optionspricer.volatility.SurfaceHistory history) {
+        this.surfaceHistory = history;
+    }
+
+    /** Supplies the sampled P&L record for /api/pnl. Call before {@link #start()}. */
+    public void setPnlHistory(com.sbk.optionspricer.execution.PnlHistory history) {
+        this.pnlHistory = history;
+    }
+
+    static final int DEFAULT_HISTORY_HOURS = 24;
+    static final int MAX_HISTORY_HOURS = 24 * 7;
+    /** Longest series sent to the browser; longer ones are thinned evenly, keeping the last point. */
+    static final int MAX_SERIES_POINTS = 400;
+
+    /** The /api/surface/history body: one point per calibration of {@code model} in the last {@code hours}. */
+    static java.util.Map<String, Object> surfaceHistoryBody(com.sbk.optionspricer.volatility.SurfaceHistory history, String model, int hours, java.time.Instant now) {
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("model", model);
+        body.put("hours", hours);
+        body.put("definitions", java.util.Map.of(
+                "atmVol", "fitted vol at strike = spot on the front fitted expiry",
+                "skew", "vol at 0.95 spot minus vol at 1.05 spot on the front fitted expiry"));
+        java.util.List<java.util.Map<String, Object>> points = new java.util.ArrayList<>();
+        body.put("points", points);
+        if (history == null) {
+            body.put("ready", false);
+            body.put("status", "no surface history configured");
+            return body;
+        }
+        java.util.List<com.sbk.optionspricer.volatility.SurfaceHistory.Entry> entries = history.since(now.minus(java.time.Duration.ofHours(hours)), model);
+        body.put("ready", !entries.isEmpty());
+        body.put("status", entries.isEmpty() ? "no " + model + " calibration recorded in the last " + hours + " h; one point is written per calibration" : "");
+        body.put("count", entries.size());
+        for (var e : entries) {
+            java.util.Map<String, Object> p = new java.util.LinkedHashMap<>();
+            p.put("at", e.at().toEpochMilli());
+            p.put("spot", Json.round(e.spot(), 2));
+            p.put("source", e.source());
+            p.put("marketData", e.marketData());
+            p.put("quotesUsed", e.quotesUsed());
+            p.put("rmse", finiteOrNull(e.rmse(), 6));
+            p.put("frontExpiry", Json.round(e.frontExpiry(), 4));
+            p.put("atmVol", finiteOrNull(e.atmVol(), 5));
+            p.put("skew", finiteOrNull(e.skew(), 5));
+            points.add(p);
+        }
+        if (!entries.isEmpty()) {
+            var last = entries.get(entries.size() - 1);
+            body.put("symbol", last.symbol());
+            body.put("latestAt", last.at().toEpochMilli());
+        }
+        return body;
+    }
+
+    /** The /api/pnl body: totals since the ledger began and today's P&L and drawdown, from the sampled record. */
+    static java.util.Map<String, Object> pnlBody(com.sbk.optionspricer.execution.PnlHistory history, java.time.Instant now) {
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        if (history == null) {
+            body.put("ready", false);
+            body.put("status", "no P&L history configured");
+            return body;
+        }
+        var summary = history.summary(now);
+        if (summary.isEmpty()) {
+            body.put("ready", false);
+            body.put("status", "no valuation recorded yet");
+            return body;
+        }
+        var s = summary.get();
+        body.put("ready", true);
+        body.put("asOf", s.asOf().toEpochMilli());
+        body.put("firstSampleAt", s.firstSampleAt().toEpochMilli());
+        body.put("realizedPnl", Json.round(s.realized(), 2));
+        body.put("unrealizedPnl", Json.round(s.unrealized(), 2));
+        body.put("totalPnl", Json.round(s.total(), 2));
+        java.util.Map<String, Object> day = new java.util.LinkedHashMap<>();
+        day.put("date", s.day().toString());
+        day.put("timezone", com.sbk.optionspricer.execution.PnlHistory.TRADING_DAY_ZONE.getId());
+        day.put("start", s.dayStart().toEpochMilli());
+        day.put("baseline", Json.round(s.dayBaseline(), 2));
+        day.put("baselineIsPreviousClose", s.baselineIsPreviousClose());
+        day.put("pnl", Json.round(s.dayPnl(), 2));
+        day.put("peak", Json.round(s.dayPeak(), 2));
+        day.put("trough", Json.round(s.dayTrough(), 2));
+        day.put("maxDrawdown", Json.round(s.dayMaxDrawdown(), 2));
+        day.put("sampleCount", s.today().size());
+        java.util.List<java.util.Map<String, Object>> samples = new java.util.ArrayList<>();
+        for (var sample : thin(s.today(), MAX_SERIES_POINTS)) {
+            java.util.Map<String, Object> row = new java.util.LinkedHashMap<>();
+            row.put("at", sample.at().toEpochMilli());
+            row.put("total", Json.round(sample.total(), 2));
+            row.put("realized", Json.round(sample.realized(), 2));
+            row.put("unrealized", Json.round(sample.unrealized(), 2));
+            samples.add(row);
+        }
+        day.put("samples", samples);
+        body.put("day", day);
+        return body;
+    }
+
+    /** Every {@code step}th element so at most about {@code max} remain, always keeping the last one. */
+    static <T> java.util.List<T> thin(java.util.List<T> list, int max) {
+        if (list.size() <= max) {
+            return list;
+        }
+        int step = (int) Math.ceil(list.size() / (double) max);
+        java.util.List<T> out = new java.util.ArrayList<>(max + 1);
+        for (int i = 0; i < list.size(); i += step) {
+            out.add(list.get(i));
+        }
+        if (out.get(out.size() - 1) != list.get(list.size() - 1)) {
+            out.add(list.get(list.size() - 1));
+        }
+        return out;
+    }
+
     private static Object finiteOrNull(double v, int places) {
         return Double.isFinite(v) ? Json.round(v, places) : null;
     }
@@ -603,6 +723,30 @@ public class OptionsDashboardServer {
             applySecurityHeaders(exchange, true, isSecureRequest(exchange));
             if (!authorizeApi(exchange)) return;
             sendJson(exchange, 200, valuationBody());
+        }));
+
+        server.createContext("/api/surface/history", guarded(exchange -> {
+            applySecurityHeaders(exchange, true, isSecureRequest(exchange));
+            if (!authorizeApi(exchange)) return;
+            String rawQuery = exchange.getRequestURI().getRawQuery();
+            String requested = queryParam(rawQuery, "model");
+            String model = requested == null || "SSVI".equals(requested) ? "SSVI" : "SVI".equals(requested) ? "SVI" : "SABR";
+            int hours = DEFAULT_HISTORY_HOURS;
+            String hoursParam = queryParam(rawQuery, "hours");
+            if (hoursParam != null) {
+                try {
+                    hours = Math.max(1, Math.min(MAX_HISTORY_HOURS, Integer.parseInt(hoursParam.trim())));
+                } catch (NumberFormatException ignored) {
+                    // not a number: the default window
+                }
+            }
+            sendJson(exchange, 200, surfaceHistoryBody(surfaceHistory, model, hours, java.time.Instant.now()));
+        }));
+
+        server.createContext("/api/pnl", guarded(exchange -> {
+            applySecurityHeaders(exchange, true, isSecureRequest(exchange));
+            if (!authorizeApi(exchange)) return;
+            sendJson(exchange, 200, pnlBody(pnlHistory, java.time.Instant.now()));
         }));
 
         server.createContext("/api/control", guarded(exchange -> {

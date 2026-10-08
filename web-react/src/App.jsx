@@ -2,7 +2,8 @@ import { useEffect, useState, useRef } from 'react';
 import './App.css';
 import { secureFetch, securePost } from './lib/api';
 import { formatNumber } from './lib/format';
-import { renderSurfaceCharts } from './lib/surfaceCharts';
+import { renderSurfaceCharts, renderHistoryChart } from './lib/surfaceCharts';
+import { surfaceHistorySummary } from './lib/history';
 import { surfaceLabel, surfaceTone } from './lib/surfaceLabel';
 import LoginForm from './components/LoginForm';
 import DataBanner from './components/DataBanner';
@@ -33,6 +34,8 @@ function App() {
   const [logs, setLogs] = useState([{ time: '09:00:00', msg: 'AURA-OPT Unified Engine online. Mmap IPC active.' }]);
   const [surfaceData, setSurfaceData] = useState(null);
   const [otherSurfaces, setOtherSurfaces] = useState([]);
+  const [surfaceHistory, setSurfaceHistory] = useState(null);
+  const [pnl, setPnl] = useState({ ready: false });
   const [expandedChart, setExpandedChart] = useState(null);
   const [cmdText, setCmdText] = useState('VOLS <GO>');
   const [surfaceModel, setSurfaceModel] = useState('SSVI'); // 'SSVI' | 'SABR' | 'FREE_SABR'
@@ -40,6 +43,7 @@ function App() {
   const chartRef3D = useRef(null);
   const chartRefSmile = useRef(null);
   const chartRefTerm = useRef(null);
+  const chartRefHistory = useRef(null);
 
   const [spotInfo, setSpotInfo] = useState({ symbol: 'SPY', spotPrice: null, source: '', status: 'UNAVAILABLE', timestamp: 0 });
   const [healthInfo, setHealthInfo] = useState({ symbol: 'SPY', providers: {} });
@@ -201,9 +205,11 @@ function App() {
     const fetchOrders = poll('/execution', setOrders, () => {});
     const fetchControl = poll('/control', setControl, () => {});
     const fetchValuation = poll('/valuation', setValuation, () => {});
+    const fetchPnl = poll('/pnl', setPnl, () => {});
+    const fetchSurfaceHistory = poll(`/surface/history?model=${surfaceModel}&hours=24`, setSurfaceHistory, () => {});
     const fetchHealthData = poll('/health', setHealthInfo, () => setHealthInfo({ symbol: 'SPY', providers: {} }));
 
-    const jobs = [[updateRiskMetrics, 1000], [fetchSpotData, 2000], [fetchSurfaceData, 5000], [fetchOtherSurfaces, 5000], [fetchHealthData, 5000], [fetchPositions, 2000], [fetchOrders, 2000], [fetchControl, 2000], [fetchValuation, 2000]];
+    const jobs = [[updateRiskMetrics, 1000], [fetchSpotData, 2000], [fetchSurfaceData, 5000], [fetchOtherSurfaces, 5000], [fetchHealthData, 5000], [fetchPositions, 2000], [fetchOrders, 2000], [fetchControl, 2000], [fetchValuation, 2000], [fetchPnl, 5000], [fetchSurfaceHistory, 60000]];
     jobs.forEach(([job]) => job());
     const timers = jobs.map(([job, ms]) => setInterval(job, ms));
     return () => timers.forEach(clearInterval);
@@ -217,6 +223,11 @@ function App() {
       term: chartRefTerm.current
     }, otherSurfaces);
   }, [surfaceData, otherSurfaces]);
+
+  useEffect(() => {
+    if (!surfaceHistory || !chartRefHistory.current || !window.Plotly) return;
+    renderHistoryChart(window.Plotly, chartRefHistory.current, surfaceHistory.points, surfaceModel);
+  }, [surfaceHistory, surfaceModel]);
 
   useEffect(() => {
     const timer = setTimeout(() => window.dispatchEvent(new Event('resize')), 300);
@@ -277,7 +288,7 @@ function App() {
       </header>
 
       <div className="layout-grid">
-        <RiskPanel metrics={metrics} displayedRisk={displayedRisk} logs={logs} valuation={valuation} />
+        <RiskPanel metrics={metrics} displayedRisk={displayedRisk} logs={logs} valuation={valuation} pnl={pnl} />
 
         <div className="middle-column">
           <ChartPanel
@@ -301,6 +312,9 @@ function App() {
               expanded={expandedChart === 'SMILE'} onToggle={() => toggleChart('SMILE')} />
             <ChartPanel id="volatilityChartTerm" chartRef={chartRefTerm} className="sub-chart" title="TERM STRUCTURE (2D)"
               expanded={expandedChart === 'TERM'} onToggle={() => toggleChart('TERM')} />
+            <ChartPanel id="volatilityChartHistory" chartRef={chartRefHistory} className="sub-chart"
+              title={`HISTORY 24H · ${surfaceHistorySummary(surfaceHistory ? surfaceHistory.points : [])}`}
+              expanded={expandedChart === 'HISTORY'} onToggle={() => toggleChart('HISTORY')} />
           </div>
         </div>
 

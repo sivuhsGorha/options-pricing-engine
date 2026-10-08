@@ -73,6 +73,12 @@ the quotes used and skipped, the RMSE, the parameters, whether SSVI's closed-for
 and warnings. `/api/surface3d` returns it, or the calibration status while nothing is fitted. If the chain came
 from the synthetic fallback the surface is labelled `DEMO`; nothing on the startup path waits for this.
 
+**Surface history** (`volatility/SurfaceHistory`): every calibration appends one row per model to
+`surface_history.csv` under `DATA_DIR`: the front-expiry ATM vol (the fitted vol at strike = spot), the skew
+(vol at 0.95 spot minus vol at 1.05 spot on that expiry), RMSE, quotes used, provenance and the parameters.
+`/api/surface/history` serves a window of it and the dashboard charts ATM vol and skew over the day. The file
+is kept across restarts; a row that cannot be parsed stops startup naming the line.
+
 ---
 
 ## 3. Rates and day count

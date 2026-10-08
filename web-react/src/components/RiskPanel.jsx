@@ -1,9 +1,22 @@
 import { formatNumber, formatCurrency } from '../lib/format';
+import { pnlTone } from '../lib/history';
 
 const timeOf = (ms) => (ms ? new Date(ms).toLocaleTimeString() : '--');
+const dateOf = (ms) => (ms ? new Date(ms).toISOString().slice(0, 10) : '--');
 
-export default function RiskPanel({ metrics, displayedRisk, logs, valuation }) {
+function PnlRow({ label, value, title }) {
+    return (
+        <tr title={title}>
+            <td className="val-amber">{label}</td>
+            <td className={`align-right mono ${pnlTone(value) || 'val-white'}`}>{formatCurrency(value)}</td>
+        </tr>
+    );
+}
+
+export default function RiskPanel({ metrics, displayedRisk, logs, valuation, pnl }) {
     const valued = valuation && valuation.ready;
+    const pnlReady = Boolean(pnl && pnl.ready);
+    const day = pnlReady ? pnl.day : null;
     return (
         <div className="panel risk-panel">
             <div className="panel-header">
@@ -45,6 +58,24 @@ export default function RiskPanel({ metrics, displayedRisk, logs, valuation }) {
                 <div style={{ color: '#5C6B73', fontSize: '11px', padding: '2px 0 6px' }}>
                     {valued ? `Greeks from the pricer, valued ${timeOf(valuation.asOf)} at spot ${formatNumber(valuation.spot)}` : 'Greeks: linear until the first valuation'}
                 </div>
+
+                <div className="margin-block" id="pnl-block" title="paper-trading P&L from the fill ledger and the latest marks, recorded on disk across restarts">
+                    <div className="margin-label">P&amp;L (PAPER){pnlReady ? ` · SINCE ${dateOf(pnl.firstSampleAt)}` : ''}</div>
+                    <table className="data-table">
+                        <tbody>
+                            <PnlRow label="REALISED" value={pnlReady ? pnl.realizedPnl : null} title="locked in by fills that reduced a position; rebuilt from the fill ledger at start" />
+                            <PnlRow label="UNREALISED" value={pnlReady ? pnl.unrealizedPnl : null} title="open positions at the latest marks against average cost" />
+                            <PnlRow label="TOTAL" value={pnlReady ? pnl.totalPnl : null} title="realised plus unrealised, from a flat book" />
+                            <PnlRow label={`TODAY${day ? ` (${day.date})` : ''}`} value={day ? day.pnl : null}
+                                title={day ? `from ${day.baselineIsPreviousClose ? "yesterday's last mark" : 'the first mark today'}; the day is ${day.timezone}` : 'measured over the New York trading day'} />
+                            <PnlRow label="TODAY MAX DRAWDOWN" value={day && Number.isFinite(day.maxDrawdown) ? -day.maxDrawdown : null} title="largest fall from a running peak of total P&L today" />
+                        </tbody>
+                    </table>
+                    <div style={{ color: '#5C6B73', fontSize: '11px', paddingTop: '4px' }}>
+                        {pnlReady ? `${day.sampleCount} marks today · last ${timeOf(pnl.asOf)}` : (pnl && pnl.status) || 'no valuation recorded yet'}
+                    </div>
+                </div>
+
                 <div className="margin-block" id="margin-block">
                     <div className="margin-label">SCENARIO MARGIN</div>
                     <div className="margin-value mono" id="val-margin">{formatCurrency(metrics.scenarioMargin)}</div>

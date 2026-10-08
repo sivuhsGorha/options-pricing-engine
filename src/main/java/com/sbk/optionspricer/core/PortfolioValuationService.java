@@ -56,6 +56,7 @@ public final class PortfolioValuationService implements ValuationSource, AutoClo
     private volatile String status = "valuation has not run yet";
     private Thread worker;
     private volatile boolean closed;
+    private volatile java.util.function.Consumer<Valuation> valuationListener = valuation -> { };
 
     public PortfolioValuationService(PositionTracker tracker, VolatilitySurfaceSource surfaces, OptionMarketData chains,
                                      Supplier<MarketSnapshot> spotSupplier, double riskFreeRate, double dividendYield,
@@ -74,6 +75,11 @@ public final class PortfolioValuationService implements ValuationSource, AutoClo
         this.dividendYield = dividendYield;
         this.interval = interval;
         this.clock = clock;
+    }
+
+    /** Receives every valuation (for the P&L history). A listener failure is logged, never fatal. */
+    public void setValuationListener(java.util.function.Consumer<Valuation> listener) {
+        this.valuationListener = listener == null ? valuation -> { } : listener;
     }
 
     /** Revalues now, on the calling thread. Returns empty (and sets the status) when there is no usable spot. */
@@ -130,6 +136,11 @@ public final class PortfolioValuationService implements ValuationSource, AutoClo
                 netDelta, netGamma, netVega, netTheta, netRho, List.copyOf(warnings));
         latest = valuation;
         status = "";
+        try {
+            valuationListener.accept(valuation);
+        } catch (RuntimeException e) {
+            System.err.println("[PNL HISTORY] valuation not recorded: " + e.getMessage());
+        }
         return Optional.of(valuation);
     }
 

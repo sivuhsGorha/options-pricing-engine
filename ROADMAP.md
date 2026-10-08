@@ -102,8 +102,8 @@ wider than that noise and the docs must say so.
 | # | Task | Done when |
 | :-- | :--- | :--- |
 | C1 (done 2026-10-08) | The fill ledger lives under `DATA_DIR` (default `data/`, never `target/`), records the price, and the book (positions, average cost, realised P&L) is rebuilt from it at start. Kept JDK-only (append-only CSV) rather than adding a SQLite dependency: no reviewer-visible gain, and a new download on an unreliable network is a build risk | stop, start, and the positions table is unchanged |
-| C2 | Persist surface snapshots (parameters, RMSE, quotes used) so the surface history can be charted | a "surface history" chart of ATM vol and skew over the day |
-| C3 | Daily P&L and drawdown from the ledger on the dashboard | the risk panel shows realised and unrealised P&L since start |
+| C2 (done 2026-10-08) | Every calibration is recorded (`volatility/SurfaceHistory`, `surface_history.csv` under `DATA_DIR`): per model the front-expiry ATM vol, the 95/105 skew, RMSE, quotes used and parameters. `/api/surface/history` serves a window of it and the dashboard's HISTORY chart draws ATM vol and skew over the day, across restarts | a "surface history" chart of ATM vol and skew over the day |
+| C3 (done 2026-10-08) | The valuation is sampled to `pnl_history.csv` (once a minute, and at once when realised P&L changes). `/api/pnl` reports realised, unrealised and total P&L since the ledger began, and today's P&L and maximum drawdown over the New York trading day measured from yesterday's last mark; the risk panel shows them | the risk panel shows realised and unrealised P&L since start |
 
 ### Phase D: presentation (half a day, needs your screenshot)
 

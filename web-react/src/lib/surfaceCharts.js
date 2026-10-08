@@ -1,3 +1,5 @@
+import { surfaceHistorySeries } from './history';
+
 const LAYOUT_BASE = {
     paper_bgcolor: '#0C0F14',
     plot_bgcolor: '#05070A',
@@ -207,4 +209,36 @@ export function renderSurfaceCharts(plotly, surface, elements, otherModels = [])
         strikeIdx.map(i => lineTrace(expiries, vols.map(row => pct(row[i])), `K=${Math.round(strikes[i])}`)),
         { ...LAYOUT_2D, xaxis: { title: 'EXPIRY (y)', ...AXIS_2D }, yaxis: { title: 'IV (%)', ...AXIS_2D } },
         PLOT_CONFIG);
+}
+
+/**
+ * ATM vol (left axis, %) and 95/105 skew (right axis, vol points) of one model over time, one point per
+ * calibration. With nothing recorded yet the chart says so rather than drawing an empty frame.
+ */
+export function renderHistoryChart(plotly, element, points, model) {
+    const s = surfaceHistorySeries(points);
+    const traces = [];
+    if (s.atm.y.length) {
+        traces.push({ x: s.atm.x, y: s.atm.y, type: 'scatter', mode: 'lines+markers', name: `${model} ATM vol (%)`, line: { width: 2 }, marker: { size: 4 } });
+    }
+    if (s.skew.y.length) {
+        traces.push({
+            x: s.skew.x, y: s.skew.y, type: 'scatter', mode: 'lines+markers', name: 'skew 95/105 (vol pts)', yaxis: 'y2',
+            line: { width: 1.5, dash: 'dot' }, marker: { size: 4 }
+        });
+    }
+    const layout = {
+        ...LAYOUT_2D,
+        margin: { t: 10, r: 52, l: 48, b: 40 },
+        xaxis: { title: 'TIME', ...AXIS_2D, type: 'date' },
+        yaxis: { title: 'ATM IV (%)', ...AXIS_2D },
+        yaxis2: { title: 'SKEW (vol pts)', ...AXIS_2D, overlaying: 'y', side: 'right', titlefont: { size: 11 }, showgrid: false }
+    };
+    if (!traces.length) {
+        layout.annotations = [{
+            text: 'no calibration recorded yet<br>one point per calibration, kept across restarts',
+            showarrow: false, x: 0.5, y: 0.5, xref: 'paper', yref: 'paper', font: { color: '#5C6B73', size: 12 }
+        }];
+    }
+    plotly.react(element, traces, layout, PLOT_CONFIG);
 }

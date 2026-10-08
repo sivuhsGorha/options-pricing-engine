@@ -35,4 +35,29 @@ describe('RiskPanel', () => {
         expect(screen.getByText('[09:00:00]')).toBeInTheDocument();
         expect(screen.getByText(/OPERATOR: trading halted\./)).toBeInTheDocument();
     });
+
+    it('shows realised, unrealised, total, today and drawdown from the P&L record', () => {
+        const pnl = {
+            ready: true, asOf: 1, firstSampleAt: Date.UTC(2026, 9, 8), realizedPnl: 75, unrealizedPnl: -20.5, totalPnl: 54.5,
+            day: { date: '2026-10-08', timezone: 'America/New_York', pnl: -12.25, maxDrawdown: 30, baselineIsPreviousClose: true, sampleCount: 12 }
+        };
+        render(<RiskPanel metrics={{}} displayedRisk={{}} logs={[]} pnl={pnl} />);
+
+        expect(screen.getByText('$75.00')).toBeInTheDocument();
+        expect(screen.getByText('-$20.50')).toBeInTheDocument();
+        expect(screen.getByText('$54.50')).toBeInTheDocument();
+        expect(screen.getByText('-$12.25')).toBeInTheDocument();
+        expect(screen.getByText('-$30.00')).toBeInTheDocument();
+        expect(screen.getByText('-$20.50').className).toContain('ticker-down');
+        expect(screen.getByText('$75.00').className).toContain('ticker-up');
+        expect(screen.getByText(/SINCE 2026-10-08/)).toBeInTheDocument();
+        expect(screen.getByText(/12 marks today/)).toBeInTheDocument();
+    });
+
+    it('says why there is no P&L yet instead of showing zeros', () => {
+        render(<RiskPanel metrics={{}} displayedRisk={{}} logs={[]} pnl={{ ready: false, status: 'no valuation recorded yet' }} />);
+
+        expect(screen.getByText('no valuation recorded yet')).toBeInTheDocument();
+        expect(screen.queryByText('$0.00')).not.toBeInTheDocument();
+    });
 });

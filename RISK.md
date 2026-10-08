@@ -46,6 +46,14 @@ keeps unrealised P&L against the tracker's average cost and realised P&L from re
 its source (`MID`/`MODEL`/`SPOT`/`INTRINSIC`, `SVI`/`MARKET_IV`/`FEED_IV`) and a contract that cannot be
 valued is reported as such, not as zero. `/api/valuation` returns it; before the first spot it says why not.
 
+`execution/PnlHistory` samples the valuation to `pnl_history.csv` under `DATA_DIR`, once a minute and at once
+when realised P&L changes. Realised and unrealised P&L are cumulative from a flat book, because the tracker is
+rebuilt from the fill ledger at start, so their sum is the P&L since the ledger began. The trading day is the
+calendar day in New York. Today's P&L is measured from the last sample before the day started (yesterday's
+last mark), or from the first sample of the day when there is none; the day's maximum drawdown is the largest
+fall from a running peak of total P&L over that series. `/api/pnl` returns the figures with the day's series
+and the risk panel shows them.
+
 ---
 
 ## 3. Alerts and the trading halt

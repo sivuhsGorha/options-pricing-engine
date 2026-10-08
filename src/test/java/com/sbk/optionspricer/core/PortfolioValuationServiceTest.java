@@ -138,4 +138,19 @@ class PortfolioValuationServiceTest {
         assertTrue(PortfolioValuationService.surfaceVol(fit, t + 15.0 / 365, 100.0).isEmpty(), "halfway between two monthly slices matches nothing");
         assertTrue(PortfolioValuationService.surfaceVol(null, t, 100.0).isEmpty());
     }
+
+    @Test
+    void eachValuationIsHandedToTheListener() {
+        PositionTracker tracker = new PositionTracker(FillRecorder.NONE);
+        tracker.applyFill(new PositionTracker.ExecutionFill("SPY", 10, 1, 99.0));
+        PortfolioValuationService service = new PortfolioValuationService(tracker, null, null, () -> spot(100.0), 0.05, 0.0, Duration.ofSeconds(5), Clock.systemUTC());
+        List<Valuation> seen = new java.util.ArrayList<>();
+        service.setValuationListener(seen::add);
+
+        Valuation v = service.revalue().orElseThrow();
+
+        assertEquals(List.of(v), seen);
+        service.setValuationListener(x -> { throw new IllegalStateException("disk full"); });
+        assertTrue(service.revalue().isPresent(), "a failing recorder never stops the valuation");
+    }
 }

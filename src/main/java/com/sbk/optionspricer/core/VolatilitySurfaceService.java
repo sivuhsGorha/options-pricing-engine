@@ -54,6 +54,7 @@ public final class VolatilitySurfaceService implements VolatilitySurfaceSource, 
     private volatile List<OptionChainProvider.SourcedChain> latestChains = List.of();
     private Thread worker;
     private volatile boolean closed;
+    private volatile Consumer<Snapshot> snapshotListener = snapshot -> { };
 
     public VolatilitySurfaceService(OptionChainProvider provider, String symbol, double riskFreeRate, double dividendYield,
                                     Duration refreshInterval, Clock clock, Consumer<OptionChain> onChainLoaded) {
@@ -71,6 +72,11 @@ public final class VolatilitySurfaceService implements VolatilitySurfaceSource, 
         this.clock = clock;
         this.onChainLoaded = onChainLoaded == null ? chain -> { } : onChainLoaded;
         this.status = new Status(State.LOADING, "calibration has not run yet", clock.instant());
+    }
+
+    /** Receives every successful calibration (for the surface history). A listener failure is logged, never fatal. */
+    public void setSnapshotListener(Consumer<Snapshot> listener) {
+        this.snapshotListener = listener == null ? snapshot -> { } : listener;
     }
 
     /** Runs one calibration now, on the calling thread. Safe to call from tests and from the worker. */
@@ -136,9 +142,15 @@ public final class VolatilitySurfaceService implements VolatilitySurfaceSource, 
             status = new Status(State.FAILED, "could not fit a surface to " + extraction.points().size() + " quotes: " + lastOrEmpty(warnings), now);
             return;
         }
-        latest = new Snapshot(now, symbol, String.join("+", sources), marketData, chains.get(0).spot(), ssvi, sabr, svi,
+        Snapshot snapshot = new Snapshot(now, symbol, String.join("+", sources), marketData, chains.get(0).spot(), ssvi, sabr, svi,
                 extraction.quotesSkipped(), List.copyOf(warnings));
+        latest = snapshot;
         status = new Status(State.READY, String.format(java.util.Locale.ROOT, "%d quotes from %s", extraction.points().size(), String.join("+", sources)), now);
+        try {
+            snapshotListener.accept(snapshot);
+        } catch (RuntimeException e) {
+            System.err.println("[SURFACE HISTORY] calibration not recorded: " + rootMessage(e));
+        }
     }
 
     /** Starts the background worker: calibrate now, then every refresh interval, until {@link #close()}. */

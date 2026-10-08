@@ -65,6 +65,8 @@ accepted and rejected orders with the data status and the rejection reason.
 | `POST /api/control/resume` | clears the halt, returns the new state |
 | `POST /api/control/strategy` | body `{"enabled": true\|false}`; switches order generation, returns the new state |
 | `GET /api/valuation` | the mark-to-market of the book: per position mark and its source, average cost, unrealised P&L, implied vol and its source, delta/gamma/vega/theta/rho; portfolio totals; or `ready: false` with the reason |
+| `GET /api/pnl` | realised, unrealised and total P&L since the ledger began, and today's P&L, peak, trough and maximum drawdown over the New York trading day (measured from yesterday's last mark) with the day's sampled series; `ready: false` until the first valuation is recorded |
+| `GET /api/surface/history?model=SSVI\|SVI\|SABR&hours=24` | one point per calibration of the model in the window (at most 168 h): time, spot, source, quotes used, RMSE, front-expiry ATM vol (strike = spot) and skew (vol at 0.95 spot minus vol at 1.05 spot); `ready: false` with the reason while nothing is recorded |
 
 All endpoints require a session cookie or HMAC-signed request and set security headers (see INFRA.md). The
 state-changing endpoints accept POST only, and a cookie-bearing request must also carry an allowed `Origin`

@@ -62,10 +62,18 @@ or the logs ever prints a secret; if one leaks (pasted output, screenshot), rota
 
 ## Data
 
-`DATA_DIR` (default `data/`) holds the fill ledger (`fills.csv`: one row per fill with its price, the record the
-book is rebuilt from at start; the startup log says how many fills were replayed) and the mmap state file
-(`MMAP_STATE_FILE`). It is git-ignored; back it up if you care about the paper-trading history. Deleting
-`fills.csv` starts the book flat. A row the ledger cannot parse stops startup naming the line, on purpose.
+`DATA_DIR` (default `data/`) is git-ignored and holds everything that must survive a restart; back it up if
+you care about the paper-trading history. The startup log reports each file:
+
+| File | Holds | Deleting it |
+| :--- | :--- | :--- |
+| `fills.csv` | one row per fill with its price; the book, average cost and realised P&L are rebuilt from it | starts the book flat |
+| `pnl_history.csv` | the valuation sampled once a minute (and when realised P&L changes); today's P&L and drawdown come from it | loses the P&L history, not the book |
+| `surface_history.csv` | one row per model per calibration: front ATM vol, skew, RMSE, quotes used, parameters | loses the surface history chart |
+| `shm_state.dat` (`MMAP_STATE_FILE`) | the engine-to-web shared state | recreated at start |
+
+A row in any CSV that cannot be parsed stops startup naming the file and line, on purpose: a record with a
+hole in it must not quietly produce a different book.
 
 ## Upgrade
 
