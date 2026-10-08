@@ -90,6 +90,17 @@ public final class ConfigValidator {
         if (symbol == null || symbol.isBlank()) {
             errors.add("execution.symbol must not be blank");
         }
+        String transport = config.getString("execution.transport", "paper");
+        if (!"paper".equals(transport) && !"alpaca".equals(transport)) {
+            errors.add("execution.transport must be paper or alpaca (found '" + transport + "')");
+        } else if ("alpaca".equals(transport)) {
+            String keyId = EnvironmentConfigLoader.get("ALPACA_KEY_ID");
+            String secret = EnvironmentConfigLoader.get("ALPACA_SECRET");
+            if (keyId == null || keyId.isBlank() || secret == null || secret.isBlank()) {
+                errors.add("execution.transport is alpaca but ALPACA_KEY_ID and ALPACA_SECRET are not both set in .env");
+            }
+        }
+        number(config, errors, "execution.fill_wait_seconds", 10.0, v -> v >= 1.0 && v <= 120.0, "must be between 1 and 120 seconds");
         return errors;
     }
 

@@ -20,7 +20,9 @@ risk:
   max_position: 10000.0
 execution:
   symbol: SPY
-  slippage_bps: 25                   # paper fills move this far against you
+  transport: paper                   # paper: in-process simulated fills; alpaca: an Alpaca PAPER account (keys in .env)
+  fill_wait_seconds: 10              # alpaca only: how long to wait for a fill before cancelling the remainder
+  slippage_bps: 25                   # paper transport only: fills move this far against you
   contract_multiplier: 1             # 100 for standard equity options
 strategy:
   mode: vol_spread                   # vol_spread: front-month ATM straddle vs the fitted surface; momentum: shares on a price move

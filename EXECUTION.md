@@ -15,6 +15,7 @@ StrategyExecutionLoop ──> OrderManager.submit(order, marketSnapshot)
                               │  4 PreTradeRiskFilter (incl. concentration, liquidity, rate)
                               ▼
                      ExchangeTransport.transmit ──> PaperTradingExecutionAdapter (full fill, slippage)
+                                               or  AlpacaPaperTransport (day limit at the touch, fill polled)
                               │
                               ▼  fill validated (0 <= filled <= requested)
                      PositionTracker.applyFill(symbol, signedQty, multiplier, price)
@@ -28,7 +29,7 @@ StrategyExecutionLoop ──> OrderManager.submit(order, marketSnapshot)
 **Order** is a record: client id, side, quantity, limit price. **OrderStatus**: `NEW`, `ACCEPTED`, `REJECTED`,
 `PARTIALLY_FILLED`, `FILLED`, `CANCELLED`. `OrderManager` keeps open orders and a bounded status map (10,000
 most recent) and supports `cancel(orderId)` for the unfilled remainder of a working order (local state only:
-`ExchangeTransport` has no cancel operation yet).
+no transport leaves an order working at the venue, see below).
 
 **Instruments.** A snapshot for an option carries its `Instrument`; its symbol is the OCC contract symbol
 (`SPY261120C00780000`, see `instruments/OccSymbol`) and the position is booked under that symbol with the
@@ -40,8 +41,24 @@ contract's own multiplier (100), while the pre-trade notional and concentration 
 concentration, booking), with the multiplier from the instrument when there is one. Prices crossing the wire are converted with `execution/PriceScale` to
 exact decimal ticks of 0.0001 (HALF_EVEN), never by truncating `price * 10000`.
 
-**Paper fills** (`PaperTradingExecutionAdapter`): a buy fills at the ask (or bid if no ask) moved up by
-`execution.slippage_bps`; a sell at the bid moved down. Quantity always fills in full.
+**Transports** (`execution.transport`). `paper` (`PaperTradingExecutionAdapter`): a buy fills at the ask (or
+bid if no ask) moved up by `execution.slippage_bps`; a sell at the bid moved down; quantity always fills in
+full; nothing leaves the process. `alpaca` (`AlpacaPaperTransport`, keys `ALPACA_KEY_ID` and `ALPACA_SECRET`
+in `.env`): each order goes to the Alpaca **paper** account as a day limit order at the touch (ask for a buy,
+bid for a sell; the order's own price without a book), under the OCC symbol for an option. The transport polls
+the order for up to `execution.fill_wait_seconds`; a fill comes back at Alpaca's average price, a partial fill
+is booked as `PARTIALLY_FILLED` and the remainder is cancelled, no fill is a rejection naming the wait, and
+Alpaca's own rejections (options level, buying power) come back verbatim. `AlpacaPaperClient` has the paper
+URL as a constant: no setting can point it at a live account. If a cancel fails the result says the order may
+still be working, and the reconciliation below catches any later fill.
+
+**Reconciliation** (`BookReconciler`, Alpaca only): at start and every minute the local book is compared with
+the account's positions (signed quantity per symbol, options under their OCC symbol). Any difference trips
+`TradingHalt` with a reason naming each position and both quantities, and trips it again if an operator resumes
+while the difference persists; an unreachable account is reported, not treated as a mismatch. The halt is never
+cleared automatically. `/api/control` and `/api/health` carry the transport block (`transport`, `venue`,
+`description`, `checkedAt`, `reconciliation`: `NOT_APPLICABLE` / `PENDING` / `OK` / `MISMATCH` / `UNREACHABLE`,
+`differences`), and the paper-trading panel shows a TRANSPORT badge with it.
 
 **Market data policy.** `strict()` (default) accepts LIVE and DELAYED quotes under 30 s old.
 `allowSimulated()` (`ALLOW_SIMULATED_DATA=true`) adds SIMULATED. STALE and UNAVAILABLE are never tradable and
@@ -94,5 +111,6 @@ LSEG, SIX or Nasdaq, and no latency figure has been measured.
 
 An `ExchangeTransport` implementation with: session management and heartbeats, order acknowledgement and
 execution reports (partial fills), cancel and replace, cancel-on-disconnect, reconciliation of positions against
-venue drop-copy, and certification against the venue's test environment. The order manager's fill validation
-and halt-on-mismatch are designed with that in mind, but nothing has been tested against a real venue.
+venue drop-copy, and certification against the venue's test environment. The Alpaca paper transport covers
+acknowledgement, polled execution reports, cancel and position reconciliation over REST against a broker's
+paper environment; nothing has been tested against a real exchange.

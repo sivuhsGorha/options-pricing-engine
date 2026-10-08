@@ -61,8 +61,8 @@ function App() {
       tone: spotTone
     },
     { name: 'SOURCE', value: spotInfo.source || 'N/A', change: spotInfo.status || 'UNAVAILABLE', tone: spotTone },
-    // There is no exchange gateway: orders only fill in the paper-trading adapter.
-    { name: 'GATEWAY', value: 'PAPER', change: Object.keys(providers).length > 0 ? 'FEEDS OK' : 'WAITING', tone: 'ticker-up' }
+    // No exchange gateway: orders fill in the in-process simulator or in an Alpaca paper account.
+    { name: 'GATEWAY', value: control.transport ? control.transport.transport.toUpperCase() : 'PAPER', change: Object.keys(providers).length > 0 ? 'FEEDS OK' : 'WAITING', tone: 'ticker-up' }
   ];
 
   const displayedRisk = {

@@ -65,6 +65,7 @@ Secrets and deployment settings come from the environment or a `.env` file in th
 | `MMAP_STATE_FILE` | no (`data/shm_state.dat`) | engine-to-web shared state file |
 | `DATA_DIR` | no (`data`) | fill ledger (`fills.csv`) and other state that must survive a restart |
 | `ALLOW_SIMULATED_DATA` | no (false) | lets SIMULATED quotes back paper orders |
+| `ALPACA_KEY_ID`, `ALPACA_SECRET` | only with `execution.transport: alpaca` | Alpaca paper-account keys; the client can only address `paper-api.alpaca.markets` |
 | `FINNHUB_KEY`, `POLYGON_API_KEY`, `ALPHA_VANTAGE_KEY`, `MARKETSTACK_KEY` | at least one for live data | spot providers |
 | `FRED_API_KEY` | no | enables the US Treasury par-yield curve |
 

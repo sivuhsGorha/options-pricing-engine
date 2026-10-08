@@ -93,9 +93,9 @@ wider than that noise and the docs must say so.
 
 | # | Task | Done when |
 | :-- | :--- | :--- |
-| B1 | `AlpacaPaperTransport`: submit, acknowledge, poll for fills (partial fills become `PARTIALLY_FILLED`), cancel; keys from `.env` (`ALPACA_KEY_ID`, `ALPACA_SECRET`), paper endpoint only, hermetic tests against recorded responses | an order placed from the dashboard appears in the Alpaca paper account and its fill comes back into the position tracker |
-| B2 | Reconciliation: compare the local book with Alpaca positions at start and every minute; a mismatch trips the halt with the difference in the reason | a deliberately mismatched position halts trading and names the contract |
-| B3 | Transport selection in config (`execution.transport: paper | alpaca`) and a `TRANSPORT` badge in the UI | the dashboard says which transport is live |
+| B1 (done 2026-10-08) | `AlpacaPaperTransport` over `AlpacaPaperClient`: day limit orders at the touch, the fill polled for `execution.fill_wait_seconds`, partial fills booked as `PARTIALLY_FILLED` with the remainder cancelled, Alpaca rejections verbatim; keys from `.env`, paper endpoint as a constant; tests against responses recorded from the paper API | an order placed from the dashboard appears in the Alpaca paper account and its fill comes back into the position tracker |
+| B2 (done 2026-10-08) | `BookReconciler`: local book vs Alpaca positions at start and every minute; a mismatch trips the halt naming each position and both quantities, and trips it again on resume while it persists; an unreachable account is reported, not halted | a deliberately mismatched position halts trading and names the contract |
+| B3 (done 2026-10-08) | `execution.transport: paper \| alpaca` validated (with the keys when alpaca); the transport block on `/api/control` and `/api/health`; TRANSPORT badge, reconciliation line and GATEWAY ribbon in the UI | the dashboard says which transport is live |
 
 ### Phase C: state that survives a restart (1 to 2 days)
 

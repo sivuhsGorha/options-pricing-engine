@@ -78,4 +78,32 @@ describe('ExecutionPanel', () => {
         expect(screen.getByText(/No orders yet/)).toBeInTheDocument();
         expect(screen.getByText(/VALUATION: no spot price/)).toBeInTheDocument();
     });
+
+    it('shows the paper transport by default and the Alpaca transport with its reconciliation', () => {
+        const { unmount } = render(<ExecutionPanel positions={noPositions} orders={[]} control={activeControl} valuation={noValuation} onHalt={() => {}} onResume={() => {}} onToggleStrategy={() => {}} />);
+        expect(screen.getByText('TRANSPORT PAPER')).toBeInTheDocument();
+        expect(screen.queryByText(/ALPACA PAPER/)).not.toBeInTheDocument();
+        unmount();
+
+        const alpaca = { ...activeControl, transport: { transport: 'alpaca', venue: 'Alpaca paper account', description: 'day limit orders at the touch',
+            checkedAt: 1, reconciliation: 'OK', differences: [] } };
+        render(<ExecutionPanel positions={noPositions} orders={[]} control={alpaca} valuation={noValuation} onHalt={() => {}} onResume={() => {}} onToggleStrategy={() => {}} />);
+        expect(screen.getByText('TRANSPORT ALPACA · OK')).toBeInTheDocument();
+        expect(screen.getByText(/ALPACA PAPER · book reconciled/)).toBeInTheDocument();
+    });
+
+    it('shows a book mismatch with the differing positions', () => {
+        const mismatch = { ...activeControl, halted: true, haltReason: 'book does not match the Alpaca account: SPY: local 10, alpaca 0',
+            transport: { transport: 'alpaca', venue: 'Alpaca paper account', description: 'x', checkedAt: 1, reconciliation: 'MISMATCH', differences: ['SPY: local 10, alpaca 0'] } };
+        render(<ExecutionPanel positions={noPositions} orders={[]} control={mismatch} valuation={noValuation} onHalt={() => {}} onResume={() => {}} onToggleStrategy={() => {}} />);
+
+        expect(screen.getByText('TRANSPORT ALPACA · MISMATCH')).toBeInTheDocument();
+        expect(screen.getByText('BOOK MISMATCH vs ALPACA: SPY: local 10, alpaca 0')).toBeInTheDocument();
+    });
+
+    it('describes the empty order tape for the options strategy in its own terms', () => {
+        render(<ExecutionPanel positions={noPositions} orders={[]} control={{ ...activeControl, mode: 'vol_spread' }} valuation={noValuation} onHalt={() => {}} onResume={() => {}} onToggleStrategy={() => {}} />);
+
+        expect(screen.getByText(/No orders yet\. The strategy trades when the straddle/)).toBeInTheDocument();
+    });
 });

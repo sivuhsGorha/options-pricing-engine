@@ -7,10 +7,11 @@ A Java 25 options pricing and risk library with a paper-trading loop and a web d
 options, calibrates volatility surfaces, computes Greeks and portfolio risk, and runs an order flow
 (pre-trade checks, risk admission, simulated fills) against live or simulated market data.
 
-**What it is not:** a connection to any exchange. There is no live order entry and no exchange market-data
-feed. Orders only ever fill in the built-in paper-trading adapter. The `gateways/` package and
-`execution/SmartOrderRouter` are simulations of binary-protocol encoding and decoding (see their class
-headers). No latency figure is measured or claimed.
+**What it is not:** a connection to any exchange, or to real money. There is no exchange market-data feed.
+Orders fill either in the built-in paper-trading simulator or, with `execution.transport: alpaca`, in an
+Alpaca *paper* account (the client can only address the paper endpoint), and the book is reconciled with
+that account every minute. The `gateways/` package and `execution/SmartOrderRouter` are simulations of
+binary-protocol encoding and decoding (see their class headers). No latency figure is measured or claimed.
 
 ---
 
@@ -24,7 +25,7 @@ headers). No latency figure is measured or claimed.
 | Volatility | SVI, SSVI with no-arbitrage conditions and validation, SABR (Hagan), Dupire local vol; a background service fits SSVI, raw SVI and SABR to the same option-chain quotes (Nelder-Mead least squares) and the dashboard shows the fit's source, quotes, RMSE and parameters |
 | Rates | OIS / par-yield curve bootstrap, ACT/365F day count, optional FRED and ESTR providers |
 | Greeks and risk | First, second and higher-order Greeks, portfolio aggregation, limit alerts that halt trading, margin approximation (not an exchange margin model) |
-| Execution | `OrderManager` (halt check, data-quality policy, portfolio admission, pre-trade limits, order state machine, audit trail), `PositionTracker` with average cost and realised P&L, paper-trading fills, option contracts booked per OCC symbol with their multiplier, exact decimal ticks |
+| Execution | `OrderManager` (halt check, data-quality policy, portfolio admission, pre-trade limits, order state machine, audit trail), `PositionTracker` with average cost and realised P&L, option contracts booked per OCC symbol with their multiplier, exact decimal ticks. Two transports: the in-process simulator, and an Alpaca paper account (day limit orders at the touch, fill polled, remainder cancelled, book reconciled with the account every minute and trading halted on a mismatch) |
 | Strategy and valuation | Vol-spread strategy: the front-month ATM straddle against the fitted surface, delta-hedged, every decision recorded; a share momentum strategy as the alternative mode. A valuation service marks the book every few seconds with Black-Scholes Greeks at the surface's vol and feeds them to the risk engine, whose alerts use the configured limits. P&L (today's with its drawdown, and since the ledger began) and every calibration's ATM vol and skew are recorded under `data/` and shown on the dashboard across restarts |
 | Dashboard | Embedded HTTP API and a Jetty WebSocket feed, HMAC request signing, browser sessions, React frontend with risk, volatility-surface and paper-trading panels |
 | IPC | Engine state published through a memory-mapped file (seqlock) and read by the web layer |
@@ -55,7 +56,7 @@ flowchart LR
     subgraph trading [Paper trading]
         STRAT[VolSpreadStrategy<br/>front-month ATM straddle vs the fitted surface]
         OM[OrderManager<br/>halt, data policy, admission, pre-trade limits]
-        PAPER[PaperTradingExecutionAdapter<br/>simulated fill with slippage]
+        PAPER[ExchangeTransport<br/>in-process simulator, or Alpaca paper account]
         BOOK[PositionTracker<br/>average cost, realised PnL]
     end
     subgraph risk [Risk]
@@ -92,7 +93,8 @@ flowchart LR
    refuses stale or simulated quotes and records every decision with its reason.
 3. **Order gates.** An order passes the halt check, the data-quality policy (fresh LIVE or DELAYED quotes
    only), portfolio admission (projected Greeks against the limits), the pre-trade filter (size, notional,
-   concentration, liquidity), and only then the paper adapter, which fills with slippage.
+   concentration, liquidity), and only then the transport: the simulator fills with slippage; the Alpaca
+   transport sends a day limit order at the touch, waits for the fill and cancels any remainder.
 4. **Book.** A fill is written to the ledger before the book changes, so memory never runs ahead of the record;
    at start the book, average cost and realised P&L are rebuilt from the ledger.
 5. **Risk.** The valuation service marks each position at its quote mid (or model price) with Greeks from the

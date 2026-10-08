@@ -228,8 +228,8 @@ public class OrderManager {
 
     /**
      * Cancels the unfilled remainder of a working order. Quantity already executed stays booked.
-     * Note: {@link ExchangeTransport} has no cancel operation yet, so this updates local state only;
-     * a venue-side cancel must be added with a real gateway.
+     * Local state only: no transport leaves an order working at the venue (the Alpaca transport cancels the
+     * remainder itself before it returns), so there is nothing to cancel there.
      */
     public synchronized void cancel(long orderId) {
         OrderStatus status = orderStatuses.get(orderId);

@@ -14,14 +14,31 @@ export default function ExecutionPanel({ positions, orders, control, valuation, 
     const accepted = orders.filter(o => o.accepted).length;
     const halted = control.halted;
     const triggerText = Number.isFinite(control.triggerPct) ? `${(control.triggerPct * 100).toFixed(3)}%` : '--';
+    const transport = control.transport || null;
+    const reconciliation = transport ? transport.reconciliation : 'NOT_APPLICABLE';
+    const transportTone = reconciliation === 'OK' ? '#00E676' : reconciliation === 'MISMATCH' ? '#FF3D00'
+        : reconciliation === 'UNREACHABLE' || reconciliation === 'PENDING' ? '#FF9900' : '#00E5FF';
+    const transportName = transport ? transport.transport.toUpperCase() : 'PAPER';
     return (
         <div className="panel tape-panel">
             <div className="panel-header">
                 <span>PAPER TRADING</span>
+                <span className="tag" style={{ color: transportTone, borderColor: transportTone }}
+                    title={transport ? `${transport.venue}: ${transport.description}` : 'orders fill in the in-process simulator'}>
+                    TRANSPORT {transportName}{reconciliation !== 'NOT_APPLICABLE' ? ` · ${reconciliation}` : ''}
+                </span>
                 <span className="tag" style={{ color: '#00E676' }}>
                     {accepted} FILLED / {orders.length - accepted} REJECTED
                 </span>
             </div>
+            {transport && transport.transport === 'alpaca' && (
+                <div style={{ padding: '6px 8px', fontSize: '12px', borderBottom: '1px solid #1C232D', color: reconciliation === 'MISMATCH' ? '#FF3D00' : '#9EC1FF' }}
+                    title={transport.description}>
+                    {reconciliation === 'MISMATCH'
+                        ? `BOOK MISMATCH vs ALPACA: ${transport.differences.join('; ')}`
+                        : `ALPACA PAPER · book ${reconciliation === 'OK' ? 'reconciled' : reconciliation.toLowerCase()} ${transport.checkedAt ? timeOf(transport.checkedAt) : ''}`.trim()}
+                </div>
+            )}
             <div style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap',
                 padding: '6px 8px', fontSize: '13px', borderBottom: '1px solid #1C232D',
@@ -98,7 +115,9 @@ export default function ExecutionPanel({ positions, orders, control, valuation, 
                     </thead>
                     <tbody id="orders-body">
                         {recent.length === 0 && (
-                            <tr><td colSpan={4}>No orders yet. The strategy trades when the price moves by the trigger percentage between two quotes.</td></tr>
+                            <tr><td colSpan={4}>{control.mode === 'vol_spread'
+                                ? 'No orders yet. The strategy trades when the straddle\'s market vol is further from the reference surface than the edge band.'
+                                : 'No orders yet. The strategy trades when the price moves by the trigger percentage between two quotes.'}</td></tr>
                         )}
                         {recent.map(o => (
                             <tr key={o.orderId} className={o.accepted ? 'row-up' : 'row-down'}>

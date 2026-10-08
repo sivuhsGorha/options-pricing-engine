@@ -22,7 +22,9 @@ public class AppCompositionRoot {
     public final LiveMarketSnapshotAdapter marketAdapter;
     public final PreTradeRiskFilter preTradeFilter;
     public final PortfolioRiskAdmission riskAdmission;
-    public final PaperTradingExecutionAdapter executionTransport;
+    public final ExchangeTransport executionTransport;
+    /** Null unless the Alpaca transport is selected. */
+    public final BookReconciler bookReconciler;
     public final OrderManager orderManager;
     public final StrategyExecutionLoop strategyLoop;
     public final QuantSimulationHarness harness;
@@ -62,13 +64,38 @@ public class AppCompositionRoot {
                         java.util.Map.of(symbol.trim().toUpperCase(java.util.Locale.ROOT), maxConcentration)),
                 null);
         this.riskAdmission = new PortfolioRiskAdmission(maxNotional, maxDelta, maxGamma, maxVega, maxPositionAbs);
-        this.executionTransport = new PaperTradingExecutionAdapter(positionTracker, slippageBps);
+        com.sbk.optionspricer.execution.TradingHalt tradingHalt = new com.sbk.optionspricer.execution.TradingHalt();
+        // Where orders go: the in-process simulator, or an Alpaca paper account (the client can only address the
+        // paper endpoint). With Alpaca, the book is reconciled with the account at start and every minute.
+        String transportName = config.getString("execution.transport", "paper");
+        java.util.function.Supplier<TransportStatus> transportStatus;
+        if ("alpaca".equals(transportName)) {
+            AlpacaPaperClient alpaca = AlpacaPaperClient.fromEnv();
+            long fillWaitSeconds = Math.max(1L, (long) config.getDouble("execution.fill_wait_seconds", 10.0));
+            AlpacaPaperTransport alpacaTransport = new AlpacaPaperTransport(alpaca, java.time.Duration.ofSeconds(fillWaitSeconds));
+            this.executionTransport = alpacaTransport;
+            this.bookReconciler = new BookReconciler(alpaca, positionTracker, tradingHalt, java.time.Duration.ofMinutes(1), java.time.Clock.systemUTC());
+            transportStatus = () -> alpacaTransport.status(bookReconciler.lastResult());
+            try {
+                AlpacaPaperClient.Account account = alpaca.account();
+                System.out.println("[TRANSPORT] alpaca paper account " + account.status() + ", options level " + account.optionsTradingLevel()
+                        + ", buying power " + String.format(java.util.Locale.ROOT, "%.0f %s", account.buyingPower(), account.currency())
+                        + (account.tradingBlocked() ? ", TRADING BLOCKED" : ""));
+            } catch (RuntimeException e) {
+                System.err.println("[TRANSPORT] alpaca paper account not reachable at start: " + e.getMessage() + "; orders will be rejected until it is");
+            }
+        } else {
+            this.executionTransport = new PaperTradingExecutionAdapter(positionTracker, slippageBps);
+            this.bookReconciler = null;
+            TransportStatus paper = TransportStatus.paper(slippageBps);
+            transportStatus = () -> paper;
+            System.out.println("[TRANSPORT] paper: orders fill in the in-process simulator");
+        }
         boolean allowSimulated = Boolean.parseBoolean(
                 com.sbk.optionspricer.config.EnvironmentConfigLoader.getOrDefault("ALLOW_SIMULATED_DATA", "false"));
         OrderManager.MarketDataPolicy dataPolicy = allowSimulated
                 ? OrderManager.MarketDataPolicy.allowSimulated()
                 : OrderManager.MarketDataPolicy.strict();
-        com.sbk.optionspricer.execution.TradingHalt tradingHalt = new com.sbk.optionspricer.execution.TradingHalt();
         tradingHalt.haltOnCriticalAlerts(engine.getGreekAlertManager());
         this.orderManager = new OrderManager(preTradeFilter, executionTransport, positionTracker, dataPolicy, tradingHalt, riskAdmission, contractMultiplier);
         this.strategyLoop = new StrategyExecutionLoop(symbol, orderManager, riskAdmission, positionTracker, baseQuantity, triggerPct, marketAdapter);
@@ -103,6 +130,7 @@ public class AppCompositionRoot {
         com.sbk.optionspricer.core.OperatorConsole console = new com.sbk.optionspricer.core.OperatorConsole(tradingHalt, harness, strategyLoop);
         dashboard.setOperatorControls(console);
         dashboard.setFeedStatusSource(spotProvider::lastKnownFeedStatus);
+        dashboard.setTransportStatus(transportStatus);
 
         // Marks the book every few seconds: option Greeks from the fitted surface, P&L against average cost.
         this.valuationService = new com.sbk.optionspricer.core.PortfolioValuationService(positionTracker, surfaceService, surfaceService,
@@ -126,6 +154,13 @@ public class AppCompositionRoot {
         harness.setOptionStrategy(volSpreadStrategy::step, java.time.Duration.ofSeconds((long) config.getDouble("strategy.option_interval_seconds", 30.0)));
         console.describeStrategy(harness::getStrategyMode,
                 () -> volSpreadStrategy.lastDecision().map(com.sbk.optionspricer.execution.VolSpreadStrategy.Decision::summary).orElse(null));
+
+        if (bookReconciler != null) {
+            // The first reconciliation runs before any order can be placed; a mismatch halts trading from the start.
+            BookReconciler.Result first = bookReconciler.reconcile();
+            System.out.println("[RECONCILE] " + first.status() + ": " + first.message());
+            bookReconciler.start();
+        }
     }
 
     /**
@@ -139,6 +174,9 @@ public class AppCompositionRoot {
         closed = true;
         System.out.println("[SHUTDOWN] stopping dashboard, surface calibration and engine");
         step("dashboard", dashboard::stop);
+        if (bookReconciler != null) {
+            step("reconciliation", bookReconciler::close);
+        }
         step("valuation", valuationService::close);
         step("surface calibration", surfaceService::close);
         step("engine", harness::stop);

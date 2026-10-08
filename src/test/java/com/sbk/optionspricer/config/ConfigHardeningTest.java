@@ -108,4 +108,24 @@ class ConfigHardeningTest {
         assertTrue(errors.stream().anyMatch(e -> e.contains("risk.max_gamma")), errors.toString());
         assertTrue(errors.stream().noneMatch(e -> e.contains("risk.max_vega")), errors.toString());
     }
+
+    @Test
+    void theTransportIsValidatedAndAlpacaNeedsItsKeys() throws Exception {
+        ConfigManager bogus = ConfigManager.fromFile(yaml(
+                "market_data:\n  refresh_interval_seconds: 900\ndashboard:\n  port: 8082\nexecution:\n  transport: ibkr\n  fill_wait_seconds: 0\n"));
+        List<String> errors = ConfigValidator.validate(bogus);
+        assertTrue(errors.stream().anyMatch(e -> e.contains("execution.transport") && e.contains("ibkr")), errors.toString());
+        assertTrue(errors.stream().anyMatch(e -> e.contains("execution.fill_wait_seconds")), errors.toString());
+
+        ConfigManager paper = ConfigManager.fromFile(yaml(
+                "market_data:\n  refresh_interval_seconds: 900\ndashboard:\n  port: 8082\nexecution:\n  transport: paper\n  fill_wait_seconds: 10\n"));
+        assertTrue(ConfigValidator.validate(paper).isEmpty(), ConfigValidator.validate(paper).toString());
+
+        ConfigManager alpaca = ConfigManager.fromFile(yaml(
+                "market_data:\n  refresh_interval_seconds: 900\ndashboard:\n  port: 8082\nexecution:\n  transport: alpaca\n"));
+        boolean keysPresent = EnvironmentConfigLoader.get("ALPACA_KEY_ID") != null && EnvironmentConfigLoader.get("ALPACA_SECRET") != null;
+        List<String> alpacaErrors = ConfigValidator.validate(alpaca);
+        assertEquals(!keysPresent, alpacaErrors.stream().anyMatch(e -> e.contains("ALPACA_KEY_ID")),
+                "the keys are required exactly when the transport is alpaca (present here: " + keysPresent + "): " + alpacaErrors);
+    }
 }

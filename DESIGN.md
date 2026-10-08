@@ -45,8 +45,10 @@ status>)` or `REJECTED: <reason>`), from `/api/positions`, `/api/control` and `/
 call POST endpoints that require the session cookie and the page's own Origin (see EXECUTION.md); every
 action is written to the event log with its outcome.
 
-**Footer ribbon.** SPY price and status, SOURCE, and GATEWAY, which reads `PAPER` because orders fill only in
-the paper-trading adapter.
+**Footer ribbon.** SPY price and status, SOURCE, and GATEWAY, which names the transport: `PAPER` (the
+in-process simulator) or `ALPACA` (the Alpaca paper account). The paper-trading panel's TRANSPORT badge adds
+the reconciliation state, and a line under the strategy row shows when the book was last reconciled or which
+positions differ.
 
 ---
 

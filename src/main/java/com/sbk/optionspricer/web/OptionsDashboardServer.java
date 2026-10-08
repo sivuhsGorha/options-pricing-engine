@@ -103,6 +103,46 @@ public class OptionsDashboardServer {
 
     private volatile com.sbk.optionspricer.volatility.SurfaceHistory surfaceHistory;
     private volatile com.sbk.optionspricer.execution.PnlHistory pnlHistory;
+    private volatile java.util.function.Supplier<com.sbk.optionspricer.execution.TransportStatus> transportStatus;
+
+    /** Says which transport orders go to and how the book reconciles with it. Call before {@link #start()}. */
+    public void setTransportStatus(java.util.function.Supplier<com.sbk.optionspricer.execution.TransportStatus> source) {
+        this.transportStatus = source;
+    }
+
+    /** The transport block of /api/control and /api/health; null when nothing is configured. */
+    static java.util.Map<String, Object> transportJson(com.sbk.optionspricer.execution.TransportStatus s) {
+        if (s == null) {
+            return null;
+        }
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("transport", s.transport());
+        body.put("venue", s.venue());
+        body.put("description", s.description());
+        body.put("checkedAt", s.checkedAt() == null ? null : s.checkedAt().toEpochMilli());
+        body.put("reconciliation", s.reconciliation());
+        body.put("differences", s.differences());
+        return body;
+    }
+
+    private com.sbk.optionspricer.execution.TransportStatus currentTransport() {
+        var source = transportStatus;
+        if (source == null) {
+            return null;
+        }
+        try {
+            return source.get();
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    /** The control state with the transport block added, so every control response says where orders go. */
+    private java.util.Map<String, Object> controlWithTransport(com.sbk.optionspricer.execution.OperatorControls.ControlState s) {
+        java.util.Map<String, Object> body = controlJson(s);
+        body.put("transport", transportJson(currentTransport()));
+        return body;
+    }
 
     /** Supplies the calibration record for /api/surface/history. Call before {@link #start()}. */
     public void setSurfaceHistory(com.sbk.optionspricer.volatility.SurfaceHistory history) {
@@ -374,11 +414,17 @@ public class OptionsDashboardServer {
             trading.put("status", "UNAVAILABLE");
         }
         components.put("trading", trading);
+        var transport = currentTransport();
+        boolean transportDegraded = false;
+        if (transport != null) {
+            components.put("transport", transportJson(transport));
+            transportDegraded = "MISMATCH".equals(transport.reconciliation()) || "UNREACHABLE".equals(transport.reconciliation());
+        }
         body.put("components", components);
 
         boolean marketFresh = "LIVE".equals(sourceStatus) || "DELAYED".equals(sourceStatus);
         boolean surfaceFailed = "FAILED".equals(surface.get("status"));
-        body.put("status", !riskReadable ? "down" : (marketFresh && !surfaceFailed && !halted) ? "ok" : "degraded");
+        body.put("status", !riskReadable ? "down" : (marketFresh && !surfaceFailed && !halted && !transportDegraded) ? "ok" : "degraded");
         body.put("uptimeSeconds", java.time.Duration.between(startedAt, java.time.Instant.now()).toSeconds());
         return body;
     }
@@ -764,7 +810,7 @@ public class OptionsDashboardServer {
                     sendJsonError(exchange, 405, "method not allowed");
                     return;
                 }
-                sendJson(exchange, 200, controlJson(controls.state()));
+                sendJson(exchange, 200, controlWithTransport(controls.state()));
                 return;
             }
             if (!acceptMutation(exchange)) return;
@@ -773,16 +819,16 @@ public class OptionsDashboardServer {
             switch (path) {
                 case "/api/control/halt" -> {
                     com.fasterxml.jackson.databind.JsonNode reason = body.get("reason");
-                    sendJson(exchange, 200, controlJson(controls.halt(reason == null || !reason.isTextual() ? null : reason.asText())));
+                    sendJson(exchange, 200, controlWithTransport(controls.halt(reason == null || !reason.isTextual() ? null : reason.asText())));
                 }
-                case "/api/control/resume" -> sendJson(exchange, 200, controlJson(controls.resume()));
+                case "/api/control/resume" -> sendJson(exchange, 200, controlWithTransport(controls.resume()));
                 case "/api/control/strategy" -> {
                     com.fasterxml.jackson.databind.JsonNode enabled = body.get("enabled");
                     if (enabled == null || !enabled.isBoolean()) {
                         sendJsonError(exchange, 400, "body must be {\"enabled\": true|false}");
                         return;
                     }
-                    sendJson(exchange, 200, controlJson(controls.setStrategyEnabled(enabled.asBoolean())));
+                    sendJson(exchange, 200, controlWithTransport(controls.setStrategyEnabled(enabled.asBoolean())));
                 }
                 default -> sendJsonError(exchange, 404, "not found");
             }
