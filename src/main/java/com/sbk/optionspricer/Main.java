@@ -88,6 +88,7 @@ public class Main {
         root.harness.start();
         root.dashboard.start();
         root.surfaceService.start();
+        root.valuationService.start();
         System.out.println("[SURFACE] Calibrating SSVI/SABR to the option chain in the background; the dashboard shows the status.");
 
         System.out.println("\n[SUCCESS] UNIFIED SYSTEM ONLINE AND PROCESSING REAL-TIME MMAP IPC STATE.");

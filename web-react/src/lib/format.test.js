@@ -6,6 +6,8 @@ describe('format', () => {
         expect(formatNumber(1234.5)).toBe('1,234.50');
         expect(formatCurrency(1234.5)).toBe('$1,234.50');
         expect(formatNumber(0)).toBe('0.00');
+        expect(formatCurrency(-75)).toBe('-$75.00');
+        expect(formatNumber(-12.25)).toBe('-12.25');
     });
 
     it('shows -- for anything that is not a finite number instead of NaN or null', () => {

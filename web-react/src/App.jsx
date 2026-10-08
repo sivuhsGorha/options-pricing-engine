@@ -28,6 +28,7 @@ function App() {
   });
   const [positions, setPositions] = useState({ halted: false, haltReason: null, positions: [] });
   const [orders, setOrders] = useState([]);
+  const [valuation, setValuation] = useState({ ready: false });
   const [control, setControl] = useState({ halted: false, haltReason: null, strategyEnabled: true, symbol: null, triggerPct: NaN, baseQuantity: 0 });
   const [logs, setLogs] = useState([{ time: '09:00:00', msg: 'AURA-OPT Unified Engine online. Mmap IPC active.' }]);
   const [surfaceData, setSurfaceData] = useState(null);
@@ -199,9 +200,10 @@ function App() {
     const fetchPositions = poll('/positions', setPositions, () => {});
     const fetchOrders = poll('/execution', setOrders, () => {});
     const fetchControl = poll('/control', setControl, () => {});
+    const fetchValuation = poll('/valuation', setValuation, () => {});
     const fetchHealthData = poll('/health', setHealthInfo, () => setHealthInfo({ symbol: 'SPY', providers: {} }));
 
-    const jobs = [[updateRiskMetrics, 1000], [fetchSpotData, 2000], [fetchSurfaceData, 5000], [fetchOtherSurfaces, 5000], [fetchHealthData, 5000], [fetchPositions, 2000], [fetchOrders, 2000], [fetchControl, 2000]];
+    const jobs = [[updateRiskMetrics, 1000], [fetchSpotData, 2000], [fetchSurfaceData, 5000], [fetchOtherSurfaces, 5000], [fetchHealthData, 5000], [fetchPositions, 2000], [fetchOrders, 2000], [fetchControl, 2000], [fetchValuation, 2000]];
     jobs.forEach(([job]) => job());
     const timers = jobs.map(([job, ms]) => setInterval(job, ms));
     return () => timers.forEach(clearInterval);
@@ -302,7 +304,7 @@ function App() {
           </div>
         </div>
 
-        <ExecutionPanel positions={positions} orders={orders} control={control} onHalt={haltTrading} onResume={resumeTrading} onToggleStrategy={toggleStrategy} />
+        <ExecutionPanel positions={positions} orders={orders} control={control} valuation={valuation} onHalt={haltTrading} onResume={resumeTrading} onToggleStrategy={toggleStrategy} />
       </div>
 
       <footer className="sys-footer">

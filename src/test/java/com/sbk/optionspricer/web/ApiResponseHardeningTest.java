@@ -52,6 +52,14 @@ class ApiResponseHardeningTest {
                        com.sbk.optionspricer.volatility.VolatilitySurfaceSource surfaceSource,
                        java.util.function.Supplier<java.util.Map<String, String>> feedStatus,
                        com.sbk.optionspricer.execution.OperatorControls controls) throws Exception {
+        start(reader, orderManager, tracker, adapter, surfaceSource, feedStatus, controls, null);
+    }
+
+    private void start(MmapStateReader reader, OrderManager orderManager, PositionTracker tracker, MarketSnapshotAdapter adapter,
+                       com.sbk.optionspricer.volatility.VolatilitySurfaceSource surfaceSource,
+                       java.util.function.Supplier<java.util.Map<String, String>> feedStatus,
+                       com.sbk.optionspricer.execution.OperatorControls controls,
+                       com.sbk.optionspricer.execution.ValuationSource valuationSource) throws Exception {
         webRoot = Files.createTempDirectory("api-hardening-web");
         server = new OptionsDashboardServer(OptionsDashboardServerTest.TEST_SECRET, OptionsDashboardServerTest.OPERATOR_PASSWORD,
                 OptionsDashboardServerTest.ALLOWED_ORIGIN, "127.0.0.1", 0, 0, reader, webRoot.toString(),
@@ -64,6 +72,9 @@ class ApiResponseHardeningTest {
         }
         if (controls != null) {
             server.setOperatorControls(controls);
+        }
+        if (valuationSource != null) {
+            server.setValuationSource(valuationSource);
         }
         server.start();
         OptionsDashboardServerTest.waitForWebSocketPort(server);
@@ -248,6 +259,46 @@ class ApiResponseHardeningTest {
         assertEquals(480.20, body.get("bid").asDouble(), 1e-9);
         assertEquals(480.30, body.get("ask").asDouble(), 1e-9);
         assertEquals(4321L, body.get("volume").asLong());
+    }
+
+    @Test
+    void valuationEndpointReportsMarksGreeksAndPnlWithTheirSourcesOrSaysWhyNot() throws Exception {
+        var row = new com.sbk.optionspricer.execution.Valuation.PositionValuation("SPY261120C00780000", "OPTION", 2, 100, 9.9, "MID",
+                2.0, 1580.0, 0.21, "SVI", 0.52, 0.012, 0.95, -5.1, 0.3, false, null);
+        var unvalued = new com.sbk.optionspricer.execution.Valuation.PositionValuation("SPY281215C00100000", "OPTION", 1, 100, Double.NaN, "NONE",
+                5.0, Double.NaN, Double.NaN, "NONE", Double.NaN, Double.NaN, Double.NaN, Double.NaN, Double.NaN, false, null);
+        var valuation = new com.sbk.optionspricer.execution.Valuation(Instant.now(), 780.25, "FINNHUB/DELAYED", java.util.List.of(row, unvalued),
+                1580.0, 75.0, 2 * 100 * 0.52, 2 * 100 * 0.012, 2 * 100 * 0.95, 2 * 100 * -5.1, 2 * 100 * 0.3, java.util.List.of("one warning"));
+        com.sbk.optionspricer.execution.ValuationSource ready = new com.sbk.optionspricer.execution.ValuationSource() {
+            @Override public java.util.Optional<com.sbk.optionspricer.execution.Valuation> latestValuation() { return java.util.Optional.of(valuation); }
+            @Override public String valuationStatus() { return ""; }
+        };
+        start(reader(() -> new MmapStateReader.RiskState(0, 0, 0, 0)), null, null, null, null, null, null, ready);
+
+        JsonNode body = MAPPER.readTree(get("/api/valuation").body());
+
+        assertTrue(body.get("ready").asBoolean());
+        assertEquals("FINNHUB/DELAYED", body.get("spotSource").asText());
+        assertEquals(1580.0, body.get("unrealizedPnl").asDouble(), 1e-9);
+        assertEquals(75.0, body.get("realizedPnl").asDouble(), 1e-9);
+        assertEquals(2 * 100 * -5.1, body.get("netTheta").asDouble(), 1e-6);
+        JsonNode first = body.get("positions").get(0);
+        assertEquals("MID", first.get("markSource").asText());
+        assertEquals("SVI", first.get("volSource").asText());
+        assertEquals(0.52, first.get("delta").asDouble(), 1e-9);
+        JsonNode second = body.get("positions").get(1);
+        assertTrue(second.get("mark").isNull(), "an unvalued contract has null, never 0 or NaN in the JSON");
+        assertTrue(second.get("delta").isNull());
+        server.stop();
+
+        com.sbk.optionspricer.execution.ValuationSource notYet = new com.sbk.optionspricer.execution.ValuationSource() {
+            @Override public java.util.Optional<com.sbk.optionspricer.execution.Valuation> latestValuation() { return java.util.Optional.empty(); }
+            @Override public String valuationStatus() { return "no spot price: cannot mark the book"; }
+        };
+        start(reader(() -> new MmapStateReader.RiskState(0, 0, 0, 0)), null, null, null, null, null, null, notYet);
+        JsonNode pending = MAPPER.readTree(get("/api/valuation").body());
+        assertFalse(pending.get("ready").asBoolean());
+        assertTrue(pending.get("status").asText().contains("no spot"));
     }
 
     @Test

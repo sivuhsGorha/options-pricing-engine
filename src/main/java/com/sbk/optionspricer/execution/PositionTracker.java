@@ -36,6 +36,10 @@ public class PositionTracker {
 
     private final Map<String, PortfolioPosition> positions = new LinkedHashMap<>();
     private final Map<String, Double> lastExecutionPrice = new LinkedHashMap<>();
+    /** Volume-weighted cost of the open quantity per symbol; absent when flat. */
+    private final Map<String, Double> averageCost = new LinkedHashMap<>();
+    /** P&L locked in by fills that reduced or flipped a position, in currency (quantity x multiplier x price difference). */
+    private double realizedPnl;
     private final FillRecorder fillRecorder;
 
     /** Live tracker: fills are recorded to the authoritative {@link FillLedger}. */
@@ -74,9 +78,47 @@ public class PositionTracker {
             throw new IllegalArgumentException("fill multiplier does not match existing position multiplier");
         }
 
+        int before = position.getQuantity();
         position.addQuantity(fill.quantity());
 
         lastExecutionPrice.put(symbol, fill.executionPrice());
+        bookCost(symbol, before, fill.quantity(), fill.multiplier(), fill.executionPrice());
+    }
+
+    /**
+     * Average-cost accounting. Adding to a position (or opening one) blends the fill into the average; reducing
+     * one realises {@code closed x multiplier x (price - average)} with the sign of the position; a fill that
+     * flips the position closes the old side and opens the new one at the fill price.
+     */
+    private void bookCost(String symbol, int before, int filled, int multiplier, double price) {
+        Double avg = averageCost.get(symbol);
+        if (before == 0 || avg == null || (before > 0) == (filled > 0)) {
+            double openQty = Math.abs(before);
+            double blended = avg == null || openQty == 0 ? price : (openQty * avg + Math.abs(filled) * price) / (openQty + Math.abs(filled));
+            averageCost.put(symbol, blended);
+            return;
+        }
+        int closed = Math.min(Math.abs(filled), Math.abs(before));
+        realizedPnl += closed * (double) multiplier * (price - avg) * Math.signum(before);
+        int remaining = before + filled;
+        if (remaining == 0) {
+            averageCost.remove(symbol);
+        } else if (Math.abs(filled) > Math.abs(before)) {
+            averageCost.put(symbol, price); // flipped: the remainder was opened at this fill
+        }
+    }
+
+    /** Average cost of the open quantity, or NaN when the symbol is flat or unknown. */
+    public synchronized double getAverageCost(String symbol) {
+        if (symbol == null || symbol.isBlank()) {
+            return Double.NaN;
+        }
+        Double avg = averageCost.get(symbol.trim().toUpperCase());
+        return avg == null ? Double.NaN : avg;
+    }
+
+    public synchronized double getRealizedPnl() {
+        return realizedPnl;
     }
 
     public synchronized PortfolioPosition getPosition(String symbol) {

@@ -7,8 +7,10 @@ const timeOf = (ms) => (ms ? new Date(ms).toLocaleTimeString() : '--');
  * Paper-trading state and operator controls: halt status with HALT / RESUME, the strategy switch with its
  * trigger and size, open positions, and the most recent orders with reasons for rejections.
  */
-export default function ExecutionPanel({ positions, orders, control, onHalt, onResume, onToggleStrategy }) {
+export default function ExecutionPanel({ positions, orders, control, valuation, onHalt, onResume, onToggleStrategy }) {
     const recent = [...orders].reverse().slice(0, 25);
+    const marks = new Map((valuation && valuation.ready && valuation.positions ? valuation.positions : []).map(v => [v.symbol, v]));
+    const pnlTone = (v) => (!Number.isFinite(v) ? '#9EC1FF' : v >= 0 ? '#00E676' : '#FF3D00');
     const accepted = orders.filter(o => o.accepted).length;
     const halted = control.halted;
     const triggerText = Number.isFinite(control.triggerPct) ? `${(control.triggerPct * 100).toFixed(3)}%` : '--';
@@ -42,6 +44,14 @@ export default function ExecutionPanel({ positions, orders, control, onHalt, onR
                     {control.strategyEnabled ? 'STRATEGY OFF' : 'STRATEGY ON'}
                 </button>
             </div>
+            <div style={{ padding: '6px 8px', fontSize: '12px', borderBottom: '1px solid #1C232D', color: '#9EC1FF' }}
+                title={valuation && valuation.warnings && valuation.warnings.length ? valuation.warnings.join('\n') : 'mark-to-market of the book'}>
+                {valuation && valuation.ready
+                    ? <>MARKED {timeOf(valuation.asOf)} · spot {formatNumber(valuation.spot)} ({valuation.spotSource}) · P&amp;L unrealised{' '}
+                        <span style={{ color: pnlTone(valuation.unrealizedPnl), fontWeight: 'bold' }}>{formatCurrency(valuation.unrealizedPnl)}</span>
+                        {' '}/ realised <span style={{ color: pnlTone(valuation.realizedPnl), fontWeight: 'bold' }}>{formatCurrency(valuation.realizedPnl)}</span></>
+                    : <>VALUATION: {valuation && valuation.status ? valuation.status : 'waiting'}</>}
+            </div>
             <div className="panel-content no-padding">
                 <table className="data-table">
                     <thead>
@@ -49,18 +59,26 @@ export default function ExecutionPanel({ positions, orders, control, onHalt, onR
                             <th>POSITION</th>
                             <th className="align-right">QTY</th>
                             <th className="align-right">x</th>
+                            <th className="align-right">MARK</th>
+                            <th className="align-right">P&amp;L</th>
                             <th className="align-right">NOTIONAL</th>
                         </tr>
                     </thead>
                     <tbody id="positions-body">
                         {positions.positions.length === 0 && (
-                            <tr><td colSpan={4}>No positions yet.</td></tr>
+                            <tr><td colSpan={6}>No positions yet.</td></tr>
                         )}
                         {positions.positions.map(p => (
                             <tr key={p.symbol}>
                                 <td title={p.symbol}>{describePosition(p)}</td>
                                 <td className="align-right mono">{p.quantity}</td>
                                 <td className="align-right mono">{p.multiplier}</td>
+                                <td className="align-right mono" title={marks.get(p.symbol) ? `${marks.get(p.symbol).markSource} · vol ${marks.get(p.symbol).volSource}` : 'not yet marked'}>
+                                    {marks.get(p.symbol) ? formatNumber(marks.get(p.symbol).mark) : '--'}
+                                </td>
+                                <td className="align-right mono" style={{ color: pnlTone(marks.get(p.symbol) ? marks.get(p.symbol).unrealizedPnl : NaN) }}>
+                                    {marks.get(p.symbol) ? formatCurrency(marks.get(p.symbol).unrealizedPnl) : '--'}
+                                </td>
                                 <td className="align-right mono">{formatCurrency(p.notional)}</td>
                             </tr>
                         ))}

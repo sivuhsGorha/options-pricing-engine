@@ -94,6 +94,69 @@ public class OptionsDashboardServer {
     }
 
     private volatile com.sbk.optionspricer.execution.OperatorControls operatorControls;
+    private volatile com.sbk.optionspricer.execution.ValuationSource valuationSource;
+
+    /** Supplies the mark-to-market of the book for /api/valuation. Call before {@link #start()}. */
+    public void setValuationSource(com.sbk.optionspricer.execution.ValuationSource source) {
+        this.valuationSource = source;
+    }
+
+    private static Object finiteOrNull(double v, int places) {
+        return Double.isFinite(v) ? Json.round(v, places) : null;
+    }
+
+    java.util.Map<String, Object> valuationBody() {
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        var source = valuationSource;
+        if (source == null) {
+            body.put("ready", false);
+            body.put("status", "no valuation service configured");
+            return body;
+        }
+        var latest = source.latestValuation();
+        if (latest.isEmpty()) {
+            body.put("ready", false);
+            body.put("status", source.valuationStatus());
+            return body;
+        }
+        var v = latest.get();
+        body.put("ready", true);
+        body.put("asOf", v.asOf().toEpochMilli());
+        body.put("spot", Json.round(v.spot(), 2));
+        body.put("spotSource", v.spotSource());
+        body.put("unrealizedPnl", finiteOrNull(v.unrealizedPnl(), 2));
+        body.put("realizedPnl", finiteOrNull(v.realizedPnl(), 2));
+        body.put("netDelta", finiteOrNull(v.netDelta(), 2));
+        body.put("netGamma", finiteOrNull(v.netGamma(), 4));
+        body.put("netVega", finiteOrNull(v.netVega(), 2));
+        body.put("netTheta", finiteOrNull(v.netTheta(), 2));
+        body.put("netRho", finiteOrNull(v.netRho(), 2));
+        body.put("warnings", v.warnings());
+        java.util.List<java.util.Map<String, Object>> rows = new java.util.ArrayList<>();
+        for (var p : v.positions()) {
+            java.util.Map<String, Object> row = new java.util.LinkedHashMap<>();
+            row.put("symbol", p.symbol());
+            row.put("kind", p.kind());
+            row.put("quantity", p.quantity());
+            row.put("multiplier", p.multiplier());
+            row.put("mark", finiteOrNull(p.mark(), 4));
+            row.put("markSource", p.markSource());
+            row.put("averageCost", finiteOrNull(p.averageCost(), 4));
+            row.put("unrealizedPnl", finiteOrNull(p.unrealizedPnl(), 2));
+            row.put("impliedVol", finiteOrNull(p.impliedVol(), 4));
+            row.put("volSource", p.volSource());
+            row.put("delta", finiteOrNull(p.delta(), 4));
+            row.put("gamma", finiteOrNull(p.gamma(), 6));
+            row.put("vega", finiteOrNull(p.vega(), 4));
+            row.put("theta", finiteOrNull(p.theta(), 4));
+            row.put("rho", finiteOrNull(p.rho(), 4));
+            row.put("expired", p.expired());
+            row.put("note", p.note());
+            rows.add(row);
+        }
+        body.put("positions", rows);
+        return body;
+    }
     private final java.time.Instant startedAt = java.time.Instant.now();
     /** Last known status per market-data provider, read without probing; null means none is wired in. */
     private volatile java.util.function.Supplier<java.util.Map<String, String>> feedStatusSource;
@@ -532,6 +595,12 @@ public class OptionsDashboardServer {
             }
             body.put("positions", rows);
             sendJson(exchange, 200, body);
+        }));
+
+        server.createContext("/api/valuation", guarded(exchange -> {
+            applySecurityHeaders(exchange, true, isSecureRequest(exchange));
+            if (!authorizeApi(exchange)) return;
+            sendJson(exchange, 200, valuationBody());
         }));
 
         server.createContext("/api/control", guarded(exchange -> {

@@ -28,6 +28,7 @@ public class AppCompositionRoot {
     public final QuantSimulationHarness harness;
     public final OptionsDashboardServer dashboard;
     public final com.sbk.optionspricer.core.VolatilitySurfaceService surfaceService;
+    public final com.sbk.optionspricer.core.PortfolioValuationService valuationService;
 
     public AppCompositionRoot() throws Exception {
         this.config = new ConfigManager();
@@ -90,6 +91,11 @@ public class AppCompositionRoot {
         dashboard.setSurfaceSource(surfaceService);
         dashboard.setOperatorControls(new com.sbk.optionspricer.core.OperatorConsole(tradingHalt, harness, strategyLoop));
         dashboard.setFeedStatusSource(spotProvider::lastKnownFeedStatus);
+
+        // Marks the book every few seconds: option Greeks from the fitted surface, P&L against average cost.
+        this.valuationService = new com.sbk.optionspricer.core.PortfolioValuationService(positionTracker, surfaceService, surfaceService,
+                () -> marketAdapter.getSnapshot(symbol), riskFreeRate, dividendYield, java.time.Duration.ofSeconds(5), java.time.Clock.systemUTC());
+        dashboard.setValuationSource(valuationService);
     }
 
     /**
@@ -103,6 +109,7 @@ public class AppCompositionRoot {
         closed = true;
         System.out.println("[SHUTDOWN] stopping dashboard, surface calibration and engine");
         step("dashboard", dashboard::stop);
+        step("valuation", valuationService::close);
         step("surface calibration", surfaceService::close);
         step("engine", harness::stop);
         System.out.println("[SHUTDOWN] done");

@@ -37,9 +37,14 @@ Per position (`risk/PortfolioPosition`) and aggregated over the book (`risk/Gree
 `risk/greeks/AnalyticalHigherGreeks` gives the closed-form higher-order values; `GreekDriftCalculator` projects
 delta decay (charm) and gamma bleed (color) over a horizon.
 
-The position tracker's default Greek model is **linear delta** (delta = quantity x multiplier) until a
-pricing model updates a position's Greeks; this is the number the dashboard shows as "net delta" from the
-execution book.
+`core/PortfolioValuationService` marks the book every five seconds: an option at its quote mid (or the
+Black-Scholes price when there is no two-sided quote) with Greeks from the fitted SVI slice at its strike and
+expiry (falling back to the quote's implied volatility, then the feed's figure), a stock at spot with delta
+one, an expired contract at intrinsic and flagged. It writes each option's delta, gamma and vega into its
+position, so the execution book's Greeks and the risk panel are pricer-derived, not linear placeholders, and
+keeps unrealised P&L against the tracker's average cost and realised P&L from reductions. Every number carries
+its source (`MID`/`MODEL`/`SPOT`/`INTRINSIC`, `SVI`/`MARKET_IV`/`FEED_IV`) and a contract that cannot be
+valued is reported as such, not as zero. `/api/valuation` returns it; before the first spot it says why not.
 
 ---
 
