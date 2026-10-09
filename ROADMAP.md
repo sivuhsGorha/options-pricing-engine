@@ -60,6 +60,12 @@ the formatters and the surface provenance badge (29 tests); `npm test` runs in C
 bid/ask/IV/volume/OI, no key) and is the default source, so the surface is a `FIT · CBOE_DELAYED` for every
 visitor instead of a demo; Yahoo (now `401 Invalid Crumb`) stays available but off by default.
 
+**First live session** (2026-10-09). The Alpaca paper transport ran through the US open: eight orders, two fills
+(one full, one partial), a one-share cancel-then-fill race, and the reconciliation halt that caught it within
+the minute. Two changes came out of it: the transport prices the touch from Alpaca's own latest quote instead
+of a lagging feed's print, and it waits for a cancel to settle before booking what filled. The session is logged
+with times, order ids and prices in `EXECUTION.md` section 5.
+
 ---
 
 ## Next: from a pricing dashboard to an options paper-trading system

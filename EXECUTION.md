@@ -45,12 +45,19 @@ exact decimal ticks of 0.0001 (HALF_EVEN), never by truncating `price * 10000`.
 bid if no ask) moved up by `execution.slippage_bps`; a sell at the bid moved down; quantity always fills in
 full; nothing leaves the process. `alpaca` (`AlpacaPaperTransport`, keys `ALPACA_KEY_ID` and `ALPACA_SECRET`
 in `.env`): each order goes to the Alpaca **paper** account as a day limit order at the touch (ask for a buy,
-bid for a sell; the order's own price without a book), under the OCC symbol for an option. The transport polls
-the order for up to `execution.fill_wait_seconds`; a fill comes back at Alpaca's average price, a partial fill
-is booked as `PARTIALLY_FILLED` and the remainder is cancelled, no fill is a rejection naming the wait, and
-Alpaca's own rejections (options level, buying power) come back verbatim. `AlpacaPaperClient` has the paper
-URL as a constant: no setting can point it at a live account. If a cancel fails the result says the order may
-still be working, and the reconciliation below catches any later fill.
+bid for a sell), under the OCC symbol for an option. The touch is Alpaca's own latest quote (stocks from the
+IEX feed, options from the indicative feed, read from `data.alpaca.markets` with the same keys) when it is less
+than 30 s old; otherwise the feed's book, and without one the order's own price. The result names which was
+used (`at limit 776.50 (the venue's ask)`). The venue's quote matters because the spot feed's print lagged the
+venue by 30 to 50 cents in the first live session, and a limit pegged to it sat outside the book (section 5).
+The transport polls the order for up to `execution.fill_wait_seconds`; a fill comes back at Alpaca's average
+price, a partial fill is booked as `PARTIALLY_FILLED` and the remainder is cancelled, no fill is a rejection
+naming the wait and the limit, and Alpaca's own rejections (options level, buying power) come back verbatim.
+After a cancel the transport waits up to 5 s for the order to leave its working states, because a fill can
+complete while the cancel is in flight; an order that filled in full in that window is booked in full
+(`filled before the cancel took effect`). `AlpacaPaperClient` has the paper URL as a constant: no setting can
+point it at a live account. If a cancel fails or does not settle, the result says the order may still be
+working, and the reconciliation below catches any later fill.
 
 **Reconciliation** (`BookReconciler`, Alpaca only): at start and every minute the local book is compared with
 the account's positions (signed quantity per symbol, options under their OCC symbol). Any difference trips
@@ -114,3 +121,47 @@ execution reports (partial fills), cancel and replace, cancel-on-disconnect, rec
 venue drop-copy, and certification against the venue's test environment. The Alpaca paper transport covers
 acknowledgement, polled execution reports, cancel and position reconciliation over REST against a broker's
 paper environment; nothing has been tested against a real exchange.
+
+---
+
+## 5. Live session log
+
+What the system did against the Alpaca paper account, with the numbers as recorded. Times are UTC (New York
+is UTC-4). Nothing here is simulated; the account, order ids and fills can be checked on app.alpaca.markets.
+
+### 2026-10-09: first fills, first reconciliation halt
+
+**Setup.** SPY, `execution.transport: alpaca`, `fill_wait_seconds: 10`. Momentum mode with a 0.001 % trigger (a
+test value, chosen so that the first ticks after the open would produce orders; the default is 0.1 %). Spot from
+Finnhub, labelled DELAYED, with no bid or ask published. Surface fitted to 960 Cboe quotes. Book empty,
+reconciliation OK at start. The engine ran the code at commit `10fb649`, before the two changes below.
+
+| Time | Order | What happened |
+| :-- | :-- | :-- |
+| 13:29:34 | 1, buy 10 | Rejected before the venue: spot was the previous close, status STALE |
+| 13:30:35 | 2, buy 10 | Limit 776.29 at Finnhub's last print; no fill in 10 s; cancelled. Alpaca received it at 13:30:40, five seconds after it was created: the round trip from this machine ate half the wait |
+| 13:31:27 to 13:33:50 | 3, 4, 5, buy 10 | Limits 776.35, 776.25, 776.70, all at the feed's last; none filled. At 13:33:07 the feed said 776.25 while Alpaca's book was 776.55 / 776.58: a buy limit 30 cents under the bid cannot fill in a rising market |
+| 13:34:20 | 6, sell 10 | **Filled in full at 776.64.** The market had risen through the feed's stale print, so the sell was marketable. First row in `data/fills.csv` |
+| 13:35:51 | 7, sell 10 | 9 filled at 776.5211 when the wait expired; cancel accepted; the tenth share filled at 776.57 **1.5 ms after** the single confirmation fetch. Booked as a partial of 9; Alpaca's average 776.526 for 10 |
+| 13:36:16 | reconciler | `local -19, alpaca -20`: **trading halted** within the minute, naming the symbol and both quantities |
+| 13:36:20 | 8 | Refused with the halt reason |
+
+**Operator actions.** The missing share was appended to `fills.csv` at the venue's price (776.570001, so the
+ledger's average matches Alpaca's), the mode was set back to `vol_spread` and the trigger to its default. The
+account ended the session short 20 SPY at an average of 776.583.
+
+**What it showed.** The gates, the transport, the ledger, the partial-fill path and the reconciliation halt all
+behaved as designed, and two of them exposed real defects in the design:
+
+1. **A limit at a delayed print is not "the touch".** The feed's last trade lagged the venue by 30 to 50 cents.
+   In a trend that makes every momentum order non-marketable (a buy sits under the bid, a sell over the ask);
+   the only fills came when the market moved through the stale price, which is adverse selection by
+   construction. The transport now prices the touch from Alpaca's own latest quote and falls back to the feed
+   only when that is unavailable or older than 30 s.
+2. **A cancel is not a terminal state.** One fetch after the cancel is a race against the venue; the order
+   completed 1.5 ms later. The transport now waits for the order to settle (up to 5 s) before reporting, and an
+   order that filled in full during the cancel is booked in full. The reconciler remains the backstop; it was
+   the backstop here, and it worked.
+
+**Not shown yet.** A restart with an open position (the ledger replay), a fill in vol-spread mode, and a full
+day of P&L samples with a position on the book.

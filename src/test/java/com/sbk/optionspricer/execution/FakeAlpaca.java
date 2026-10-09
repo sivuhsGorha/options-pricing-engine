@@ -8,8 +8,13 @@ import java.util.function.Supplier;
 /** A scripted Alpaca paper API: recorded JSON per endpoint, every request remembered. No network. */
 final class FakeAlpaca implements AlpacaPaperClient.Http {
 
+    /** Requests to the trading host, in order. */
     final List<String> calls = new ArrayList<>();
+    /** Requests to the market-data host (quotes), in order; kept apart because the real client uses two hosts. */
+    final List<String> dataCalls = new ArrayList<>();
     private Supplier<AlpacaPaperClient.Response> onPost = () -> new AlpacaPaperClient.Response(500, "{\"message\":\"no scripted POST\"}");
+    /** Without a scripted quote the data host answers 404, and the transport falls back to the feed's book. */
+    private Supplier<AlpacaPaperClient.Response> onQuote = () -> new AlpacaPaperClient.Response(404, "{\"message\":\"no scripted quote\"}");
     private final List<AlpacaPaperClient.Response> onGetOrder = new ArrayList<>();
     private Supplier<AlpacaPaperClient.Response> onDelete = () -> new AlpacaPaperClient.Response(204, "");
     private Supplier<AlpacaPaperClient.Response> onPositions = () -> new AlpacaPaperClient.Response(200, "[]");
@@ -25,6 +30,30 @@ final class FakeAlpaca implements AlpacaPaperClient.Http {
                         + "\"stop_price\":null,\"status\":\"%s\",\"extended_hours\":false,\"legs\":null}",
                 id, symbol, qty, filledQty == Math.rint(filledQty) ? Long.toString((long) filledQty) : Double.toString(filledQty),
                 filledAvgPrice == null ? "null" : "\"" + filledAvgPrice + "\"", side, status);
+    }
+
+    /** The latest stock quote, in the shape recorded from data.alpaca.markets (IEX feed) on 2026-10-09. */
+    static String stockQuoteJson(String symbol, double bid, double ask, String time) {
+        return String.format(Locale.ROOT,
+                "{\"quote\":{\"ap\":%s,\"as\":160,\"ax\":\"V\",\"bp\":%s,\"bs\":240,\"bx\":\"V\",\"c\":[\"R\"],\"t\":\"%s\",\"z\":\"B\"},\"symbol\":\"%s\"}",
+                ask, bid, time, symbol);
+    }
+
+    /** The latest option quote, in the shape recorded from data.alpaca.markets (indicative feed) on 2026-10-09. */
+    static String optionQuoteJson(String symbol, double bid, double ask, String time) {
+        return String.format(Locale.ROOT,
+                "{\"quotes\":{\"%s\":{\"ap\":%s,\"as\":76,\"ax\":\"Q\",\"bp\":%s,\"bs\":41,\"bx\":\"Q\",\"c\":\" \",\"t\":\"%s\"}}}",
+                symbol, ask, bid, time);
+    }
+
+    FakeAlpaca quote(String body) {
+        onQuote = () -> new AlpacaPaperClient.Response(200, body);
+        return this;
+    }
+
+    FakeAlpaca quoteThrows(RuntimeException e) {
+        onQuote = () -> { throw e; };
+        return this;
     }
 
     static String positionJson(String symbol, String side, String qty, String assetClass, String avgEntry) {
@@ -84,6 +113,12 @@ final class FakeAlpaca implements AlpacaPaperClient.Http {
         if ("DELETE".equals(method) && path.startsWith("/v2/orders/")) return onDelete.get();
         if ("GET".equals(method) && "/v2/positions".equals(path)) return onPositions.get();
         throw new IllegalStateException("unexpected request " + method + " " + path);
+    }
+
+    @Override
+    public AlpacaPaperClient.Response data(String path) {
+        dataCalls.add("GET " + path);
+        return onQuote.get();
     }
 
     long count(String prefix) {

@@ -21,20 +21,29 @@ import java.util.Locale;
  * ({@code ALPACA_KEY_ID}, {@code ALPACA_SECRET}) and are never logged; an error carries Alpaca's status code
  * and message only.
  *
- * <p>The HTTP layer is a one-method interface so tests run against recorded responses without a network.
+ * <p>Quotes are read from the market-data host ({@link #DATA_BASE_URL}, read-only, the same keys) so an order can
+ * be priced at the venue's own touch rather than at a lagging feed's print.
+ *
+ * <p>The HTTP layer is a small interface so tests run against recorded responses without a network.
  */
 public final class AlpacaPaperClient {
 
     public static final String PAPER_BASE_URL = "https://paper-api.alpaca.markets";
+    /** Market data (quotes). Stocks come from the IEX feed, the one a free data plan may read; options from the indicative feed. */
+    public static final String DATA_BASE_URL = "https://data.alpaca.markets";
     public static final String KEY_ID_VARIABLE = "ALPACA_KEY_ID";
     public static final String SECRET_VARIABLE = "ALPACA_SECRET";
 
     public record Response(int status, String body) {}
 
-    /** One HTTP exchange: method, path under the base URL, optional JSON body. */
-    @FunctionalInterface
+    /** One HTTP exchange: method, path under the trading base URL, optional JSON body. */
     public interface Http {
         Response send(String method, String path, String jsonBody);
+
+        /** A read from the market-data host; a test fake may answer it from the same script. */
+        default Response data(String path) {
+            return send("GET", path, null);
+        }
     }
 
     /** A non-2xx answer from Alpaca, with its message (for example {@code qty must be > 0}). */
@@ -102,27 +111,39 @@ public final class AlpacaPaperClient {
             throw new IllegalArgumentException("Alpaca key id and secret must not be blank");
         }
         HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
-        return (method, path, jsonBody) -> {
-            HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(PAPER_BASE_URL + path))
-                    .timeout(Duration.ofSeconds(15))
-                    .header("APCA-API-KEY-ID", keyId)
-                    .header("APCA-API-SECRET-KEY", secret)
-                    .header("Accept", "application/json");
-            if (jsonBody != null) {
-                builder.header("Content-Type", "application/json").method(method, HttpRequest.BodyPublishers.ofString(jsonBody));
-            } else {
-                builder.method(method, HttpRequest.BodyPublishers.noBody());
+        return new Http() {
+            @Override
+            public Response send(String method, String path, String jsonBody) {
+                return exchange(client, keyId, secret, PAPER_BASE_URL + path, method, jsonBody);
             }
-            try {
-                HttpResponse<String> response = client.send(builder.build(), HttpResponse.BodyHandlers.ofString());
-                return new Response(response.statusCode(), response.body());
-            } catch (IOException e) {
-                throw new UncheckedIOException(e);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new IllegalStateException("interrupted while talking to Alpaca", e);
+
+            @Override
+            public Response data(String path) {
+                return exchange(client, keyId, secret, DATA_BASE_URL + path, "GET", null);
             }
         };
+    }
+
+    private static Response exchange(HttpClient client, String keyId, String secret, String url, String method, String jsonBody) {
+        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(url))
+                .timeout(Duration.ofSeconds(15))
+                .header("APCA-API-KEY-ID", keyId)
+                .header("APCA-API-SECRET-KEY", secret)
+                .header("Accept", "application/json");
+        if (jsonBody != null) {
+            builder.header("Content-Type", "application/json").method(method, HttpRequest.BodyPublishers.ofString(jsonBody));
+        } else {
+            builder.method(method, HttpRequest.BodyPublishers.noBody());
+        }
+        try {
+            HttpResponse<String> response = client.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+            return new Response(response.statusCode(), response.body());
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("interrupted while talking to Alpaca", e);
+        }
     }
 
     // ------------------------------------------------------------------ endpoints
@@ -173,10 +194,38 @@ public final class AlpacaPaperClient {
         }
     }
 
+    /** The venue's latest two-sided quote and its time. */
+    public record Quote(double bid, double ask, java.time.Instant at) {}
+
+    /**
+     * The venue's latest quote: an option contract (OCC symbol) from the options indicative feed, anything else
+     * as a stock from the IEX feed. A missing or one-sided quote is an error, never a zero.
+     */
+    public Quote latestQuote(String symbol) {
+        if (symbol == null || symbol.isBlank()) {
+            throw new IllegalArgumentException("symbol must not be blank");
+        }
+        String sym = symbol.trim().toUpperCase(Locale.ROOT);
+        JsonNode q = com.sbk.optionspricer.instruments.OccSymbol.parse(sym).isPresent()
+                ? callData("/v1beta1/options/quotes/latest?symbols=" + sym).path("quotes").path(sym)
+                : callData("/v2/stocks/" + sym + "/quotes/latest?feed=iex").path("quote");
+        if (q.isMissingNode() || !q.hasNonNull("bp") || !q.hasNonNull("ap") || !q.hasNonNull("t")) {
+            throw new IllegalStateException("Alpaca returned no quote for " + sym);
+        }
+        return new Quote(number(q, "bp"), number(q, "ap"), java.time.Instant.parse(q.get("t").asText()));
+    }
+
     // ------------------------------------------------------------------ plumbing
 
     private JsonNode call(String method, String path, String body) {
-        Response r = http.send(method, path, body);
+        return parse(http.send(method, path, body), method, path);
+    }
+
+    private JsonNode callData(String path) {
+        return parse(http.data(path), "GET", path);
+    }
+
+    private static JsonNode parse(Response r, String method, String path) {
         if (r.status() / 100 != 2) {
             throw new AlpacaException(r.status(), message(r));
         }
