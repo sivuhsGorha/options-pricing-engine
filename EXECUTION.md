@@ -162,6 +162,18 @@ behaved as designed, and two of them exposed real defects in the design:
    completed 1.5 ms later. The transport now waits for the order to settle (up to 5 s) before reporting, and an
    order that filled in full during the cancel is booked in full. The reconciler remains the backstop; it was
    the backstop here, and it worked.
+3. **The option quotes were stale for thirteen minutes in every fifteen.** After the restart (13:49, in
+   vol-spread mode) the strategy printed `WAIT - SPY261106C00779000: quote STALE` with the market open. Cboe's
+   document was fresh when fetched (its timestamp was 16 s old when checked at 13:54), but it was fetched only
+   at each 15-minute calibration, and a quote is STALE 120 s after the feed stamped it. The console confirmed
+   the shape of it: thirty `WAIT - quote STALE` steps, then, right after the 14:06 refit, the strategy's first
+   real decisions, `HOLD 2026-11-06 779: market 12.3% vs ref 12.0% (edge +0.32 pts) - edge within the
+   1.00-point band`, twice, and STALE again within the minute. The chains now reload every
+   `market_data.quote_refresh_seconds` (60 by default) on the calibration thread, without refitting, and the
+   Cboe document cache was cut from 5 min to 30 s so that a reload actually fetches.
 
-**Not shown yet.** A restart with an open position (the ledger replay), a fill in vol-spread mode, and a full
-day of P&L samples with a position on the book.
+**Restart.** At 13:49 the engine was started again by hand with the position on the book:
+`3 fills replayed, 1 open positions`, then `RECONCILE OK: book matches the Alpaca account (1 open positions)`.
+The book, its average cost and the P&L came back from the ledger alone.
+
+**Not shown yet.** A fill in vol-spread mode, and a full day of P&L samples with a position on the book.

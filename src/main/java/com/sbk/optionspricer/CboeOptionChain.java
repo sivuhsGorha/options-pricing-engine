@@ -33,7 +33,8 @@ import java.util.regex.Pattern;
 public final class CboeOptionChain implements OptionChainProvider {
 
     public static final String SOURCE = "CBOE_DELAYED";
-    static final Duration CACHE_TTL = Duration.ofMinutes(5);
+    /** Long enough that one calibration (expiry listing plus four chains) costs one request; short enough that a quote refresh every minute fetches a new document. */
+    static final Duration CACHE_TTL = Duration.ofSeconds(30);
     private static final String URL_TEMPLATE = "https://cdn.cboe.com/api/global/delayed_quotes/options/%s.json";
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final Pattern SYMBOL = Pattern.compile("^[A-Z0-9._-]{1,10}$");

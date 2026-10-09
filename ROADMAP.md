@@ -62,9 +62,12 @@ visitor instead of a demo; Yahoo (now `401 Invalid Crumb`) stays available but o
 
 **First live session** (2026-10-09). The Alpaca paper transport ran through the US open: eight orders, two fills
 (one full, one partial), a one-share cancel-then-fill race, and the reconciliation halt that caught it within
-the minute. Two changes came out of it: the transport prices the touch from Alpaca's own latest quote instead
-of a lagging feed's print, and it waits for a cancel to settle before booking what filled. The session is logged
-with times, order ids and prices in `EXECUTION.md` section 5.
+the minute. Three changes came out of it: the transport prices the touch from Alpaca's own latest quote instead
+of a lagging feed's print; it waits for a cancel to settle before booking what filled; and the option chains are
+reloaded every minute between the 15-minute calibrations, because the vol-spread strategy had been seeing STALE
+quotes for thirteen minutes in every fifteen. A restart with the position on the book rebuilt it from the ledger
+and reconciled with the account. The session is logged with times, order ids and prices in `EXECUTION.md`
+section 5.
 
 ---
 

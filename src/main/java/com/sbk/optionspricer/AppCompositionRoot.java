@@ -119,8 +119,11 @@ public class AppCompositionRoot {
         double riskFreeRate = config.getDouble("market_data.risk_free_rate", 0.05);
         double dividendYield = config.getDouble("market_data.dividend_yield", 0.0);
         long refreshSeconds = Math.max(30L, (long) config.getDouble("market_data.refresh_interval_seconds", 900.0));
+        // Quotes are reloaded far more often than the surface is refitted: the strategy judges a quote STALE after 120 s.
+        long quoteSeconds = Math.max(10L, (long) config.getDouble("market_data.quote_refresh_seconds", 60.0));
         this.surfaceService = new com.sbk.optionspricer.core.VolatilitySurfaceService(engine.getOptionChainProvider(), symbol,
-                riskFreeRate, dividendYield, java.time.Duration.ofSeconds(refreshSeconds), java.time.Clock.systemUTC(), engine::recordChainSnapshots);
+                riskFreeRate, dividendYield, java.time.Duration.ofSeconds(refreshSeconds), java.time.Duration.ofSeconds(quoteSeconds),
+                java.time.Clock.systemUTC(), engine::recordChainSnapshots);
         dashboard.setSurfaceSource(surfaceService);
         // Every calibration is recorded so ATM vol and skew can be charted over the day, across restarts.
         com.sbk.optionspricer.volatility.SurfaceHistory surfaceHistory = new com.sbk.optionspricer.volatility.SurfaceHistory(dataDir.resolve("surface_history.csv"));

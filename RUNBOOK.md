@@ -55,7 +55,7 @@ background and the panel badge shows `LOADING` until it does.
 | Startup prints `[CONFIG] ...` and exits 2 | configuration error | the message names the line or key; `--check-config` lists all of them |
 | Strategy row says `WAIT - no loaded expiry at least 14 days out` | the chains have not loaded yet, or every loaded expiry is too close | wait for calibration (the surface badge turns FIT) |
 | Strategy row says `WAIT - ... SIMULATED` or `... disagrees with the live spot` | the chain is the synthetic fallback; the strategy will not trade a generated chain | the surface service retries Cboe within a minute; check `cdn.cboe.com` is reachable |
-| Strategy row says `WAIT - ... quote STALE` | the Cboe document is older than two minutes (outside US hours this is normal) | wait for market hours |
+| Strategy row says `WAIT - ... quote STALE` | the Cboe document the quote came from is older than two minutes. Outside US hours this is normal. During market hours it means the quote reload (`market_data.quote_refresh_seconds`, default 60) is failing or too slow: the console prints `[SURFACE] quote refresh failed, keeping the last chains: ...` | outside hours, wait; during hours, check `cdn.cboe.com` is reachable and that the interval is well under 120 s |
 | Strategy row says `HOLD ... edge within the band` | normal: the market is within `strategy.vol_edge` of the reference surface | nothing; the edge is shown so you can judge the band |
 
 ## Secrets

@@ -31,6 +31,8 @@ public final class ConfigValidator {
 
         number(config, errors, "market_data.refresh_interval_seconds", 900.0,
                 v -> v > 0.0, "must be a positive number of seconds");
+        number(config, errors, "market_data.quote_refresh_seconds", 60.0,
+                v -> v >= 10.0 && v <= 900.0, "must be between 10 and 900 seconds (how often option quotes are reloaded between calibrations)");
         number(config, errors, "market_data.spot", 100.0, v -> v > 0.0, "must be positive");
         number(config, errors, "market_data.risk_free_rate", 0.05, v -> v > -1.0 && v < 1.0, "must be a decimal rate such as 0.05");
         number(config, errors, "market_data.dividend_yield", 0.0, v -> v >= 0.0 && v < 1.0, "must be a decimal yield such as 0.015");

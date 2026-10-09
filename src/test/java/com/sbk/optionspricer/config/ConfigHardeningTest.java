@@ -110,6 +110,21 @@ class ConfigHardeningTest {
     }
 
     @Test
+    void theQuoteRefreshCadenceIsBounded() throws Exception {
+        ConfigManager tooFast = ConfigManager.fromFile(yaml(
+                "market_data:\n  refresh_interval_seconds: 900\n  quote_refresh_seconds: 5\ndashboard:\n  port: 8082\n"));
+        List<String> errors = ConfigValidator.validate(tooFast);
+        assertTrue(errors.stream().anyMatch(e -> e.contains("market_data.quote_refresh_seconds")), errors.toString());
+
+        ConfigManager fine = ConfigManager.fromFile(yaml(
+                "market_data:\n  refresh_interval_seconds: 900\n  quote_refresh_seconds: 60\ndashboard:\n  port: 8082\n"));
+        assertTrue(ConfigValidator.validate(fine).stream().noneMatch(e -> e.contains("quote_refresh")), ConfigValidator.validate(fine).toString());
+
+        ConfigManager absent = ConfigManager.fromFile(yaml("market_data:\n  refresh_interval_seconds: 900\ndashboard:\n  port: 8082\n"));
+        assertTrue(ConfigValidator.validate(absent).stream().noneMatch(e -> e.contains("quote_refresh")), "the key is optional; the default is 60 s");
+    }
+
+    @Test
     void theTransportIsValidatedAndAlpacaNeedsItsKeys() throws Exception {
         ConfigManager bogus = ConfigManager.fromFile(yaml(
                 "market_data:\n  refresh_interval_seconds: 900\ndashboard:\n  port: 8082\nexecution:\n  transport: ibkr\n  fill_wait_seconds: 0\n"));

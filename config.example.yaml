@@ -5,6 +5,7 @@ market_data:
   # yahoo_finance: needs a cookie/crumb Yahoo no longer grants to plain requests; kept for completeness.
   sources: [cboe]
   refresh_interval_seconds: 900      # how often the surface is re-fitted
+  quote_refresh_seconds: 60          # how often the option chain is reloaded between re-fits; a quote is STALE 120 s after the feed stamped it
   live_data_enabled: true
   risk_free_rate: 0.05               # flat rate used for forwards and pricing
   dividend_yield: 0.012              # continuous yield of the underlying (SPY pays ~1.2%)

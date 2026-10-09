@@ -46,6 +46,43 @@ class VolatilitySurfaceServiceTest {
         }
     };
 
+    /** A clock the test moves by hand. */
+    static final class ManualClock extends Clock {
+        java.time.Instant now = java.time.Instant.parse("2026-10-09T13:30:00Z");
+        @Override public java.time.ZoneId getZone() { return java.time.ZoneOffset.UTC; }
+        @Override public Clock withZone(java.time.ZoneId zone) { return this; }
+        @Override public java.time.Instant instant() { return now; }
+    }
+
+    /** A venue serving generated chains as market data, each stamped with the time it was served; counts what it served and can go down. */
+    static final class StampingVenue implements OptionChainProvider {
+        private final SyntheticOptionChainProvider inner = new SyntheticOptionChainProvider(100.0, 0.2, 0.05, 0.0);
+        private final Clock clock;
+        final AtomicInteger served = new AtomicInteger();
+        volatile boolean down;
+
+        StampingVenue(Clock clock) {
+            this.clock = clock;
+        }
+
+        @Override
+        public OptionChain getOptionChain(String symbol, LocalDate expiry) {
+            if (down) throw new RuntimeException("Cboe returned HTTP 503");
+            served.incrementAndGet();
+            return inner.getOptionChain(symbol, expiry);
+        }
+
+        @Override
+        public OptionChainProvider.SourcedChain getSourcedChain(String symbol, LocalDate expiry) {
+            return new OptionChainProvider.SourcedChain(getOptionChain(symbol, expiry), "FAKE_VENUE", true, List.of(), clock.instant());
+        }
+
+        @Override
+        public String sourceName() {
+            return "FAKE_VENUE";
+        }
+    }
+
     private static VolatilitySurfaceService service(OptionChainProvider provider, AtomicInteger chainsSeen) {
         return new VolatilitySurfaceService(provider, "SPY", 0.05, 0.0, Duration.ofMinutes(15), Clock.systemUTC(),
                 chain -> { if (chainsSeen != null) chainsSeen.incrementAndGet(); });
@@ -194,7 +231,84 @@ class VolatilitySurfaceServiceTest {
 
         VolatilitySurfaceService market = service(new CompositeOptionChainProvider(List.of(FAKE_VENUE, new SyntheticOptionChainProvider())), null);
         market.refresh();
-        assertEquals(Duration.ofMinutes(15), market.nextDelay(), "a market-data surface waits the full interval");
+        assertEquals(VolatilitySurfaceService.DEFAULT_QUOTE_REFRESH, market.nextDelay(), "a market-data surface ticks every quote interval; the refit waits the full interval");
+
+        VolatilitySurfaceService slowQuotes = new VolatilitySurfaceService(new CompositeOptionChainProvider(List.of(FAKE_VENUE, new SyntheticOptionChainProvider())),
+                "SPY", 0.05, 0.0, Duration.ofMinutes(15), Duration.ofMinutes(5), Clock.systemUTC(), null);
+        slowQuotes.refresh();
+        assertEquals(Duration.ofMinutes(5), slowQuotes.nextDelay());
+        VolatilitySurfaceService quotesSlowerThanFits = new VolatilitySurfaceService(FAKE_VENUE, "SPY", 0.05, 0.0, Duration.ofMinutes(2), Duration.ofMinutes(5), Clock.systemUTC(), null);
+        quotesSlowerThanFits.refresh();
+        assertEquals(Duration.ofMinutes(2), quotesSlowerThanFits.nextDelay(), "the quote interval never exceeds the calibration interval");
+    }
+
+    // Live on 2026-10-09: the chains were loaded only at each 15-minute calibration and a quote is STALE 120 s after
+    // the feed stamped it, so the vol-spread strategy saw tradable quotes for about two minutes in fifteen and
+    // spent the morning on "WAIT - quote STALE". Quotes now reload on their own cadence; the surface refits on its own.
+
+    @Test
+    void quotesAreReloadedOnTheirOwnCadenceAndTheSurfaceRefitsOnlyOnTheLongOne() {
+        ManualClock clock = new ManualClock();
+        StampingVenue venue = new StampingVenue(clock);
+        VolatilitySurfaceService service = new VolatilitySurfaceService(venue, "SPY", 0.05, 0.0, Duration.ofMinutes(15), Duration.ofMinutes(1), clock, null);
+        java.time.Instant t0 = clock.now;
+        assertTrue(service.fitDue(clock.now), "nothing fitted yet");
+        assertTrue(service.lastQuoteRefreshAt().isEmpty());
+
+        service.runOnce();
+
+        assertEquals(VolatilitySurfaceSource.State.READY, service.status().state(), service.status().message());
+        assertEquals(t0, service.latest().orElseThrow().asOf());
+        assertEquals(4, venue.served.get(), "the calibration loaded four chains");
+        assertEquals(t0, service.lastQuoteRefreshAt().orElseThrow());
+        String contract = com.sbk.optionspricer.instruments.OccSymbol.format("SPY", service.loadedExpiries().get(0), com.sbk.optionspricer.OptionType.CALL, 100.0);
+        assertEquals(com.sbk.optionspricer.market.MarketDataStatus.DELAYED, service.optionQuote(contract).orElseThrow().status());
+
+        clock.now = t0.plusSeconds(150);
+        assertEquals(com.sbk.optionspricer.market.MarketDataStatus.STALE, service.optionQuote(contract).orElseThrow().status(),
+                "the chains loaded at the calibration have aged past the 120 s window");
+        assertFalse(service.fitDue(clock.now), "a market-data surface is refitted only every 15 minutes");
+        assertEquals(Duration.ofMinutes(1), service.nextDelay(), "but the worker ticks every quote interval");
+
+        service.runOnce();
+
+        assertEquals(8, venue.served.get(), "the tick reloaded the chains");
+        assertEquals(t0, service.latest().orElseThrow().asOf(), "and did not refit");
+        assertEquals(clock.now, service.lastQuoteRefreshAt().orElseThrow());
+        assertEquals(com.sbk.optionspricer.market.MarketDataStatus.DELAYED, service.optionQuote(contract).orElseThrow().status(), "the quotes are fresh again");
+
+        clock.now = t0.plus(Duration.ofMinutes(15));
+        assertTrue(service.fitDue(clock.now));
+        service.runOnce();
+        assertEquals(clock.now, service.latest().orElseThrow().asOf(), "refitted on the long cadence");
+        assertEquals(12, venue.served.get());
+    }
+
+    @Test
+    void aFailedQuoteReloadKeepsTheLastChainsAndTheSurface() {
+        ManualClock clock = new ManualClock();
+        StampingVenue venue = new StampingVenue(clock);
+        VolatilitySurfaceService service = new VolatilitySurfaceService(venue, "SPY", 0.05, 0.0, Duration.ofMinutes(15), Duration.ofMinutes(1), clock, null);
+        java.time.Instant t0 = clock.now;
+        service.runOnce();
+        assertEquals(4, service.loadedExpiries().size());
+
+        venue.down = true;
+        clock.now = t0.plusSeconds(60);
+        assertFalse(service.refreshQuotes(), "nothing loaded");
+
+        assertEquals(VolatilitySurfaceSource.State.READY, service.status().state(), "a failed reload does not fail the surface");
+        assertEquals(t0, service.latest().orElseThrow().asOf());
+        assertEquals(4, service.loadedExpiries().size(), "the last chains are kept");
+        assertEquals(t0, service.lastQuoteRefreshAt().orElseThrow(), "and the reload time is not advanced");
+        String contract = com.sbk.optionspricer.instruments.OccSymbol.format("SPY", service.loadedExpiries().get(0), com.sbk.optionspricer.OptionType.CALL, 100.0);
+        clock.now = t0.plusSeconds(200);
+        assertEquals(com.sbk.optionspricer.market.MarketDataStatus.STALE, service.optionQuote(contract).orElseThrow().status(), "so the old quotes age into STALE and the strategy waits");
+
+        venue.down = false;
+        service.runOnce();
+        assertEquals(VolatilitySurfaceSource.State.READY, service.status().state());
+        assertEquals(com.sbk.optionspricer.market.MarketDataStatus.DELAYED, service.optionQuote(contract).orElseThrow().status());
     }
 
     @Test

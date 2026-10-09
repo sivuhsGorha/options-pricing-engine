@@ -64,7 +64,7 @@ to implied volatility by `VolatilitySurfaceCalibrator`, which returns no value r
 price cannot be inverted.
 
 **Surface calibration** (`core/VolatilitySurfaceService`, `volatility/SurfaceFitter`): on its own thread,
-every `market_data.refresh_interval_seconds`, the service asks the provider for its listed expiries (Cboe's
+every `market_data.refresh_interval_seconds` (900 by default), the service asks the provider for its listed expiries (Cboe's
 contract list; the next eight monthly third Fridays for providers without a listing), picks the dates nearest
 to 1, 2, 3 and 6 months, loads those chains, inverts the out-of-the-money two-sided quotes to implied volatility,
 and fits SSVI (global eta, gamma, rho with per-expiry ATM variance from the data), raw SVI (a, b, rho, m, sigma
@@ -72,6 +72,15 @@ per expiry) and SABR (alpha, rho, nu per expiry, beta 0.5) by Nelder-Mead least 
 the quotes used and skipped, the RMSE, the parameters, whether SSVI's closed-form no-arbitrage conditions hold,
 and warnings. `/api/surface3d` returns it, or the calibration status while nothing is fitted. If the chain came
 from the synthetic fallback the surface is labelled `DEMO`; nothing on the startup path waits for this.
+
+**Quote reloads between calibrations.** The chains are reloaded every `market_data.quote_refresh_seconds` (60 by
+default, 10 to 900) without refitting, because a quote is `STALE` 120 s after the feed stamped it: chains loaded
+only at each 15-minute calibration were tradable for about two minutes in fifteen, and on 2026-10-09 the
+vol-spread strategy spent the morning on `WAIT - quote STALE`. A failed reload keeps the last chains (which then
+age into `STALE`, so the strategy waits) and does not touch the surface or its status. Cboe serves the whole
+chain as one document of several megabytes, so the reload costs that much per interval; raise the interval if
+bandwidth matters more than quote freshness. The Cboe document cache is 30 s, long enough that one calibration
+(expiry listing plus four chains) is one request.
 
 **Surface history** (`volatility/SurfaceHistory`): every calibration appends one row per model to
 `surface_history.csv` under `DATA_DIR`: the front-expiry ATM vol (the fitted vol at strike = spot), the skew
