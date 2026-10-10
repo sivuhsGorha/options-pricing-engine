@@ -179,6 +179,13 @@ public final class VolSpreadStrategy {
 
     private Decision manageOpenStraddle(Instant now, LocalDate today, MarketSnapshot spot, List<String> orders) {
         int sign = Integer.signum(tracker.getNetQuantity(openCall) != 0 ? tracker.getNetQuantity(openCall) : tracker.getNetQuantity(openPut));
+        if ((tracker.getNetQuantity(openCall) == 0) != (tracker.getNetQuantity(openPut) == 0)) {
+            // One leg only: a refused second leg, or a flatten that was refused earlier. A lone short option is a
+            // naked position the strategy never intends to hold, whatever the edge says, so it is closed first.
+            closeStraddle(orders);
+            return record(new Decision(now, "CLOSE", "only one leg is held; flattening it", openExpiry, openStrike,
+                    Double.NaN, Double.NaN, Double.NaN, sign, orders));
+        }
         double t = TimeConventions.yearFraction(today, openExpiry);
         long daysLeft = Math.round(t * TimeConventions.DAYS_PER_YEAR);
         if (daysLeft <= params.maxDaysToExpiry()) {
@@ -281,9 +288,17 @@ public final class VolSpreadStrategy {
         openPut = put;
         openExpiry = front;
         openStrike = strike;
+        if (filledLegs == 1) {
+            // Never carry a lone leg: close it now. If the close is refused too, the book still holds it and the
+            // next step flattens it first (see manageOpenStraddle).
+            closeStraddle(orders);
+            String left = hasOpenStraddle() ? "; the close was refused, the next step retries" : "";
+            return record(new Decision(now, sell ? "SELL_STRADDLE_REJECTED" : "BUY_STRADDLE_REJECTED",
+                    "second leg refused; the first leg was flattened" + left, front, strike, edge.marketIv(), edge.referenceIv(), edge.value(),
+                    hasOpenStraddle() ? (sell ? -1 : 1) : 0, orders));
+        }
         String action = sell ? "SELL_STRADDLE" : "BUY_STRADDLE";
-        String reason = filledLegs == 2 ? "market " + (sell ? "rich" : "cheap") + " to the " + params.referenceModel() + " reference by more than the band"
-                : "only one leg filled; the next step will flatten it";
+        String reason = "market " + (sell ? "rich" : "cheap") + " to the " + params.referenceModel() + " reference by more than the band";
         return record(new Decision(now, action, reason, front, strike, edge.marketIv(), edge.referenceIv(), edge.value(), sell ? -1 : 1, orders));
     }
 

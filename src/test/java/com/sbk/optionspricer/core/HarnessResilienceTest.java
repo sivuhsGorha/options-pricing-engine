@@ -48,6 +48,49 @@ class HarnessResilienceTest {
         assertTrue(elapsedMs < 1_500, "start() took " + elapsedMs + "ms: it blocked on provider network calls");
     }
 
+    // Found on review (2026-10-10): the strategy step ran on the 10 ms engine tick, so an order waiting on the venue
+    // (up to 15 s with the Alpaca transport) stopped risk publication and limit checks for as long as it waited.
+
+    @Test
+    void aStrategyStepWaitingOnTheVenueDoesNotStopTheEngineTickAndIsNeverEnteredTwice() throws Exception {
+        System.setProperty("MMAP_STATE_FILE", "target/harness_blocking_state.dat");
+        AtomicInteger publishes = new AtomicInteger();
+        MmapStatePublisher publisher = new MmapStatePublisher() {
+            @Override
+            public void publishRiskState(double netDelta, double netGamma, double netVega, double scenarioMargin) {
+                publishes.incrementAndGet();
+            }
+        };
+        UnifiedQuantEngine engine = new UnifiedQuantEngine(publisher, code -> fail("engine must not exit: " + code));
+        LiveSpotProvider offline = new LiveSpotProvider(null, null, null, null,
+                (url, headers) -> { throw new java.io.IOException("offline test"); });
+        QuantSimulationHarness harness = new QuantSimulationHarness(engine, offline);
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        AtomicInteger entered = new AtomicInteger();
+        harness.setStrategyMode("vol_spread");
+        harness.setOptionStrategy(() -> {
+            entered.incrementAndGet();
+            try {
+                release.await(10, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }, java.time.Duration.ofMillis(10));
+
+        try {
+            harness.start();
+            Thread.sleep(150);
+            int atFirst = publishes.get();
+            Thread.sleep(600);
+            int whileBlocked = publishes.get() - atFirst;
+            assertEquals(1, entered.get(), "the step is due every 10 ms but must not be entered again while it is still running");
+            assertTrue(whileBlocked >= 20, "the engine must keep publishing risk while a step waits on the venue; ticks=" + whileBlocked);
+        } finally {
+            release.countDown();
+            harness.stop();
+        }
+    }
+
     @Test
     void failingStrategyKeepsTheEngineTickingAndLogsAreThrottled() throws Exception {
         System.setProperty("MMAP_STATE_FILE", "target/harness_resilience_state.dat");

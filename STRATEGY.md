@@ -17,7 +17,10 @@ them for features. `strategy.mode` selects which one runs; the operator switch s
   the quotes it was fitted to and carries no signal about them, whereas the three-parameter global surface is a
   smoothed value the market deviates from. `edge = market IV - reference IV`.
 - **Entry**: edge above `vol_edge` (default 1 vol point) sells `contracts` straddles; below `-vol_edge` buys.
-  One straddle at a time. The second leg is never sent if the first is refused by the order gates.
+  One straddle at a time. The second leg is never sent if the first is refused by the order gates. If the first
+  leg fills and the second is refused, the first is closed in the same step; if that close is refused too, the
+  next step closes the lone leg before doing anything else, whatever the edge says. A single option leg is
+  never held as if it were a straddle.
 - **Exit**: the edge back inside half the band (or through zero), or the expiry within `max_days_to_expiry`.
 - **Hedge**: whenever the valuation's net delta exceeds `hedge_band` shares, shares are traded to flatten it,
   before the straddle logic runs; after a close this flattens the hedge too.

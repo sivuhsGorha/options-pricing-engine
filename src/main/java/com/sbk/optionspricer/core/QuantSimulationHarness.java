@@ -48,18 +48,62 @@ public class QuantSimulationHarness implements com.sbk.optionspricer.execution.S
         return strategyMode;
     }
 
+    /** True when the options strategy is installed, enabled, selected and its interval has elapsed. */
+    private synchronized boolean optionStepDue(long nowMs) {
+        return optionStrategyStep != null && strategyEnabled && "vol_spread".equals(strategyMode)
+                && nowMs - lastOptionStepMs >= optionStepIntervalMs;
+    }
+
     /** Runs the options strategy now if it is installed, enabled, selected and due. Returns true when it ran. */
     public boolean stepOptionStrategyIfDue(long nowMs) {
         Runnable step;
         synchronized (this) {
             step = optionStrategyStep;
-            if (step == null || !strategyEnabled || !"vol_spread".equals(strategyMode) || nowMs - lastOptionStepMs < optionStepIntervalMs) {
+            if (!optionStepDue(nowMs)) {
                 return false;
             }
             lastOptionStepMs = nowMs;
         }
         step.run();
         return true;
+    }
+
+    /**
+     * Strategy steps send orders, and an order waits for the venue (up to 15 s with the Alpaca transport). They
+     * run on their own thread so the 10 ms engine tick, which publishes risk and checks the Greek limits, never
+     * waits on one, and at most one step is in flight: a tick that finds the previous step still running skips.
+     */
+    private final java.util.concurrent.ExecutorService strategyExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "strategy-orders");
+        t.setDaemon(true);
+        return t;
+    });
+    private final java.util.concurrent.atomic.AtomicBoolean strategyBusy = new java.util.concurrent.atomic.AtomicBoolean();
+
+    private void dispatchStrategy(double spot) {
+        boolean momentum = strategyLoop != null && strategyEnabled && "momentum".equals(strategyMode);
+        if (!momentum && !optionStepDue(System.currentTimeMillis())) {
+            return;
+        }
+        if (!strategyBusy.compareAndSet(false, true)) {
+            return; // the previous step is still talking to the venue
+        }
+        try {
+            strategyExecutor.execute(() -> {
+                try {
+                    if (momentum) {
+                        runStrategyStep(spot);
+                    }
+                    stepOptionStrategyIfDue(System.currentTimeMillis());
+                } catch (RuntimeException e) {
+                    logTickFailure(e);
+                } finally {
+                    strategyBusy.set(false);
+                }
+            });
+        } catch (java.util.concurrent.RejectedExecutionException stopped) {
+            strategyBusy.set(false);
+        }
     }
     
     // NaN until a real price arrives: nothing downstream may be fed an invented spot.
@@ -132,7 +176,8 @@ public class QuantSimulationHarness implements com.sbk.optionspricer.execution.S
         this.strategyEnabled = enabled;
     }
 
-    public synchronized StrategyExecutionLoop.ExecutionSummary runStrategyStep(double price) {
+    /** One momentum step. Not synchronized: it waits on the venue, and holding this monitor would block stop() and the setters. */
+    public StrategyExecutionLoop.ExecutionSummary runStrategyStep(double price) {
         if (strategyLoop == null || !strategyEnabled) {
             return new StrategyExecutionLoop.ExecutionSummary(0, 0, 0, 0);
         }
@@ -158,10 +203,7 @@ public class QuantSimulationHarness implements com.sbk.optionspricer.execution.S
                 // processTick handles its own fatal path; stop the scheduler instead of ticking no-ops.
                 throw new IllegalStateException("Engine stopped fatally, halting scheduler.");
             }
-            if (strategyLoop != null && strategyEnabled && "momentum".equals(strategyMode)) {
-                runStrategyStep(spot);
-            }
-            stepOptionStrategyIfDue(System.currentTimeMillis());
+            dispatchStrategy(spot);
         } catch (RuntimeException e) {
             if (engine.getState() == UnifiedQuantEngine.EngineState.STOPPED_FATAL) {
                 throw e;
@@ -175,7 +217,7 @@ public class QuantSimulationHarness implements com.sbk.optionspricer.execution.S
     private long suppressedFailures = 0L;
 
     /** A failure repeating every 10 ms tick is logged once per interval, with a count of suppressed repeats. */
-    private void logTickFailure(RuntimeException e) {
+    private synchronized void logTickFailure(RuntimeException e) {
         long now = System.currentTimeMillis();
         if (lastFailureLogMs == 0L || now - lastFailureLogMs >= FAILURE_LOG_INTERVAL_MS) {
             System.err.println("[SIMULATION HARNESS] tick failed"
@@ -192,12 +234,18 @@ public class QuantSimulationHarness implements com.sbk.optionspricer.execution.S
         if (!isRunning) return;
         isRunning = false;
         engineScheduler.shutdown();
+        strategyExecutor.shutdown();
         try {
             if (!engineScheduler.awaitTermination(5, TimeUnit.SECONDS)) {
                 engineScheduler.shutdownNow();
             }
+            // An order may be waiting on the venue; give it a moment, then interrupt (the Alpaca transport cancels on interrupt).
+            if (!strategyExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                strategyExecutor.shutdownNow();
+            }
         } catch (InterruptedException e) {
             engineScheduler.shutdownNow();
+            strategyExecutor.shutdownNow();
             Thread.currentThread().interrupt();
         }
         

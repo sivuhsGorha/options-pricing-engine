@@ -67,6 +67,12 @@ cleared automatically. `/api/control` and `/api/health` carry the transport bloc
 `description`, `checkedAt`, `reconciliation`: `NOT_APPLICABLE` / `PENDING` / `OK` / `MISMATCH` / `UNREACHABLE`,
 `differences`), and the paper-trading panel shows a TRANSPORT badge with it.
 
+**Threads.** An order waits for the venue (up to 15 s with the Alpaca transport), so strategy steps do not run on
+the 10 ms engine tick that publishes risk and checks the Greek limits. They run on their own thread, at most one
+step in flight; a tick that finds the previous step still running skips it. The audit trail has its own lock, so
+the order tape answers while an order is at the venue. After every booked fill the order manager runs a
+listener (the valuation service's revalue in the application), so a new option position is priced at once.
+
 **Market data policy.** `strict()` (default) accepts LIVE and DELAYED quotes under 30 s old.
 `allowSimulated()` (`ALLOW_SIMULATED_DATA=true`) adds SIMULATED. STALE and UNAVAILABLE are never tradable and
 the policy constructor refuses to make them so.

@@ -71,6 +71,15 @@ public class OrderManager {
         }
     };
     private final java.util.Deque<ExecutionAuditRecord> auditQueue = new java.util.ArrayDeque<>();
+    private volatile Runnable fillListener = () -> { };
+
+    /**
+     * Runs after every booked fill, on the submitting thread: the application passes the valuation service's
+     * revalue, so a new option position is priced at once instead of at the next scheduled valuation.
+     */
+    public void setFillListener(Runnable listener) {
+        this.fillListener = listener == null ? () -> { } : listener;
+    }
 
     /** Uses {@link MarketDataPolicy#strict()}: only fresh LIVE/DELAYED data is tradable. */
     public OrderManager(PreTradeRiskFilter riskFilter, ExchangeTransport transport, PositionTracker positionTracker) {
@@ -205,6 +214,12 @@ public class OrderManager {
         if (status == OrderStatus.PARTIALLY_FILLED) {
             openOrders.put(orderId, order);
         }
+        try {
+            fillListener.run();
+        } catch (RuntimeException e) {
+            // Valuing the book is not booking it: the fill is in, and the next scheduled valuation retries.
+            System.err.println("[ORDER MANAGER] post-fill listener failed: " + e.getMessage());
+        }
         return new OrderDecision(true, status, status == OrderStatus.FILLED ? "order filled" : "order partially filled", orderId);
     }
 
@@ -214,16 +229,23 @@ public class OrderManager {
         return new OrderDecision(false, OrderStatus.REJECTED, message, orderId);
     }
 
-    private synchronized void recordAudit(long orderId, boolean accepted, com.sbk.optionspricer.market.MarketDataStatus sourceStatus,
+    /** The audit trail has its own lock: a reader must not wait for an order that is waiting on the venue. */
+    private final Object auditLock = new Object();
+
+    private void recordAudit(long orderId, boolean accepted, com.sbk.optionspricer.market.MarketDataStatus sourceStatus,
                              String rejectionReason, double fillPrice, int quantity) {
-        auditQueue.addLast(new ExecutionAuditRecord(orderId, accepted, sourceStatus, rejectionReason, fillPrice, quantity, java.time.Instant.now()));
-        if (auditQueue.size() > 1000) {
-            auditQueue.removeFirst();
+        synchronized (auditLock) {
+            auditQueue.addLast(new ExecutionAuditRecord(orderId, accepted, sourceStatus, rejectionReason, fillPrice, quantity, java.time.Instant.now()));
+            if (auditQueue.size() > 1000) {
+                auditQueue.removeFirst();
+            }
         }
     }
 
-    public synchronized java.util.List<ExecutionAuditRecord> getAuditTrail() {
-        return new java.util.ArrayList<>(auditQueue);
+    public java.util.List<ExecutionAuditRecord> getAuditTrail() {
+        synchronized (auditLock) {
+            return new java.util.ArrayList<>(auditQueue);
+        }
     }
 
     /**

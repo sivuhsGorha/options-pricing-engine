@@ -44,6 +44,22 @@ class PortfolioRiskAdmissionTest {
     }
 
     @Test
+    void whileAnOptionPositionIsUnvaluedOnlyOrdersThatReduceAPositionAreAdmitted() {
+        PositionTracker tracker = new PositionTracker();
+        tracker.applyFill(new PositionTracker.ExecutionFill("SPY261120C00780000", -2, 100, 9.90));
+        PortfolioRiskAdmission admission = new PortfolioRiskAdmission(100_000_000.0, 5_000.0, 1_000_000.0, 1_000_000.0, 50_000.0);
+
+        assertFalse(admission.canAdmitOrder("SPY261120C00780000", -1, 9.90, tracker, 100), "adding to a short we cannot price");
+        assertFalse(admission.canAdmitOrder("SPY261120P00780000", -1, 9.90, tracker, 100), "opening a new contract on an unpriced book");
+        assertFalse(admission.canAdmitOrder("SPY", 10, 777.0, tracker, 1), "opening shares on an unpriced book");
+        assertTrue(admission.canAdmitOrder("SPY261120C00780000", 2, 9.90, tracker, 100), "buying the short back must always be possible");
+        assertTrue(admission.canAdmitOrder("SPY261120C00780000", 1, 9.90, tracker, 100), "a partial buy-back reduces the position too");
+
+        tracker.getPosition("SPY261120C00780000").updateGreeks(0.5, 0.01, 30.0);
+        assertTrue(admission.canAdmitOrder("SPY261120P00780000", -1, 9.90, tracker, 100), "once valued the ordinary limits decide");
+    }
+
+    @Test
     void shortOrdersThatReduceExposureAreAdmitted() {
         PositionTracker tracker = new PositionTracker();
         tracker.applyFill(new PositionTracker.ExecutionFill("SPY", 20, 100, 100.0));

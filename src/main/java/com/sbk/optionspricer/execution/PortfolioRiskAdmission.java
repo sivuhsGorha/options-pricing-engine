@@ -51,6 +51,12 @@ public class PortfolioRiskAdmission {
 
         PortfolioPosition existing = tracker.getPosition(symbol);
         int proposedNet = (existing == null ? 0 : existing.getQuantity()) + quantity;
+        // The book's Greeks are incomplete while an option position is unvalued, so the limits below would be checked
+        // against a number that is too small. Add no risk until it is valued; closing what is held is always allowed.
+        boolean reduces = existing != null && Math.abs(proposedNet) < Math.abs(existing.getQuantity());
+        if (!reduces && tracker.hasUnvaluedOptions()) {
+            return false;
+        }
         int multiplier = existing == null ? newPositionMultiplier : existing.getMultiplier();
         double notional = Math.abs((double) proposedNet * multiplier * price);
 

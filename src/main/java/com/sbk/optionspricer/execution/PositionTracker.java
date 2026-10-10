@@ -103,9 +103,14 @@ public class PositionTracker {
         }
         if (position == null) {
             position = new PortfolioPosition(symbol, 0, fill.multiplier());
-            // Linear underlying exposure until a pricer supplies instrument Greeks:
-            // +1 delta per unit, no gamma or vega. Exposure then scales as quantity * multiplier * delta.
-            position.updateGreeks(1.0, 0.0, 0.0);
+            if (com.sbk.optionspricer.instruments.OccSymbol.parse(symbol).isEmpty()) {
+                // A share is linear underlying exposure: +1 delta per unit, no gamma or vega. Exposure then
+                // scales as quantity * multiplier * delta.
+                position.updateGreeks(1.0, 0.0, 0.0);
+            }
+            // A contract is left unvalued: seeding it with the share's delta of one read as 100 delta per contract
+            // until the next valuation. It adds nothing to the book's Greeks until a pricer values it, and the
+            // admission gate refuses to add risk meanwhile (see hasUnvaluedOptions).
             positions.put(symbol, position);
         }
 
@@ -178,6 +183,16 @@ public class PositionTracker {
 
     public synchronized Map<String, PortfolioPosition> getPositions() {
         return Collections.unmodifiableMap(new LinkedHashMap<>(positions));
+    }
+
+    /** True while any open option position has not been valued: the book's Greeks are then incomplete. */
+    public synchronized boolean hasUnvaluedOptions() {
+        for (PortfolioPosition position : positions.values()) {
+            if (position.getQuantity() != 0 && !position.isValued()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public synchronized double getNetDelta() {

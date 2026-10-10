@@ -7,6 +7,30 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class PositionTrackerTest {
 
+    // Found on review (2026-10-10): every new position was seeded with delta 1, so for up to five seconds after a fill
+    // one option contract read as 100 delta to the alert manager and the admission gate, and 50 contracts could trip a
+    // CRITICAL halt on a number that was never real.
+
+    @Test
+    void aNewOptionPositionIsUnvaluedAndAddsNoInventedDeltaWhileAShareIsValuedAtDeltaOne() {
+        PositionTracker tracker = new PositionTracker();
+
+        tracker.applyFill(new PositionTracker.ExecutionFill("SPY261120C00780000", 1, 100, 9.90));
+        assertFalse(tracker.getPosition("SPY261120C00780000").isValued(), "no pricer has valued it yet");
+        assertEquals(0.0, tracker.getNetDelta(), 1e-9, "an unvalued contract contributes nothing rather than a made-up 100 delta");
+        assertTrue(tracker.hasUnvaluedOptions());
+
+        tracker.getPosition("SPY261120C00780000").updateGreeks(0.52, 0.01, 30.0);
+        assertTrue(tracker.getPosition("SPY261120C00780000").isValued());
+        assertEquals(52.0, tracker.getNetDelta(), 1e-9);
+        assertFalse(tracker.hasUnvaluedOptions());
+
+        tracker.applyFill(new PositionTracker.ExecutionFill("SPY", 10, 1, 777.0));
+        assertTrue(tracker.getPosition("SPY").isValued(), "a share is linear exposure, valued at delta one from the start");
+        assertEquals(62.0, tracker.getNetDelta(), 1e-9);
+        assertFalse(tracker.hasUnvaluedOptions());
+    }
+
     @Test
     void appliesFillsToPortfolioPositionsAndReconcilesNetQuantity() {
         PositionTracker tracker = new PositionTracker();

@@ -227,6 +227,67 @@ class VolSpreadStrategyTest {
         assertTrue(tracker.getPositions().isEmpty());
     }
 
+    // Found on review (2026-10-10): a rejected second leg left the first leg held, because the next step read one
+    // leg as "an open straddle" and held it until the edge reverted. The Javadoc promised a flatten.
+
+    /** Fills every order except puts, and refuses the {@code refusedCallCalls}-th call-option order (1-based), to model a venue that fails mid-straddle. */
+    private static ExchangeTransport legFailingVenue(int refusedCallCall) {
+        int[] callOrders = {0};
+        return (order, sym, bid, ask) -> {
+            boolean put = sym.length() > 9 && sym.charAt(sym.length() - 9) == 'P';
+            boolean call = sym.length() > 9 && sym.charAt(sym.length() - 9) == 'C';
+            if (put) {
+                return new ExecutionResult(sym, 0, 0.0, false, "venue refused the put");
+            }
+            if (call && ++callOrders[0] == refusedCallCall) {
+                return new ExecutionResult(sym, 0, 0.0, false, "venue refused the call");
+            }
+            return new ExecutionResult(sym, order.quantity(), order.price(), true, "Executed");
+        };
+    }
+
+    private static VolSpreadStrategy strategyOn(ExchangeTransport transport, PositionTracker tracker) {
+        OrderManager manager = new OrderManager(new PreTradeRiskFilter(1_000, 1e9, 1_000), transport, tracker,
+                OrderManager.MarketDataPolicy.allowSimulated(), new TradingHalt(), null, 1);
+        VolSpreadStrategy s = new VolSpreadStrategy(manager, new FlatChains(0.23, TODAY), referenceSurface(0.20), null,
+                VolSpreadStrategyTest::spot, tracker, "SPY", R, Q, params(), Clock.fixed(NOW, ZoneOffset.UTC));
+        s.allowSimulatedChains(true);
+        return s;
+    }
+
+    private static long optionPositionsHeld(PositionTracker tracker) {
+        return tracker.getPositions().values().stream().filter(p -> p.getQuantity() != 0).count();
+    }
+
+    @Test
+    void aRefusedSecondLegIsFlattenedInTheSameStepRatherThanHeld() {
+        PositionTracker tracker = new PositionTracker(FillRecorder.NONE);
+        VolSpreadStrategy s = strategyOn(legFailingVenue(Integer.MAX_VALUE), tracker);
+
+        VolSpreadStrategy.Decision d = s.step();
+
+        assertEquals(0, optionPositionsHeld(tracker), "the call that filled was closed again: " + d.orders());
+        assertTrue(d.action().endsWith("_REJECTED"), d.summary());
+        assertTrue(d.reason().contains("flattened"), d.reason());
+        assertEquals(3, d.orders().size(), "sell call, refused put, buy call back: " + d.orders());
+    }
+
+    @Test
+    void aLoneLegWhoseFlattenWasRefusedIsFlattenedByTheNextStepWhateverTheEdge() {
+        PositionTracker tracker = new PositionTracker(FillRecorder.NONE);
+        // The venue refuses the put, and also refuses the first attempt to buy the call back.
+        VolSpreadStrategy s = strategyOn(legFailingVenue(2), tracker);
+
+        VolSpreadStrategy.Decision first = s.step();
+        assertEquals(1, optionPositionsHeld(tracker), "the flatten was refused, so one leg is still held: " + first.orders());
+
+        VolSpreadStrategy.Decision second = s.step();
+
+        assertEquals(0, optionPositionsHeld(tracker), "the next step closes it even though the edge is still rich: " + second.summary());
+        assertEquals("CLOSE", second.action());
+        assertTrue(second.reason().contains("one leg"), second.reason());
+    }
+
     @Test
     void parametersAreValidated() {
         assertThrows(IllegalArgumentException.class, () -> new VolSpreadStrategy.Params(0.0, 50, 7, 14, 1, "SSVI"));

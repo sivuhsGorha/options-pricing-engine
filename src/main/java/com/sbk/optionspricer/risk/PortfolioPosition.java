@@ -29,6 +29,9 @@ public class PortfolioPosition {
         this.multiplier = multiplier;
     }
 
+    /** True once something has supplied this position's Greeks: the tracker for a share, the valuation service for an option. */
+    private volatile boolean valued;
+
     public void updateGreeks(double newDelta, double newGamma, double newVega) {
         if (!Double.isFinite(newDelta) || !Double.isFinite(newGamma) || !Double.isFinite(newVega)) {
             throw new IllegalArgumentException("Greeks must be finite");
@@ -36,6 +39,15 @@ public class PortfolioPosition {
         this.delta = newDelta;
         this.gamma = newGamma;
         this.vega = newVega;
+        this.valued = true;
+    }
+
+    /**
+     * Whether the Greeks have been supplied. A position that has not been valued contributes zero rather than a
+     * guess, and the admission gate refuses to add risk on top of it.
+     */
+    public boolean isValued() {
+        return valued;
     }
 
     public void updateHigherOrderGreeks(double newVanna, double newVolga, double newCharm, double newSpeed, double newColor) {

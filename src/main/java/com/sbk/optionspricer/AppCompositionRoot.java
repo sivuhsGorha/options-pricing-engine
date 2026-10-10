@@ -139,6 +139,8 @@ public class AppCompositionRoot {
         this.valuationService = new com.sbk.optionspricer.core.PortfolioValuationService(positionTracker, surfaceService, surfaceService,
                 () -> marketAdapter.getSnapshot(symbol), riskFreeRate, dividendYield, java.time.Duration.ofSeconds(5), java.time.Clock.systemUTC());
         dashboard.setValuationSource(valuationService);
+        // A fill is valued at once, so a new option position never sits unpriced until the next scheduled mark.
+        orderManager.setFillListener(valuationService::revalue);
         // The valuation is sampled once a minute (and whenever realised P&L changes) for the day's P&L and drawdown.
         com.sbk.optionspricer.execution.PnlHistory pnlHistory = new com.sbk.optionspricer.execution.PnlHistory(dataDir.resolve("pnl_history.csv"), java.time.Duration.ofSeconds(60));
         valuationService.setValuationListener(pnlHistory);

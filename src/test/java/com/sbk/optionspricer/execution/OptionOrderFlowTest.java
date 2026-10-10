@@ -37,6 +37,22 @@ class OptionOrderFlowTest {
     }
 
     @Test
+    void theFillListenerRunsAfterTheFillIsBookedAndAFailingListenerNeitherHaltsNorLosesTheFill() {
+        PositionTracker tracker = new PositionTracker(FillRecorder.NONE);
+        OrderManager manager = manager(tracker, 1e9);
+        int[] seenQuantity = {Integer.MIN_VALUE};
+        manager.setFillListener(() -> seenQuantity[0] = tracker.getNetQuantity("SPY261120C00780000"));
+
+        assertTrue(manager.submit(new Order(7, true, 2, 9.90), optionQuote(CALL_780, 9.80, 10.00)).accepted());
+        assertEquals(2, seenQuantity[0], "the listener sees the booked position, so it can value it at once");
+
+        manager.setFillListener(() -> { throw new IllegalStateException("valuation blew up"); });
+        assertTrue(manager.submit(new Order(7, true, 1, 9.90), optionQuote(CALL_780, 9.80, 10.00)).accepted());
+        assertEquals(3, tracker.getNetQuantity("SPY261120C00780000"));
+        assertFalse(manager.getTradingHalt().isHalted(), "a valuation failure is not a booking failure");
+    }
+
+    @Test
     void anOptionFillIsBookedUnderItsContractWithTheContractMultiplier() {
         PositionTracker tracker = new PositionTracker(FillRecorder.NONE);
         OrderManager manager = manager(tracker, 1e9);
