@@ -8,8 +8,8 @@ has already caught a real defect here.
 ## 1. Correctness rules
 
 1. **Never fabricate a value.** A missing quote is `UNAVAILABLE`, not 100.0; a failed implied-volatility
-   inversion returns empty, not 20%; an unreadable risk state is a 503, not zeros. Placeholders that remain
-   (volume 2000, +/- 1 cent spreads) are documented in DATA.md as defects.
+   inversion returns empty, not 20%; an unreadable risk state is a 503, not zeros. Placeholders that were once filled in
+   (volume 2000, +/- 1 cent spreads) were removed from an earlier version and must not come back.
 2. **Label simulations.** A class that simulates a feed, venue or protocol says `SIMULATION` in its header and
    in its log lines. Documentation says what is implemented and what is not, in separate sections.
 3. **One convention per concept.** Dates become times only through `TimeConventions` (ACT/365F). Prices

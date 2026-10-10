@@ -10,9 +10,10 @@ import java.nio.channels.FileChannel;
 import java.lang.invoke.VarHandle;
 
 /**
- * Publishes the core risk state to a memory-mapped file for Zero-GC Inter-Process Communication (IPC).
- * The Web/REST API process reads this file to serve the frontend, ensuring the critical path JVM
- * is fully isolated from HTTP and JSON serialization garbage.
+ * Publishes the core risk state to a memory-mapped file under a seqlock (an odd sequence marks a write in
+ * progress, so a reader retries rather than see a torn record). The dashboard reads it through a second read-only
+ * mapping in the SAME JVM: there is no second process, so this demonstrates the technique and does not isolate the
+ * engine from HTTP or JSON garbage. The file would let a separate reader process attach unchanged.
  */
 public class MmapStatePublisher {
     private static final long FILE_SIZE = 56;

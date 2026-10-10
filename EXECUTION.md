@@ -74,7 +74,7 @@ step in flight; a tick that finds the previous step still running skips it. The 
 the order tape answers while an order is at the venue. After every booked fill the order manager runs a
 listener (the valuation service's revalue in the application), so a new option position is priced at once.
 
-**Market data policy.** `strict()` (default) accepts LIVE and DELAYED quotes under 30 s old.
+**Market data policy.** `strict()` (default) accepts LIVE and DELAYED quotes no more than 120 s old (by its own timestamp a LIVE quote turns STALE after 30 s and a DELAYED one after 120 s).
 `allowSimulated()` (`ALLOW_SIMULATED_DATA=true`) adds SIMULATED. STALE and UNAVAILABLE are never tradable and
 the policy constructor refuses to make them so.
 

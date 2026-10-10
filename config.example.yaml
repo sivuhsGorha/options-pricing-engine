@@ -6,12 +6,9 @@ market_data:
   sources: [cboe]
   refresh_interval_seconds: 900      # how often the surface is re-fitted
   quote_refresh_seconds: 60          # how often the option chain is reloaded between re-fits; a quote is STALE 120 s after the feed stamped it
-  live_data_enabled: true
   risk_free_rate: 0.05               # flat rate used for forwards and pricing
   dividend_yield: 0.012              # continuous yield of the underlying (SPY pays ~1.2%)
 volatility:
-  ssvi_enabled: true
-  sabr_enabled: true
   default_volatility: 0.2            # volatility of the synthetic fallback chain
 risk:
   max_notional: 1000000.0
@@ -36,10 +33,8 @@ strategy:
   min_days_to_expiry: 14             # never open on an expiry closer than this
   max_days_to_expiry: 7              # close an open straddle when its expiry is this close
   contracts: 1                       # straddle size per leg
-  option_interval_seconds: 30        # how often the straddle is evaluated (quotes refresh every few minutes anyway)
+  option_interval_seconds: 30        # how often the straddle is evaluated (the quotes it reads are reloaded every quote_refresh_seconds)
   # momentum parameters
   base_quantity: 10
   trigger_pct: 0.001                 # 0.1% move between two quotes fires one signal
-dashboard:
-  port: 8082
-  update_rate_hz: 20
+# The dashboard's address is not set here: PORT (default 8080) and BIND_ADDRESS (default 127.0.0.1) in .env.

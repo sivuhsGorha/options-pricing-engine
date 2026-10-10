@@ -28,7 +28,7 @@ figure is measured or claimed.
 | Greeks and risk | First, second and higher-order Greeks, portfolio aggregation, limit alerts that halt trading, margin approximation (not an exchange margin model) |
 | Execution | `OrderManager` (halt check, data-quality policy, portfolio admission, pre-trade limits, order state machine, audit trail), `PositionTracker` with average cost and realised P&L, option contracts booked per OCC symbol with their multiplier, exact decimal ticks. Two transports: the in-process simulator, and an Alpaca paper account (day limit orders at the venue's own touch, fill polled, remainder cancelled and the cancel settled before the fill is booked, book reconciled with the account every minute and trading halted on a mismatch). First live session on 2026-10-09: two fills, one reconciliation halt, logged in [EXECUTION.md](EXECUTION.md) |
 | Strategy and valuation | Vol-spread strategy: the front-month ATM straddle against the fitted surface, delta-hedged, every decision recorded; a share momentum strategy as the alternative mode. A valuation service marks the book every few seconds with Black-Scholes Greeks at the surface's vol and feeds them to the risk engine, whose alerts use the configured limits. P&L (today's with its drawdown, and since the ledger began) and every calibration's ATM vol and skew are recorded under `data/` and shown on the dashboard across restarts |
-| Dashboard | Embedded HTTP API and a Jetty WebSocket feed, HMAC request signing, browser sessions, React frontend with risk, volatility-surface and paper-trading panels |
+| Dashboard | Embedded HTTP API (the React app polls it once a second) and a Jetty WebSocket endpoint that the React app does not use, HMAC request signing, browser sessions, React frontend with risk, volatility-surface and paper-trading panels |
 | IPC | Engine state published through a memory-mapped file (seqlock) and read by the web layer |
 
 Spot prices come from Finnhub, Polygon, Alpha Vantage and MarketStack when API keys are configured; option
@@ -69,7 +69,7 @@ flowchart LR
         PNL[(pnl_history.csv)]
         SHIST[(surface_history.csv)]
     end
-    UI[Dashboard<br/>React + HTTP API + WebSocket]
+    UI[Dashboard<br/>React + HTTP API (polled)]
 
     CBOE --> FIT --> SVC
     SVC --> STRAT
@@ -113,7 +113,7 @@ flowchart LR
 Prerequisites: JDK 25, Maven 3.9+, and Node 22 only if you rebuild the frontend.
 
 ```bash
-# Build and test (482 tests, JaCoCo coverage gate)
+# Build and test (486 tests, JaCoCo coverage gate)
 mvn clean verify
 
 # Configuration: copy config.example.yaml to config.yaml, and put secrets in .env (never committed):
@@ -138,7 +138,7 @@ docker compose up --build -d
 
 Sign in with `OPERATOR_PASSWORD`. The paper-trading panel shows positions and every order with its fill or
 rejection reason, with HALT / RESUME and a strategy switch. `run_all.ps1` runs the same checks as CI locally:
-the Java build with 482 tests and the coverage gate, the Python tests, and the frontend lint, 58 tests and build.
+the Java build with 486 tests and the coverage gate, the Python tests, and the frontend lint, 58 tests and build.
 
 ---
 

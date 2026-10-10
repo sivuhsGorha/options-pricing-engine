@@ -13,20 +13,79 @@ public final class ConfigValidator {
     private ConfigValidator() {
     }
 
+    /**
+     * The keys each safety-relevant section reads. An unknown key in one of these sections is an error because a
+     * misspelt limit or strategy setting is ignored, the default applies, and nothing says so. Other sections are
+     * not checked: they hold keys of older versions that are now ignored.
+     */
+    private static final Map<String, java.util.Set<String>> KNOWN_KEYS = Map.of(
+            "risk", java.util.Set.of("max_notional", "max_delta", "max_gamma", "max_vega", "max_position", "max_concentration",
+                    "max_spread_bps", "min_volume"),
+            "strategy", java.util.Set.of("mode", "trigger_pct", "base_quantity", "vol_edge", "reference_model", "hedge_band",
+                    "min_days_to_expiry", "max_days_to_expiry", "contracts", "option_interval_seconds"),
+            "execution", java.util.Set.of("symbol", "transport", "fill_wait_seconds", "slippage_bps", "contract_multiplier"));
+    /** Renamed risk keys: they have their own, more helpful message below. */
+    private static final java.util.Set<String> LEGACY_RISK_KEYS = java.util.Set.of("delta_limit", "gamma_limit", "vega_limit");
+
+    private static void unknownKeys(ConfigManager config, List<String> errors) {
+        Map<String, java.util.Set<String>> fileKeys = config.fileKeys();
+        for (Map.Entry<String, java.util.Set<String>> known : KNOWN_KEYS.entrySet()) {
+            for (String key : fileKeys.getOrDefault(known.getKey(), java.util.Set.of())) {
+                if (known.getValue().contains(key) || (known.getKey().equals("risk") && LEGACY_RISK_KEYS.contains(key))) {
+                    continue;
+                }
+                String nearest = nearest(key, known.getValue());
+                errors.add(known.getKey() + "." + key + " is not a setting this application reads"
+                        + (nearest == null ? " (known: " + new java.util.TreeSet<>(known.getValue()) + ")"
+                                : " (did you mean " + known.getKey() + "." + nearest + "?)"));
+            }
+        }
+    }
+
+    /** The known key within two edits of {@code key}, or null. */
+    private static String nearest(String key, java.util.Set<String> known) {
+        String best = null;
+        int bestDistance = 3;
+        for (String candidate : new java.util.TreeSet<>(known)) {
+            int distance = editDistance(key, candidate);
+            if (distance < bestDistance) {
+                best = candidate;
+                bestDistance = distance;
+            }
+        }
+        return best;
+    }
+
+    private static int editDistance(String a, String b) {
+        int[] previous = new int[b.length() + 1];
+        int[] current = new int[b.length() + 1];
+        for (int j = 0; j <= b.length(); j++) {
+            previous[j] = j;
+        }
+        for (int i = 1; i <= a.length(); i++) {
+            current[0] = i;
+            for (int j = 1; j <= b.length(); j++) {
+                int substitute = previous[j - 1] + (a.charAt(i - 1) == b.charAt(j - 1) ? 0 : 1);
+                current[j] = Math.min(substitute, Math.min(previous[j] + 1, current[j - 1] + 1));
+            }
+            int[] swap = previous;
+            previous = current;
+            current = swap;
+        }
+        return previous[b.length()];
+    }
+
     public static List<String> validate(ConfigManager config) {
         if (config == null) {
             return List.of("config must not be null");
         }
 
         List<String> errors = new ArrayList<>();
+        unknownKeys(config, errors);
         Map<String, Object> marketData = config.getSection("market_data");
-        Map<String, Object> dashboard = config.getSection("dashboard");
 
         if (marketData.isEmpty()) {
             errors.add("market_data section missing");
-        }
-        if (dashboard.isEmpty()) {
-            errors.add("dashboard section missing");
         }
 
         number(config, errors, "market_data.refresh_interval_seconds", 900.0,
@@ -36,14 +95,6 @@ public final class ConfigValidator {
         number(config, errors, "market_data.spot", 100.0, v -> v > 0.0, "must be positive");
         number(config, errors, "market_data.risk_free_rate", 0.05, v -> v > -1.0 && v < 1.0, "must be a decimal rate such as 0.05");
         number(config, errors, "market_data.dividend_yield", 0.0, v -> v >= 0.0 && v < 1.0, "must be a decimal yield such as 0.015");
-        try {
-            int port = config.getInt("dashboard.port", 8082);
-            if (port <= 0 || port > 65535) {
-                errors.add("dashboard.port must be in the range 1..65535");
-            }
-        } catch (ConfigException e) {
-            errors.add(e.getMessage());
-        }
         number(config, errors, "volatility.default_volatility", 0.20, v -> v > 0.0 && v <= 5.0, "must be in (0, 5]");
 
         Map<String, Object> risk = config.getSection("risk");

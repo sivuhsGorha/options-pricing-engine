@@ -47,6 +47,8 @@ public final class ConfigManager {
 
     private final Path configPath;
     private final Map<String, Object> root;
+    /** Section to keys exactly as the file wrote them (normalised), captured before environment overrides are layered on. */
+    private final Map<String, java.util.Set<String>> fileKeys = new LinkedHashMap<>();
 
     public ConfigManager() {
         this(Path.of(DEFAULT_CONFIG_PATH));
@@ -54,7 +56,7 @@ public final class ConfigManager {
 
     public ConfigManager(Path configPath) {
         this.configPath = Objects.requireNonNull(configPath, "configPath");
-        this.root = loadOrDefault(configPath);
+        this.root = loadOrDefault(configPath, fileKeys);
     }
 
     public static ConfigManager fromFile(Path path) {
@@ -63,6 +65,31 @@ public final class ConfigManager {
 
     public Path path() {
         return configPath;
+    }
+
+    /**
+     * The keys each section had in the file, normalised like lookups (lower case, dashes as underscores), before
+     * environment variables, {@code .env} entries and system properties were applied. Empty when the file did not
+     * exist and the defaults were written. The validator checks these so a variable in the environment cannot
+     * make a valid file fail, and a misspelt key in the file cannot go unnoticed.
+     */
+    public Map<String, java.util.Set<String>> fileKeys() {
+        Map<String, java.util.Set<String>> copy = new LinkedHashMap<>();
+        fileKeys.forEach((section, keys) -> copy.put(section, java.util.Set.copyOf(keys)));
+        return Collections.unmodifiableMap(copy);
+    }
+
+    private static void recordKeys(Map<String, Object> loaded, Map<String, java.util.Set<String>> keysOut) {
+        keysOut.clear();
+        for (Map.Entry<String, Object> section : loaded.entrySet()) {
+            if (section.getValue() instanceof Map<?, ?> keys) {
+                java.util.Set<String> names = new java.util.LinkedHashSet<>();
+                for (Object key : keys.keySet()) {
+                    names.add(String.valueOf(key).toLowerCase(Locale.ROOT).replace('-', '_'));
+                }
+                keysOut.put(section.getKey().toLowerCase(Locale.ROOT).replace('-', '_'), names);
+            }
+        }
     }
 
     public Map<String, Object> getRoot() {
@@ -129,7 +156,8 @@ public final class ConfigManager {
     }
 
     public void reload() {
-        Map<String, Object> reloaded = loadOrDefault(configPath);
+        fileKeys.clear();
+        Map<String, Object> reloaded = loadOrDefault(configPath, fileKeys);
         root.clear();
         root.putAll(reloaded);
     }
@@ -143,11 +171,12 @@ public final class ConfigManager {
         return name == null ? path.toString() : name.toString();
     }
 
-    private static Map<String, Object> loadOrDefault(Path configPath) {
+    private static Map<String, Object> loadOrDefault(Path configPath, Map<String, java.util.Set<String>> keysOut) {
         Map<String, Object> loaded;
         if (Files.exists(configPath)) {
             try {
                 loaded = parseYaml(Files.readString(configPath, StandardCharsets.UTF_8), label(configPath));
+                recordKeys(loaded, keysOut);
             } catch (IOException e) {
                 // Defaults in place of a file that exists but cannot be read would run with limits the operator never saw.
                 throw new ConfigException("cannot read " + configPath + ": " + e.getMessage(), e);

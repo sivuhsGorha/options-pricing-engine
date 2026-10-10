@@ -109,6 +109,61 @@ class ConfigHardeningTest {
         assertTrue(errors.stream().noneMatch(e -> e.contains("risk.max_vega")), errors.toString());
     }
 
+    // Found on review (2026-10-10): a misspelt limit such as risk.max_dleta was ignored, the default applied, and
+    // --check-config said OK. In the risk, strategy and execution sections an unknown key is now an error, with the
+    // nearest known key when there is one. Only the keys the operator wrote in the file are checked: a variable in
+    // the environment that happens to start with a section name must not make a valid file fail.
+
+    private static final String BASE = "market_data:\n  refresh_interval_seconds: 900\ndashboard:\n  port: 8082\n";
+
+    @Test
+    void aMisspeltRiskStrategyOrExecutionKeyIsAnErrorThatNamesTheNearestKnownOne() throws Exception {
+        List<String> errors = ConfigValidator.validate(ConfigManager.fromFile(yaml(
+                BASE + "risk:\n  max_dleta: 100\n  max_gamma: 10\nstrategy:\n  vol_edgee: 0.02\nexecution:\n  transprot: paper\n")));
+
+        assertTrue(errors.stream().anyMatch(e -> e.contains("risk.max_dleta") && e.contains("did you mean risk.max_delta")), errors.toString());
+        assertTrue(errors.stream().anyMatch(e -> e.contains("strategy.vol_edgee") && e.contains("strategy.vol_edge")), errors.toString());
+        assertTrue(errors.stream().anyMatch(e -> e.contains("execution.transprot") && e.contains("execution.transport")), errors.toString());
+        assertTrue(errors.stream().noneMatch(e -> e.contains("risk.max_gamma")), "a correct key is not reported: " + errors);
+    }
+
+    @Test
+    void everyKeyTheApplicationReadsIsKnownAndCaseAndDashesAreNormalised() throws Exception {
+        List<String> errors = ConfigValidator.validate(ConfigManager.fromFile(yaml(BASE
+                + "risk:\n  Max_Notional: 1000000\n  max-delta: 5000\n  max_gamma: 1000\n  max_vega: 10000\n  max_position: 10000\n"
+                + "  max_concentration: 500000\n  max_spread_bps: 200\n  min_volume: 1\n"
+                + "strategy:\n  mode: vol_spread\n  trigger_pct: 0.001\n  base_quantity: 10\n  vol_edge: 0.01\n  reference_model: SSVI\n"
+                + "  hedge_band: 50\n  min_days_to_expiry: 14\n  max_days_to_expiry: 7\n  contracts: 1\n  option_interval_seconds: 30\n"
+                + "execution:\n  symbol: SPY\n  transport: paper\n  fill_wait_seconds: 10\n  slippage_bps: 25\n  contract_multiplier: 1\n")));
+
+        assertTrue(errors.isEmpty(), errors.toString());
+    }
+
+    @Test
+    void theShippedExampleConfigIsValidAndAdvertisesOnlySettingsTheApplicationReads() {
+        ConfigManager example = ConfigManager.fromFile(java.nio.file.Path.of("config.example.yaml"));
+
+        assertEquals(List.of(), ConfigValidator.validate(example));
+        // dashboard.port, dashboard.update_rate_hz, market_data.live_data_enabled, volatility.ssvi_enabled and
+        // volatility.sabr_enabled were validated but read by nothing; the port is PORT in .env.
+        assertFalse(example.fileKeys().containsKey("dashboard"), example.fileKeys().toString());
+        assertFalse(example.fileKeys().getOrDefault("market_data", java.util.Set.of()).contains("live_data_enabled"));
+        assertFalse(example.fileKeys().getOrDefault("volatility", java.util.Set.of()).contains("ssvi_enabled"));
+        assertFalse(example.fileKeys().getOrDefault("volatility", java.util.Set.of()).contains("sabr_enabled"));
+    }
+
+    @Test
+    void anEnvironmentVariableThatLooksLikeASectionKeyDoesNotMakeAValidFileFail() throws Exception {
+        // RISK_FREE_RATE is a plausible variable; as a system property it is applied as an override risk.free_rate.
+        System.setProperty("risk_free_rate", "0.04");
+        try {
+            List<String> errors = ConfigValidator.validate(ConfigManager.fromFile(yaml(BASE + "risk:\n  max_delta: 5000\n")));
+            assertTrue(errors.stream().noneMatch(e -> e.contains("free_rate")), errors.toString());
+        } finally {
+            System.clearProperty("risk_free_rate");
+        }
+    }
+
     @Test
     void theQuoteRefreshCadenceIsBounded() throws Exception {
         ConfigManager tooFast = ConfigManager.fromFile(yaml(
