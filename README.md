@@ -69,7 +69,7 @@ flowchart LR
         PNL[(pnl_history.csv)]
         SHIST[(surface_history.csv)]
     end
-    UI[Dashboard<br/>React + HTTP API (polled)]
+    UI[Dashboard<br/>React + HTTP API, polled]
 
     CBOE --> FIT --> SVC
     SVC --> STRAT
