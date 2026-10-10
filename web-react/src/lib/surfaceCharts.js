@@ -15,7 +15,15 @@ const AMBER_CYAN_COLORSCALE = [
     [1.0, '#00E5FF']
 ];
 
-const PLOT_CONFIG = { responsive: true, displayModeBar: false };
+// The toolbar (zoom, pan, reset) shows on hover and the wheel zooms, so it is visible that the charts can be moved.
+const PLOT_CONFIG = { responsive: true, displayModeBar: 'hover', displaylogo: false, scrollZoom: true };
+
+/**
+ * The dashboard redraws every chart every few seconds with plotly.react. Without a uirevision Plotly treats each
+ * redraw as a brand-new figure and throws away what the user did (a rotated surface, a zoomed smile). The same
+ * key on every redraw keeps it; a different model gets a different key, so a new surface starts framed afresh.
+ */
+const viewKey = (model) => `view-${model || 'surface'}`;
 /** At most this many quote markers per expiry; more hides the surface under dots. */
 const MAX_POINTS_PER_EXPIRY = 40;
 
@@ -24,6 +32,7 @@ const LAYOUT_2D = {
     ...LAYOUT_BASE,
     margin: { t: 10, r: 20, l: 40, b: 40 },
     showlegend: true,
+    dragmode: 'pan',
     legend: { orientation: 'h', y: -0.3, x: 0.5, xanchor: 'center', font: { size: 14, color: '#FF9900' } }
 };
 
@@ -155,6 +164,7 @@ export function renderSurfaceCharts(plotly, surface, elements, otherModels = [])
     plotly.react(elements.surface3d, traces3d, {
         ...LAYOUT_BASE,
         showlegend: false,
+        uirevision: viewKey(surface.model),
         scene: {
             xaxis: sceneAxis('STRIKE', [Math.min(...strikes), Math.max(...strikes)]),
             yaxis: sceneAxis('EXPIRY (y)', [Math.min(...expiries), Math.max(...expiries)]),
@@ -195,6 +205,7 @@ export function renderSurfaceCharts(plotly, surface, elements, otherModels = [])
     });
     plotly.react(elements.smile, smileTraces, {
         ...LAYOUT_2D,
+        uirevision: viewKey(surface.model),
         margin: { t: 10, r: 20, l: 48, b: 40 },
         xaxis: { title: 'STRIKE', ...AXIS_2D, range: [Math.min(...strikes), Math.max(...strikes)] },
         yaxis: { title: 'IV (%)', ...AXIS_2D, range: zRange, domain: [0.42, 1] },
@@ -207,7 +218,7 @@ export function renderSurfaceCharts(plotly, surface, elements, otherModels = [])
     const strikeIdx = [Math.floor(strikes.length * 0.2), Math.floor(strikes.length / 2), Math.floor(strikes.length * 0.8)];
     plotly.react(elements.term,
         strikeIdx.map(i => lineTrace(expiries, vols.map(row => pct(row[i])), `K=${Math.round(strikes[i])}`)),
-        { ...LAYOUT_2D, xaxis: { title: 'EXPIRY (y)', ...AXIS_2D }, yaxis: { title: 'IV (%)', ...AXIS_2D } },
+        { ...LAYOUT_2D, uirevision: viewKey(surface.model), xaxis: { title: 'EXPIRY (y)', ...AXIS_2D }, yaxis: { title: 'IV (%)', ...AXIS_2D } },
         PLOT_CONFIG);
 }
 
@@ -229,6 +240,7 @@ export function renderHistoryChart(plotly, element, points, model) {
     }
     const layout = {
         ...LAYOUT_2D,
+        uirevision: viewKey(model),
         margin: { t: 10, r: 52, l: 48, b: 40 },
         xaxis: { title: 'TIME', ...AXIS_2D, type: 'date' },
         yaxis: { title: 'ATM IV (%)', ...AXIS_2D },

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { displayablePoints, errorGrid, interpolate, renderSurfaceCharts, residuals, smileExpiries } from './surfaceCharts';
+import { displayablePoints, errorGrid, interpolate, renderHistoryChart, renderSurfaceCharts, residuals, smileExpiries } from './surfaceCharts';
 
 const strikes = [600, 700, 800, 900];
 
@@ -96,5 +96,65 @@ describe('surface chart data selection', () => {
         expect(interpolate([1, 2, 4], [10, 20, 40], 0)).toBe(10);
         expect(interpolate([1, 2, 4], [10, 20, 40], 9)).toBe(40);
         expect(residuals(null, [{ strike: 1, marketVol: 0.2 }], 0.1)).toEqual([]);
+    });
+});
+
+// Found 2026-10-10: the dashboard redraws every chart every few seconds with plotly.react, and no layout carried a
+// uirevision, so anything the user did (rotating the 3D surface, zooming a smile) was thrown away at the next refresh.
+// The toolbar was hidden too, so nothing showed that the charts can be moved.
+describe('moving the charts', () => {
+    const surface = (model, shift = 0) => ({
+        model, x: strikes, y: [0.1, 0.5], z: [[0.3 + shift, 0.2, 0.15, 0.2], [0.25, 0.18, 0.14, 0.17]],
+        fittedExpiries: [0.1, 0.5], points: [{ t: 0.1, strike: 700, marketVol: 0.21 }]
+    });
+    const elements = { surface3d: 'a', smile: 'b', term: 'c' };
+
+    it('keeps what the user did across refreshes: every chart has the same view key on every redraw', () => {
+        const plotly = { react: vi.fn() };
+
+        renderSurfaceCharts(plotly, surface('SSVI'), elements);
+        renderSurfaceCharts(plotly, surface('SSVI', 0.01), elements);   // the next poll, with slightly different data
+
+        const layouts = plotly.react.mock.calls.map(c => c[2]);
+        expect(layouts).toHaveLength(6);
+        layouts.forEach(layout => expect(layout.uirevision).toBeTruthy());
+        expect(new Set(layouts.map(l => l.uirevision)).size).toBe(1);
+    });
+
+    it('starts a fresh view when the model changes, so a different surface is not framed like the last one', () => {
+        const plotly = { react: vi.fn() };
+
+        renderSurfaceCharts(plotly, surface('SSVI'), elements);
+        renderSurfaceCharts(plotly, surface('SVI'), elements);
+
+        const [first, second] = [plotly.react.mock.calls[0][2].uirevision, plotly.react.mock.calls[3][2].uirevision];
+        expect(first).not.toEqual(second);
+    });
+
+    it('does the same for the history chart', () => {
+        const plotly = { react: vi.fn() };
+        const points = [{ at: 1000, model: 'SSVI', atmVol: 0.12, skew: 0.05 }];
+
+        renderHistoryChart(plotly, 'h', points, 'SSVI');
+        renderHistoryChart(plotly, 'h', [...points, { at: 2000, model: 'SSVI', atmVol: 0.13, skew: 0.06 }], 'SSVI');
+
+        const [a, b] = plotly.react.mock.calls.map(c => c[2].uirevision);
+        expect(a).toBeTruthy();
+        expect(a).toEqual(b);
+    });
+
+    it('shows the toolbar on hover and allows scroll-zoom, and the flat charts pan when dragged', () => {
+        const plotly = { react: vi.fn() };
+
+        renderSurfaceCharts(plotly, surface('SSVI'), elements);
+
+        plotly.react.mock.calls.forEach(call => {
+            const config = call[3];
+            expect(config.displayModeBar).toBe('hover');
+            expect(config.scrollZoom).toBe(true);
+            expect(config.displaylogo).toBe(false);
+        });
+        expect(plotly.react.mock.calls[1][2].dragmode).toBe('pan');
+        expect(plotly.react.mock.calls[2][2].dragmode).toBe('pan');
     });
 });
