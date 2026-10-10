@@ -176,4 +176,12 @@ behaved as designed, and two of them exposed real defects in the design:
 `3 fills replayed, 1 open positions`, then `RECONCILE OK: book matches the Alpaca account (1 open positions)`.
 The book, its average cost and the P&L came back from the ledger alone.
 
-**Not shown yet.** A fill in vol-spread mode, and a full day of P&L samples with a position on the book.
+**After the fixes.** The engine was started on the new build at 14:24 and ran until 14:57 in vol-spread mode:
+24 decisions, every one `HOLD` (the front-month 779 and then 780 straddle traded within 0.1 vol point of the
+SSVI reference all afternoon, against a 1-point band), and not one `quote STALE` in 33 minutes, where the
+morning had produced two usable steps in fifteen minutes. The P&L sampler recorded the short position's
+unrealised P&L moving with spot (for example -10.54 at 14:55, -12.14 at 14:56), so the day's P&L and drawdown
+are measured from a real mark for the first time.
+
+**Not shown yet.** A fill in vol-spread mode (the edge never left the band), and a full trading day of P&L
+samples with a position on the book.
