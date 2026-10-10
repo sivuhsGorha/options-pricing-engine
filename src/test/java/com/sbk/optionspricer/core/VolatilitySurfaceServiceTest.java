@@ -284,6 +284,31 @@ class VolatilitySurfaceServiceTest {
         assertEquals(12, venue.served.get());
     }
 
+    // Found on review (2026-10-10): the chain-loaded callback stores quotes in the historical snapshot file, and the
+    // per-minute reload added in 6ceee6d fired it too, appending sixteen rows a minute to a file nothing reads.
+
+    @Test
+    void aQuoteReloadDoesNotFeedTheChainHistoryOnlyACalibrationDoes() {
+        ManualClock clock = new ManualClock();
+        StampingVenue venue = new StampingVenue(clock);
+        AtomicInteger recorded = new AtomicInteger();
+        VolatilitySurfaceService service = new VolatilitySurfaceService(venue, "SPY", 0.05, 0.0, Duration.ofMinutes(15), Duration.ofMinutes(1),
+                clock, chain -> recorded.incrementAndGet());
+        java.time.Instant t0 = clock.now;
+
+        service.runOnce();
+        assertEquals(4, recorded.get(), "the calibration recorded its four chains");
+
+        clock.now = t0.plusSeconds(60);
+        service.runOnce();
+        assertEquals(8, venue.served.get(), "the minute tick reloaded the chains");
+        assertEquals(4, recorded.get(), "but recorded nothing");
+
+        clock.now = t0.plus(Duration.ofMinutes(15));
+        service.runOnce();
+        assertEquals(8, recorded.get(), "the next calibration records again");
+    }
+
     @Test
     void aFailedQuoteReloadKeepsTheLastChainsAndTheSurface() {
         ManualClock clock = new ManualClock();

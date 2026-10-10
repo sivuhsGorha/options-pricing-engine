@@ -59,10 +59,7 @@ public class AppCompositionRoot {
         this.spotProvider = new LiveSpotProvider();
         this.marketAdapter = new LiveMarketSnapshotAdapter(spotProvider);
         double maxConcentration = config.getDouble("risk.max_concentration", maxNotional);
-        this.preTradeFilter = new PreTradeRiskFilter((int) maxPositionAbs, maxNotional, 100, java.util.Map.of(),
-                new com.sbk.optionspricer.risk.ConcentrationLimitManager(
-                        java.util.Map.of(symbol.trim().toUpperCase(java.util.Locale.ROOT), maxConcentration)),
-                null);
+        this.preTradeFilter = preTradeFilter(config, symbol, maxPositionAbs, maxNotional, maxConcentration);
         this.riskAdmission = new PortfolioRiskAdmission(maxNotional, maxDelta, maxGamma, maxVega, maxPositionAbs);
         com.sbk.optionspricer.execution.TradingHalt tradingHalt = new com.sbk.optionspricer.execution.TradingHalt();
         // Where orders go: the in-process simulator, or an Alpaca paper account (the client can only address the
@@ -101,6 +98,7 @@ public class AppCompositionRoot {
         this.strategyLoop = new StrategyExecutionLoop(symbol, orderManager, riskAdmission, positionTracker, baseQuantity, triggerPct, marketAdapter);
 
         this.harness = new QuantSimulationHarness(engine, spotProvider, positionTracker, orderManager, riskAdmission, strategyLoop);
+        harness.setSymbol(symbol);
 
         String apiSecret = OptionsDashboardServer.requireEnvironmentVariable("API_SECRET");
         String operatorPassword = OptionsDashboardServer.requireEnvironmentVariable("OPERATOR_PASSWORD");
@@ -115,6 +113,7 @@ public class AppCompositionRoot {
         MmapStateReader mmapReader = new MmapStateReader();
         this.dashboard = new OptionsDashboardServer(apiSecret, operatorPassword, allowedOrigins, bindAddress, port, port + 1, mmapReader, "web", orderManager, positionTracker, marketAdapter);
 
+        dashboard.setSymbol(symbol);
         // Chains are fetched and the surface fitted off the startup path; the dashboard labels the result with its source.
         double riskFreeRate = config.getDouble("market_data.risk_free_rate", 0.05);
         double dividendYield = config.getDouble("market_data.dividend_yield", 0.0);
@@ -166,6 +165,22 @@ public class AppCompositionRoot {
             System.out.println("[RECONCILE] " + first.status() + ": " + first.message());
             bookReconciler.start();
         }
+    }
+
+    /**
+     * The pre-trade filter the application runs: size, notional, per-underlying concentration, and the liquidity
+     * gate (spread in basis points and volume, {@code risk.max_spread_bps} and {@code risk.min_volume}). It was
+     * built without the liquidity gate until 2026-10-10, which the docs described as active. A field the data
+     * source did not supply is not judged, so a spot feed without a book or a volume passes.
+     */
+    static PreTradeRiskFilter preTradeFilter(ConfigManager config, String symbol, double maxPositionAbs, double maxNotional, double maxConcentration) {
+        com.sbk.optionspricer.risk.LiquidityRiskMonitor liquidity = new com.sbk.optionspricer.risk.LiquidityRiskMonitor(
+                config.getDouble("risk.max_spread_bps", ConfigManager.DEFAULT_MAX_SPREAD_BPS),
+                (long) config.getDouble("risk.min_volume", ConfigManager.DEFAULT_MIN_VOLUME));
+        return new PreTradeRiskFilter((int) maxPositionAbs, maxNotional, 100, java.util.Map.of(),
+                new com.sbk.optionspricer.risk.ConcentrationLimitManager(
+                        java.util.Map.of(symbol.trim().toUpperCase(java.util.Locale.ROOT), maxConcentration)),
+                liquidity);
     }
 
     /**

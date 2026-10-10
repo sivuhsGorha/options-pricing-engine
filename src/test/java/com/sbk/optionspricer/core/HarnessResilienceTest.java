@@ -92,6 +92,32 @@ class HarnessResilienceTest {
     }
 
     @Test
+    void theHarnessAsksTheProvidersForTheConfiguredSymbolNotAHardCodedOne() throws Exception {
+        System.setProperty("MMAP_STATE_FILE", "target/harness_symbol_state.dat");
+        MmapStatePublisher publisher = new MmapStatePublisher() {
+            @Override
+            public void publishRiskState(double netDelta, double netGamma, double netVega, double scenarioMargin) {
+            }
+        };
+        UnifiedQuantEngine engine = new UnifiedQuantEngine(publisher, code -> fail("engine must not exit: " + code));
+        java.util.List<String> urls = new java.util.concurrent.CopyOnWriteArrayList<>();
+        LiveSpotProvider provider = new LiveSpotProvider("fh", "pg", "av", "ms", (url, headers) -> {
+            urls.add(url);
+            throw new java.io.IOException("offline test");
+        });
+        QuantSimulationHarness harness = new QuantSimulationHarness(engine, provider);
+        harness.setSymbol("qqq");
+
+        harness.start();
+        Thread.sleep(400);
+        harness.stop();
+
+        assertFalse(urls.isEmpty(), "the harness asked the providers for a quote");
+        assertTrue(urls.stream().anyMatch(u -> u.contains("QQQ")), urls.toString());
+        assertTrue(urls.stream().noneMatch(u -> u.contains("SPY")), "no request names the old hard-coded symbol: " + urls);
+    }
+
+    @Test
     void failingStrategyKeepsTheEngineTickingAndLogsAreThrottled() throws Exception {
         System.setProperty("MMAP_STATE_FILE", "target/harness_resilience_state.dat");
         AtomicInteger publishes = new AtomicInteger();

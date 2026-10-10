@@ -54,10 +54,14 @@ public final class ConfigValidator {
                         + " (the value is not converted, so review it)");
             }
         }
-        for (String key : new String[]{"max_notional", "max_delta", "max_gamma", "max_vega", "max_position", "max_concentration"}) {
+        for (String key : new String[]{"max_notional", "max_delta", "max_gamma", "max_vega", "max_position", "max_concentration", "max_spread_bps"}) {
             if (risk.containsKey(key)) {
                 number(config, errors, "risk." + key, Double.NaN, v -> Double.isFinite(v) && v > 0.0, "must be a finite positive number");
             }
+        }
+        if (risk.containsKey("min_volume")) {
+            number(config, errors, "risk.min_volume", Double.NaN, v -> Double.isFinite(v) && v >= 1.0 && v == Math.rint(v),
+                    "must be a whole number of at least 1");
         }
 
         number(config, errors, "strategy.trigger_pct", 0.001, v -> v > 0.0 && v < 1.0,

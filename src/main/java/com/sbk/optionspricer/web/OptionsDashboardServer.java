@@ -332,7 +332,7 @@ public class OptionsDashboardServer {
      */
     java.util.Map<String, Object> healthBody() {
         long now = System.currentTimeMillis();
-        String symbol = "SPY";
+        String symbol = this.symbol;
         String sourceStatus = "UNAVAILABLE";
         String source = null;
         long lastUpdate = 0L;
@@ -539,8 +539,21 @@ public class OptionsDashboardServer {
         return value;
     }
 
+    /** The instrument the header, health and risk endpoints report: {@code execution.symbol}, set by the application. */
+    private volatile String symbol = "SPY";
+
+    public void setSymbol(String symbol) {
+        if (symbol == null || symbol.isBlank()) {
+            throw new IllegalArgumentException("symbol must not be blank");
+        }
+        this.symbol = symbol.trim().toUpperCase(java.util.Locale.ROOT);
+    }
+
     public static String healthSnapshot(MarketSnapshotAdapter adapter) {
-        String symbol = "SPY";
+        return healthSnapshot(adapter, "SPY");
+    }
+
+    public static String healthSnapshot(MarketSnapshotAdapter adapter, String symbol) {
         String sourceStatus = "UNAVAILABLE";
         long lastUpdate = 0L;
         long quoteAge = 0L;
@@ -689,7 +702,7 @@ public class OptionsDashboardServer {
                 sendJsonError(exchange, 503, "market data unavailable");
                 return;
             }
-            MarketSnapshot snapshot = marketAdapter.getSnapshot("SPY");
+            MarketSnapshot snapshot = marketAdapter.getSnapshot(symbol);
             java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
             body.put("symbol", snapshot.symbol());
             // An unavailable source has no price; the snapshot's placeholder must not be shown as the spot.
@@ -851,7 +864,7 @@ public class OptionsDashboardServer {
             exchange.getResponseHeaders().set("Content-Type", "application/json");
             double spot = Double.NaN;
             if (marketAdapter != null) {
-                MarketSnapshot quote = marketAdapter.getSnapshot("SPY");
+                MarketSnapshot quote = marketAdapter.getSnapshot(symbol);
                 if (quote != null && quote.status() != com.sbk.optionspricer.market.MarketDataStatus.UNAVAILABLE) {
                     spot = quote.last();
                 }

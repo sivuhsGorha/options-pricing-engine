@@ -37,6 +37,16 @@ public class QuantSimulationHarness implements com.sbk.optionspricer.execution.S
         this.lastOptionStepMs = Long.MIN_VALUE / 2; // the first step is due immediately
     }
 
+    /** The instrument whose spot drives the risk tick: {@code execution.symbol}, set by the application (SPY until then). */
+    private volatile String symbol = "SPY";
+
+    public void setSymbol(String symbol) {
+        if (symbol == null || symbol.isBlank()) {
+            throw new IllegalArgumentException("symbol must not be blank");
+        }
+        this.symbol = symbol.trim().toUpperCase(java.util.Locale.ROOT);
+    }
+
     public void setStrategyMode(String mode) {
         if (mode == null || !(mode.equals("momentum") || mode.equals("vol_spread"))) {
             throw new IllegalArgumentException("strategy mode must be momentum or vol_spread");
@@ -149,7 +159,7 @@ public class QuantSimulationHarness implements com.sbk.optionspricer.execution.S
         // dashboard does not start until start() returns, so it runs on its own thread.
         Thread feedProbe = new Thread(() -> {
             try {
-                var feedStatus = spotProvider.getFeedStatus("SPY");
+                var feedStatus = spotProvider.getFeedStatus(symbol);
                 System.out.println("[MARKET DATA STATUS] FINNHUB=" + feedStatus.getOrDefault("FINNHUB", "UNAVAILABLE")
                         + " | ALPHA_VANTAGE=" + feedStatus.getOrDefault("ALPHA_VANTAGE", "UNAVAILABLE")
                         + " | POLYGON=" + feedStatus.getOrDefault("POLYGON", "UNAVAILABLE")
@@ -188,7 +198,7 @@ public class QuantSimulationHarness implements com.sbk.optionspricer.execution.S
         try {
             double spot = currentSpot;
             if (spotProvider.hasMarketDataKeys()) {
-                LiveSpotProvider.Quote quote = spotProvider.getQuote("SPY");
+                LiveSpotProvider.Quote quote = spotProvider.getQuote(symbol);
                 if (quote != null && !Double.isNaN(quote.last())
                         && com.sbk.optionspricer.market.MarketDataStatus.UNAVAILABLE != quote.status()) {
                     spot = quote.last();

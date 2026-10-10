@@ -248,6 +248,28 @@ class ApiResponseHardeningTest {
         assertTrue(body.get("volume").isNull(), "no volume: null, not 2000");
     }
 
+    // Found on review (2026-10-10): the spot, health and risk endpoints asked for "SPY" whatever execution.symbol said,
+    // so with another symbol the header showed one instrument while the book traded another.
+
+    @Test
+    void spotHealthAndRiskFollowTheConfiguredSymbolNotAHardCodedOne() throws Exception {
+        java.util.List<String> asked = new java.util.concurrent.CopyOnWriteArrayList<>();
+        MarketSnapshotAdapter adapter = symbol -> {
+            asked.add(symbol);
+            return new MarketSnapshot(symbol, Double.NaN, Double.NaN, 450.0, MarketSnapshot.VOLUME_UNKNOWN,
+                    Instant.now(), Instant.now(), 0L, "FINNHUB", MarketDataStatus.DELAYED);
+        };
+        start(reader(() -> new MmapStateReader.RiskState(0, 0, 0, 0)), null, null, adapter);
+        server.setSymbol("qqq");
+
+        assertEquals("QQQ", MAPPER.readTree(get("/api/spot").body()).get("symbol").asText());
+        assertEquals("QQQ", MAPPER.readTree(get("/api/health").body()).get("symbol").asText());
+        get("/api/risk");
+
+        assertFalse(asked.isEmpty());
+        assertTrue(asked.stream().allMatch("QQQ"::equals), "every quote request names the configured symbol: " + asked);
+    }
+
     @Test
     void spotEndpointReportsARealBookAndVolumeWhenTheProviderHasThem() throws Exception {
         MarketSnapshotAdapter book = symbol -> new MarketSnapshot("SPY", 480.20, 480.30, 480.25,

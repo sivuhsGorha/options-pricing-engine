@@ -136,7 +136,7 @@ public final class VolatilitySurfaceService implements VolatilitySurfaceSource, 
         Set<String> warnings = new LinkedHashSet<>();
         Loaded loaded;
         try {
-            loaded = load(today, warnings);
+            loaded = load(today, warnings, false);
         } catch (RuntimeException e) {
             warnings.add(rootMessage(e));
             loaded = new Loaded(List.of(), List.of(), Set.of(), false);
@@ -169,7 +169,7 @@ public final class VolatilitySurfaceService implements VolatilitySurfaceSource, 
     }
 
     /** One pass over the provider: the expiries nearest the target tenors, each chain with its provenance. */
-    private Loaded load(LocalDate today, Set<String> warnings) {
+    private Loaded load(LocalDate today, Set<String> warnings, boolean recordHistory) {
         List<LocalDate> expiries;
         try {
             expiries = selectExpiries(provider.listExpiries(symbol, today), today);
@@ -190,7 +190,9 @@ public final class VolatilitySurfaceService implements VolatilitySurfaceSource, 
                 sources.add(sourced.source());
                 marketData &= sourced.marketData();
                 warnings.addAll(sourced.notes());
-                onChainLoaded.accept(sourced.chain());
+                if (recordHistory) {
+                    onChainLoaded.accept(sourced.chain());
+                }
             } catch (RuntimeException e) {
                 warnings.add("expiry " + expiry + ": " + rootMessage(e));
             }
@@ -219,7 +221,7 @@ public final class VolatilitySurfaceService implements VolatilitySurfaceSource, 
         lastFitAt = now;
         LocalDate today = LocalDate.ofInstant(now, ZoneOffset.UTC);
         Set<String> warnings = new LinkedHashSet<>(); // a provider failing on every expiry is reported once
-        Loaded loaded = load(today, warnings);
+        Loaded loaded = load(today, warnings, true);
         List<OptionChain> chains = loaded.chains();
         List<OptionChainProvider.SourcedChain> sourcedChains = loaded.sourced();
         Set<String> sources = loaded.sources();

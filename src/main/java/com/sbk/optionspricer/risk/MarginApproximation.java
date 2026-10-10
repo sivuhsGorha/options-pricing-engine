@@ -1,9 +1,10 @@
 package com.sbk.optionspricer.risk;
 
 /**
- * Standard Portfolio Analysis of Risk (Margin) / Eurex Clearing Margin Simulator.
- * Computes the Initial Margin (IM) required by the clearinghouse by stress-testing 
- * the portfolio's Greeks against extreme market scenarios.
+ * A scenario stress test on the book's net Greeks: the worst loss over a grid of spot moves (-15%, 0, +15%) and
+ * volatility moves (-20, 0, +20 points), using a second-order Taylor expansion. It is a rough scale for how much
+ * the book could lose in a day, not a margin requirement: it is not SPAN, not Eurex Prisma and not any
+ * clearinghouse's figure, and it ignores cross-gamma, skew and term-structure moves.
  */
 public class MarginApproximation {
     
@@ -30,12 +31,12 @@ public class MarginApproximation {
     public static double calculateInitialMargin(double netDelta, double netGamma, double netVega, double underlyingSpot) {
         double maxLoss = 0.0;
         
-        // Define the 4 extreme corners of the Margin stress matrix
+        // The full 3 x 3 grid without its centre. The corners alone miss the book that loses on one axis only: a
+        // long-gamma, short-vega book gains at every corner (the spot move pays) yet loses on a pure vol rise.
         double[][] scenarios = {
-            { SPOT_SHOCK_UP, VOL_SHOCK_UP },
-            { SPOT_SHOCK_UP, VOL_SHOCK_DOWN },
-            { SPOT_SHOCK_DOWN, VOL_SHOCK_UP },
-            { SPOT_SHOCK_DOWN, VOL_SHOCK_DOWN }
+            { SPOT_SHOCK_UP, VOL_SHOCK_UP },     { SPOT_SHOCK_UP, 0.0 },     { SPOT_SHOCK_UP, VOL_SHOCK_DOWN },
+            { 0.0, VOL_SHOCK_UP },                                           { 0.0, VOL_SHOCK_DOWN },
+            { SPOT_SHOCK_DOWN, VOL_SHOCK_UP },   { SPOT_SHOCK_DOWN, 0.0 },   { SPOT_SHOCK_DOWN, VOL_SHOCK_DOWN }
         };
         
         for (double[] scenario : scenarios) {

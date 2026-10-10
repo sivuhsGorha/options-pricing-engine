@@ -33,6 +33,10 @@ public final class ConfigManager {
     public static final double DEFAULT_MAX_GAMMA = 1_000.0;
     public static final double DEFAULT_MAX_VEGA = 10_000.0;
     public static final double DEFAULT_MAX_POSITION = 10_000.0;
+    /** Widest bid-ask spread, in basis points of the mid, an order may be sent into. */
+    public static final double DEFAULT_MAX_SPREAD_BPS = 200.0;
+    /** Smallest known volume (contracts or shares traded today) an order may be sent into. */
+    public static final long DEFAULT_MIN_VOLUME = 1L;
 
     /** Sections that environment variables, .env entries and system properties may override. */
     private static final String[] OVERRIDE_SECTIONS = {

@@ -21,7 +21,7 @@ import java.util.List;
 /**
  * Risk engine: publishes portfolio Greeks and a stress-test scenario margin derived from the live
  * position book, raises Greek limit alerts, and runs portfolio backtests. Option-chain loading and
- * historical snapshot storage happen at initialization.
+ * historical snapshot storage happen in the surface service, at each calibration.
  */
 public final class UnifiedQuantEngine {
 
