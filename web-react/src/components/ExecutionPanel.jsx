@@ -12,7 +12,10 @@ export default function ExecutionPanel({ positions, orders, control, valuation, 
     const marks = new Map((valuation && valuation.ready && valuation.positions ? valuation.positions : []).map(v => [v.symbol, v]));
     const pnlTone = (v) => (!Number.isFinite(v) ? '#9EC1FF' : v >= 0 ? '#00E676' : '#FF3D00');
     const accepted = orders.filter(o => o.accepted).length;
-    const halted = control.halted;
+    // Until the engine has answered, the state is unknown: showing TRADING ACTIVE / STRATEGY ON would be a guess.
+    const known = typeof control.halted === 'boolean';
+    const strategyKnown = typeof control.strategyEnabled === 'boolean';
+    const halted = control.halted === true;
     const triggerText = Number.isFinite(control.triggerPct) ? `${(control.triggerPct * 100).toFixed(3)}%` : '--';
     const transport = control.transport || null;
     const reconciliation = transport ? transport.reconciliation : 'NOT_APPLICABLE';
@@ -42,9 +45,9 @@ export default function ExecutionPanel({ positions, orders, control, valuation, 
             <div style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap',
                 padding: '6px 8px', fontSize: '13px', borderBottom: '1px solid #1C232D',
-                background: halted ? '#3D0A0A' : '#0A3D2A', color: halted ? '#FF3D00' : '#00E676'
+                background: !known ? '#3D2A00' : halted ? '#3D0A0A' : '#0A3D2A', color: !known ? '#FF9900' : halted ? '#FF3D00' : '#00E676'
             }}>
-                <span>{halted ? `TRADING HALTED — ${control.haltReason || 'no reason given'}` : 'TRADING ACTIVE'}</span>
+                <span>{!known ? 'TRADING STATE UNKNOWN — waiting for the engine' : halted ? `TRADING HALTED — ${control.haltReason || 'no reason given'}` : 'TRADING ACTIVE'}</span>
                 {halted
                     ? <button type="button" className="fkey" style={{ borderColor: '#00E676', color: '#00E676' }} onClick={onResume}>RESUME</button>
                     : <button type="button" className="fkey" style={{ borderColor: '#FF3D00', color: '#FF3D00' }} onClick={onHalt}>HALT</button>}
@@ -54,13 +57,13 @@ export default function ExecutionPanel({ positions, orders, control, valuation, 
                 padding: '6px 8px', fontSize: '12px', borderBottom: '1px solid #1C232D', color: '#9EC1FF'
             }}>
                 <span title={control.note || ''}>
-                    STRATEGY <span style={{ color: control.strategyEnabled ? '#00E676' : '#FF9900', fontWeight: 'bold' }}>{control.strategyEnabled ? 'ON' : 'OFF'}</span>
+                    STRATEGY <span style={{ color: !strategyKnown ? '#9EC1FF' : control.strategyEnabled ? '#00E676' : '#FF9900', fontWeight: 'bold' }}>{!strategyKnown ? '--' : control.strategyEnabled ? 'ON' : 'OFF'}</span>
                     {' · '}{(control.mode || 'momentum').toUpperCase().replace('_', ' ')} · {control.symbol || '--'}
                     {control.mode === 'vol_spread'
                         ? (control.note ? ` · ${control.note}` : ' · waiting for the first evaluation')
                         : ` · trigger ${triggerText} · size ${control.baseQuantity || '--'}`}
                 </span>
-                <button type="button" className="fkey" onClick={onToggleStrategy}>
+                <button type="button" className="fkey" onClick={onToggleStrategy} disabled={!strategyKnown}>
                     {control.strategyEnabled ? 'STRATEGY OFF' : 'STRATEGY ON'}
                 </button>
             </div>

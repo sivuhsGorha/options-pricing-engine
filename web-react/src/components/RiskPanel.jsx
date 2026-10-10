@@ -90,7 +90,7 @@ export default function RiskPanel({ metrics, displayedRisk, logs, valuation, pnl
                         OPTIMIZED MARGIN: <span style={{ color: '#00E676', fontWeight: 'bold' }}>{formatCurrency(metrics.optimizedMargin)}</span>
                     </div>
                     <div style={{ color: '#00E5FF', fontSize: '15px', marginTop: '2px' }}>
-                        REDUCTION: <span style={{ fontWeight: 'bold' }}>{Number.isFinite(metrics.marginReductionPct) ? '-' + metrics.marginReductionPct + '%' : '--%'}</span> | HEDGE: <span style={{ color: '#FF9900' }}>{Number.isFinite(metrics.recommendedHedge) ? '+' + metrics.recommendedHedge + ' SH' : '-- SH'}</span>
+                        REDUCTION: <span style={{ fontWeight: 'bold' }}>{Number.isFinite(metrics.marginReductionPct) ? '-' + metrics.marginReductionPct + '%' : '--%'}</span> | HEDGE: <span style={{ color: '#FF9900' }}>{Number.isFinite(metrics.recommendedHedge) ? (metrics.recommendedHedge > 0 ? '+' : '') + metrics.recommendedHedge + ' SH' : '-- SH'}</span>
                     </div>
                 </div>
 

@@ -14,6 +14,18 @@ describe('RiskPanel', () => {
         expect(screen.getByText('$30,000.00')).toBeInTheDocument();
     });
 
+    it('writes the recommended hedge with one sign, never "+-"', () => {
+        const { rerender } = render(<RiskPanel metrics={{ recommendedHedge: -25 }} displayedRisk={{}} logs={[]} />);
+        expect(screen.getByText('-25 SH')).toBeInTheDocument();
+        expect(screen.queryByText(/\+-/)).not.toBeInTheDocument();
+
+        rerender(<RiskPanel metrics={{ recommendedHedge: 40 }} displayedRisk={{}} logs={[]} />);
+        expect(screen.getByText('+40 SH')).toBeInTheDocument();
+
+        rerender(<RiskPanel metrics={{ recommendedHedge: 0 }} displayedRisk={{}} logs={[]} />);
+        expect(screen.getByText('0 SH')).toBeInTheDocument();
+    });
+
     it('shows -- rather than NaN or 0 when a value is unknown', () => {
         render(<RiskPanel metrics={{}} displayedRisk={{ netDelta: null, netGamma: NaN, netVega: undefined, trackedNotional: null }} logs={[]} />);
 

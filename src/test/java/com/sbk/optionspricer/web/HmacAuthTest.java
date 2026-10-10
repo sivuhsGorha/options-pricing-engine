@@ -14,6 +14,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class HmacAuthTest {
 
@@ -82,11 +84,29 @@ public class HmacAuthTest {
     }
 
     @Test
-    void testTamperedBody() throws Exception {
+    void testTamperedPath() throws Exception {
         String ts = String.valueOf(System.currentTimeMillis() / 1000);
         String sig = sign(SECRET, "GET", "/api/spot", null, ts, "nonce3");
-        // Tampered path
+        // This test was named testTamperedBody until 2026-10-10 but tampers the path; the body has its own test below.
         assertEquals(401, send("/api/spott", ts, "nonce3", sig).getResponseCode());
+    }
+
+    @Test
+    void aBodyChangedAfterSigningFailsVerificationAndTheSignedBodyPasses() throws Exception {
+        String ts = String.valueOf(System.currentTimeMillis() / 1000);
+        byte[] signed = "{\"enabled\":false}".getBytes(StandardCharsets.UTF_8);
+        String digest = Base64.getEncoder().encodeToString(java.security.MessageDigest.getInstance("SHA-256").digest(signed));
+        String payload = "POST\n/api/control/strategy\n\n" + ts + "\nbody-unit-1\n" + digest;
+        Mac mac = Mac.getInstance("HmacSHA256");
+        mac.init(new SecretKeySpec(SECRET.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+        String signature = Base64.getEncoder().encodeToString(mac.doFinal(payload.getBytes(StandardCharsets.UTF_8)));
+
+        byte[] flipped = "{\"enabled\":true}".getBytes(StandardCharsets.UTF_8);
+        assertFalse(HmacAuth.verify(SECRET, signature, "POST", "/api/control/strategy", null, ts, "body-unit-1", flipped));
+        assertFalse(HmacAuth.verify(SECRET, signature, "POST", "/api/control/strategy", null, ts, "body-unit-1", new byte[0]),
+                "dropping the body is a change too");
+        assertTrue(HmacAuth.verify(SECRET, signature, "POST", "/api/control/strategy", null, ts, "body-unit-1", signed),
+                "a failed attempt does not spend the nonce; the genuine request still passes");
     }
 
     @Test

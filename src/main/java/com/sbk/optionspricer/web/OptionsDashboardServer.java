@@ -467,8 +467,8 @@ public class OptionsDashboardServer {
 
     /** A small JSON object body, or an empty object for no body. Sends the error and returns null when the body is unusable. */
     private static com.fasterxml.jackson.databind.JsonNode readJsonObject(HttpExchange exchange) throws IOException {
-        byte[] body = exchange.getRequestBody().readNBytes(4097);
-        if (body.length > 4096) {
+        byte[] body = requestBody(exchange);
+        if (body.length > MAX_BODY_BYTES) {
             sendJsonError(exchange, 413, "payload too large");
             return null;
         }
@@ -1080,16 +1080,37 @@ public class OptionsDashboardServer {
         };
     }
 
+    /** Exchange attribute holding the request body bytes once an HMAC request has read them for verification. */
+    private static final String BODY_ATTRIBUTE = "aura.body";
+    /** Largest request body any handler accepts; one byte more is read so an oversized body is seen, not truncated silently. */
+    private static final int MAX_BODY_BYTES = 4096;
+
+    /**
+     * The request body, from the bytes an HMAC request already read for its signature check, or from the stream.
+     * A body can be read once, so authorization and the handler must share it.
+     */
+    private static byte[] requestBody(HttpExchange exchange) throws IOException {
+        Object read = exchange.getAttribute(BODY_ATTRIBUTE);
+        return read instanceof byte[] bytes ? bytes : exchange.getRequestBody().readNBytes(MAX_BODY_BYTES + 1);
+    }
+
     private boolean authorizeApi(HttpExchange exchange) throws IOException {
         String origin = exchange.getRequestHeaders().getFirst("Origin");
         String cookie = exchange.getRequestHeaders().getFirst("Cookie");
         boolean browserRequest = origin != null || BrowserSessionManager.getSessionToken(cookie) != null;
-        boolean authorized = browserRequest
-                ? (origin == null || sessions.isAllowedOrigin(origin)) && sessions.isValidSessionCookie(cookie)
-                : HmacAuth.verify(apiSecret, exchange.getRequestHeaders().getFirst("X-Signature"),
-                        exchange.getRequestMethod(), exchange.getRequestURI().getPath(),
-                        exchange.getRequestURI().getQuery(), exchange.getRequestHeaders().getFirst("X-Timestamp"),
-                        exchange.getRequestHeaders().getFirst("X-Nonce"));
+        boolean authorized;
+        if (browserRequest) {
+            authorized = (origin == null || sessions.isAllowedOrigin(origin)) && sessions.isValidSessionCookie(cookie);
+        } else {
+            // The signature covers the body, so read it first and keep it for the handler. An oversized body is cut
+            // at the limit plus one byte; its digest cannot match what the client signed, so it is refused here.
+            byte[] body = exchange.getRequestBody().readNBytes(MAX_BODY_BYTES + 1);
+            exchange.setAttribute(BODY_ATTRIBUTE, body);
+            authorized = HmacAuth.verify(apiSecret, exchange.getRequestHeaders().getFirst("X-Signature"),
+                    exchange.getRequestMethod(), exchange.getRequestURI().getPath(),
+                    exchange.getRequestURI().getQuery(), exchange.getRequestHeaders().getFirst("X-Timestamp"),
+                    exchange.getRequestHeaders().getFirst("X-Nonce"), body);
+        }
         if (!authorized) {
             exchange.sendResponseHeaders(401, -1);
             exchange.close();

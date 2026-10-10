@@ -101,6 +101,20 @@ describe('ExecutionPanel', () => {
         expect(screen.getByText('BOOK MISMATCH vs ALPACA: SPY: local 10, alpaca 0')).toBeInTheDocument();
     });
 
+    it('says the trading state is unknown until the engine has reported it, and still offers HALT', () => {
+        const onHalt = vi.fn();
+        const unknown = { halted: null, haltReason: null, strategyEnabled: null, symbol: null, triggerPct: NaN, baseQuantity: 0 };
+        render(<ExecutionPanel positions={noPositions} orders={[]} control={unknown} valuation={noValuation} onHalt={onHalt} onResume={() => {}} onToggleStrategy={() => {}} />);
+
+        expect(screen.getByText(/TRADING STATE UNKNOWN/)).toBeInTheDocument();
+        expect(screen.queryByText('TRADING ACTIVE')).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'RESUME' })).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'HALT' }));
+        expect(onHalt).toHaveBeenCalledTimes(1);
+        expect(screen.getByRole('button', { name: 'STRATEGY ON' })).toBeDisabled();
+        expect(screen.queryByText('ON')).not.toBeInTheDocument();
+    });
+
     it('describes the empty order tape for the options strategy in its own terms', () => {
         render(<ExecutionPanel positions={noPositions} orders={[]} control={{ ...activeControl, mode: 'vol_spread' }} valuation={noValuation} onHalt={() => {}} onResume={() => {}} onToggleStrategy={() => {}} />);
 

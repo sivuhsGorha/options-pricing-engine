@@ -30,8 +30,9 @@ function App() {
   const [positions, setPositions] = useState({ halted: false, haltReason: null, positions: [] });
   const [orders, setOrders] = useState([]);
   const [valuation, setValuation] = useState({ ready: false });
-  const [control, setControl] = useState({ halted: false, haltReason: null, strategyEnabled: true, symbol: null, triggerPct: NaN, baseQuantity: 0 });
-  const [logs, setLogs] = useState([{ time: '09:00:00', msg: 'AURA-OPT Unified Engine online. Mmap IPC active.' }]);
+  // Unknown until the engine answers: assuming TRADING ACTIVE / STRATEGY ON would show a state nobody has confirmed.
+  const [control, setControl] = useState({ halted: null, haltReason: null, strategyEnabled: null, symbol: null, triggerPct: NaN, baseQuantity: 0 });
+  const [logs, setLogs] = useState([]);
   const [surfaceData, setSurfaceData] = useState(null);
   const [otherSurfaces, setOtherSurfaces] = useState([]);
   const [surfaceHistory, setSurfaceHistory] = useState(null);
@@ -53,16 +54,19 @@ function App() {
 
   const providers = healthInfo.providers || {};
   const spotTone = isFresh(spotInfo.status) ? 'ticker-up' : 'ticker-down';
+  // FEEDS OK only when some provider is actually serving a fresh quote; a map of rejected providers is not a feed.
+  const feedsServing = Object.values(providers).some(isFresh);
+  const feedsLabel = feedsServing ? 'FEEDS OK' : Object.keys(providers).length > 0 ? 'NO FEED' : 'WAITING';
   const marketRibbon = [
     {
-      name: 'SPY',
+      name: spotInfo.symbol || '--',
       value: Number.isFinite(spotInfo.spotPrice) ? formatNumber(spotInfo.spotPrice) : '--',
       change: isFresh(spotInfo.status) ? `+${spotInfo.status}` : 'UNAVAILABLE',
       tone: spotTone
     },
     { name: 'SOURCE', value: spotInfo.source || 'N/A', change: spotInfo.status || 'UNAVAILABLE', tone: spotTone },
     // No exchange gateway: orders fill in the in-process simulator or in an Alpaca paper account.
-    { name: 'GATEWAY', value: control.transport ? control.transport.transport.toUpperCase() : 'PAPER', change: Object.keys(providers).length > 0 ? 'FEEDS OK' : 'WAITING', tone: 'ticker-up' }
+    { name: 'GATEWAY', value: control.transport ? control.transport.transport.toUpperCase() : 'PAPER', change: feedsLabel, tone: feedsServing ? 'ticker-up' : 'ticker-down' }
   ];
 
   const displayedRisk = {
@@ -92,6 +96,14 @@ function App() {
     } catch {
       setLoginError('Connection error during authentication.');
     }
+  };
+
+  // The server drops a session after 15 minutes (and on restart). A 401 means the numbers on screen are no longer
+  // being refreshed, so go back to the sign-in form instead of leaving them under a live-looking banner.
+  const expireSession = () => {
+    setAuthenticated(false);
+    setOperatorPassword('');
+    setLoginError('Session expired. Sign in again.');
   };
 
   const handleLogout = async () => {
@@ -160,6 +172,10 @@ function App() {
   const operate = async (path, body, label) => {
     try {
       const response = await securePost(path, body);
+      if (response.status === 401) {
+        expireSession();
+        return;
+      }
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       setControl(await response.json());
       addLog(`OPERATOR: ${label}.`);
@@ -176,6 +192,10 @@ function App() {
     const poll = (path, onData, onError) => async () => {
       try {
         const response = await secureFetch(path);
+        if (response.status === 401) {
+          expireSession();
+          return;
+        }
         if (!response.ok) throw new Error(`${path} returned ${response.status}`);
         onData(await response.json());
       } catch {
@@ -207,7 +227,7 @@ function App() {
     const fetchValuation = poll('/valuation', setValuation, () => {});
     const fetchPnl = poll('/pnl', setPnl, () => {});
     const fetchSurfaceHistory = poll(`/surface/history?model=${surfaceModel}&hours=24`, setSurfaceHistory, () => {});
-    const fetchHealthData = poll('/health', setHealthInfo, () => setHealthInfo({ symbol: 'SPY', providers: {} }));
+    const fetchHealthData = poll('/health', setHealthInfo, () => setHealthInfo({ symbol: null, providers: {} }));
 
     const jobs = [[updateRiskMetrics, 1000], [fetchSpotData, 2000], [fetchSurfaceData, 5000], [fetchOtherSurfaces, 5000], [fetchHealthData, 5000], [fetchPositions, 2000], [fetchOrders, 2000], [fetchControl, 2000], [fetchValuation, 2000], [fetchPnl, 5000], [fetchSurfaceHistory, 60000]];
     jobs.forEach(([job]) => job());

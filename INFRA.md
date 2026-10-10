@@ -87,6 +87,16 @@ sessions; HMAC request signing with replay protection; CSP and other security he
 credential redaction in logs; client address resolution that trusts `X-Forwarded-For` only from
 `TRUSTED_PROXIES`.
 
+**Signing a request** (non-browser API clients; a browser uses its session cookie). Send `X-Timestamp` (Unix
+seconds, within 300 s in the past or 30 s in the future, and not before the server process started), `X-Nonce`
+(1 to 128 characters of `A-Z a-z 0-9 . _ ~ -`, used once) and `X-Signature`, the base64 HMAC-SHA256 under
+`API_SECRET` of the lines `METHOD`, `PATH`, `QUERY` (empty when there is none), `TIMESTAMP`, `NONCE`, joined with
+newlines. When the request has a body, add a sixth line: the base64 SHA-256 digest of the body bytes. The body is
+covered, so a payload changed in transit, or added to a request signed without one, fails verification; bodies
+are limited to 4096 bytes. Until 2026-10-10 the server never passed the body to the verifier, so a client that
+signed a body was refused and one that did not could have its body replaced; there are no known signing clients
+outside this repository.
+
 ---
 
 ## 4. CI

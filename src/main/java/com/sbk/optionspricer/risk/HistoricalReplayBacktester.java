@@ -42,6 +42,9 @@ public class HistoricalReplayBacktester {
         double lastPrice = ordered.getFirst().midPrice();
         double currentPnL = 0.0;
         double totalSlippage = 0.0;
+        // Largest fall of cumulative P&L from its running peak (the start counts as a peak of zero), never negative.
+        // It was the lowest cumulative P&L, so a run that made 20 and gave it all back reported no drawdown.
+        double peakPnL = 0.0;
         double maxDrawdown = 0.0;
         int trades = 0;
 
@@ -61,7 +64,8 @@ public class HistoricalReplayBacktester {
                 if (moveFromEntry >= threshold) {
                     currentPnL += (currentMid - entryPrice) * tradeSize;
                     totalSlippage += Math.abs(currentMid - entryPrice) * 0.25;
-                    maxDrawdown = Math.min(maxDrawdown, currentPnL);
+                    peakPnL = Math.max(peakPnL, currentPnL);
+                    maxDrawdown = Math.max(maxDrawdown, peakPnL - currentPnL);
                     entryPrice = null;
                 }
             }
@@ -72,8 +76,9 @@ public class HistoricalReplayBacktester {
         if (entryPrice != null) {
             currentPnL += (lastPrice - entryPrice) * tradeSize;
             totalSlippage += Math.abs(lastPrice - entryPrice) * 0.25;
-            trades++;
-            maxDrawdown = Math.min(maxDrawdown, currentPnL);
+            // Not counted again: the entry already counted this trade, whether it closes in the loop or at the end.
+            peakPnL = Math.max(peakPnL, currentPnL);
+            maxDrawdown = Math.max(maxDrawdown, peakPnL - currentPnL);
         }
 
         double averageSlippage = trades == 0 ? 0.0 : totalSlippage / trades;
