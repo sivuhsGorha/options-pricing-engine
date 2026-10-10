@@ -115,5 +115,5 @@ and the application has no measured latency figures, so none of them can be just
 - CPU isolation (`isolcpus`, `nohz_full`, `rcu_nocbs`), performance governor, IRQ affinity, huge pages,
   swap off. `scripts/setup_os_tuning.sh` sets the governor and prints the rest as commented examples.
 - Kernel bypass (Solarflare OpenOnload / EF_VI). Pointless without an exchange connection.
-- JVM: ZGC, `-XX:+AlwaysPreTouch`, large pages, `JitCompilerWarmer` at startup (exists, nothing calls it).
+- JVM: ZGC, `-XX:+AlwaysPreTouch`, large pages, JIT warm-up. None of it is applied.
 - Monitoring: Prometheus via JMX exporter, Grafana, alerting. None is wired up.

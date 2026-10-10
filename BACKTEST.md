@@ -12,8 +12,6 @@ would still need.
 | `risk/PortfolioBacktestOrchestrator` | runs `StrategyExecutionLoop` over a list of `OptionSnapshot` mid prices through a real `OrderManager` with the paper adapter and an in-memory `PositionTracker` (`FillRecorder.NONE`, so a backtest can never write to the live fill ledger); reports snapshots processed, signals, accepted and rejected orders, net quantity, total P&L, average slippage and maximum drawdown (the largest fall of cumulative P&L from its running peak, never negative; a position still open at the end is marked at the last price and counts as the one trade it was entered as) |
 | `risk/HistoricalReplayBacktester` | turns stored snapshots into the trade-signal sequence and P&L metrics used above |
 | `data/HistoricalDataManager` | append-only in-memory snapshot store; the surface service stores four quotes of each chain it loads into it at every calibration, not on the per-minute quote reload |
-| `gateways/HistoricalReplayEngine` | replays `market_data.csv` rows as binary ticks into the ring buffer, with the row number in any parse error (the CSV is the synthetic chain written by `fetch_real_api_data.py`) |
-| `risk/EventDrivenBacktester` | two functions: `calculateAlmgrenChrissImpact(orderSize, ADV, dailyVol, executionTimeRatio)` for market impact, and `simulateQueuePosition(orderSize, existingQueueSize)` for passive-fill queue position. They are utilities; the orchestrator does not call them |
 
 `Main` runs the orchestrator once at startup over a four-snapshot demo series and prints the summary line.
 

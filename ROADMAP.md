@@ -19,8 +19,8 @@ tracker with fill ledger; Greek alerts with hysteresis that trip a trading halt;
 VaR, expected shortfall, margin approximation and optimizer.
 
 **Platform.** Spot providers with gates and budgets; data-status model (LIVE/DELAYED/STALE/UNAVAILABLE/
-SIMULATED); mmap shared state with seqlock and correct lifecycle; SPSC ring buffer with correct slot
-release; dashboard with login, sessions, HMAC, CSP, risk, surface and paper-trading panels; CI with tests,
+SIMULATED); mmap shared state with seqlock and correct lifecycle (an SPSC ring buffer was removed on 2026-10-10, see
+EXECUTION.md section 3); dashboard with login, sessions, HMAC, CSP, risk, surface and paper-trading panels; CI with tests,
 coverage gate, Docker readiness, frontend lint/build and secret scanning; 336 Java tests, 11 Python tests.
 
 **Honesty pass.** Dead code removed, simulations labelled, documentation rewritten to match the code.

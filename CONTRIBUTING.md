@@ -36,7 +36,7 @@ mvn -B clean verify
 
 ### Pull Request Checklist:
 - [ ] `mvn clean verify` passes on JDK 25.
-- [ ] Closed-form pricing matches Monte Carlo simulation within 95% Confidence Interval.
+- [ ] Closed-form pricing agrees with the PDE pricer on European options to the tolerances in `PdeAccuracyTest`.
 - [ ] Put-Call parity condition $C - P = S e^{-qT} - K e^{-rT}$ holds to within $10^{-6}$ tolerance.
 - [ ] Implied Volatility solver accurately recovers input volatility across extreme strikes ($0.5 \le K/S \le 1.5$) and short maturities ($T = 1 \text{ day}$).
 - [ ] No allocations added to critical pricing loops.

@@ -1,7 +1,8 @@
 # Execution (EXECUTION.md)
 
-How an order moves from signal to booked position. The only live execution path is paper trading; the
-exchange-protocol code in `gateways/` is simulation and is marked as such in every class header.
+How an order moves from signal to booked position. The only live execution paths are the in-process paper
+simulator and an Alpaca paper account. There is no exchange-protocol code: the gateway simulations were removed
+(section 3).
 
 ---
 
@@ -104,19 +105,15 @@ header, so a page on another site cannot trip or clear the halt through the oper
 
 ---
 
-## 3. Simulations in `gateways/` and `execution/SmartOrderRouter`
+## 3. Removed: the gateway simulations
 
-| Class | What it really is |
-| :--- | :--- |
-| `execution/SmartOrderRouter` | writes a fixed-layout binary payload loosely modelled on Eurex ETI into a buffer and passes it to the transport. No venue, no routing between venues |
-| `gateways/EobiDecoder` | decodes a made-up 37-byte EOBI-like packet layout into `OrderBookTick`s on the ring buffer |
-| `gateways/EobiMarketDataHandler` | generates random packets in that layout on a thread; opens no socket |
-| `gateways/FixMessageEncoder` | formats FIX 4.4-style New Order Single strings; no session, no counterparty |
-| `gateways/HistoricalReplayEngine` | replays `market_data.csv` into the same ring buffer |
-| `gateways/TwapExecutionAlgo`, `QueuePositionEstimator`, `OrderTicket`, `OrderState` | schedule slicing and queue estimates on paper; not connected to the order manager |
-
-These exist to exercise the decoder and ring buffer. Nothing in this repository connects to Eurex, Euronext,
-LSEG, SIX or Nasdaq, and no latency figure has been measured.
+Earlier versions carried a `gateways/` package (a decoder for a made-up 37-byte EOBI-like packet layout, a FIX
+New Order Single encoder, a market-data replay into a ring buffer, TWAP slicing and a queue-position estimate)
+and `execution/SmartOrderRouter` (a fixed-layout binary payload loosely modelled on Eurex ETI). They were
+simulations, labelled as such, and nothing on the order path called them: a review on 2026-10-10 found them
+referenced only by their own tests, so they were deleted together with those tests and the ring buffer they fed.
+They remain in git history. Nothing in this repository connects to Eurex, Euronext, LSEG, SIX or Nasdaq, and no
+latency figure has been measured.
 
 ---
 

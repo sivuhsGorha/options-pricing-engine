@@ -10,8 +10,9 @@ options, calibrates volatility surfaces, computes Greeks and portfolio risk, and
 **What it is not:** a connection to any exchange, or to real money. There is no exchange market-data feed.
 Orders fill either in the built-in paper-trading simulator or, with `execution.transport: alpaca`, in an
 Alpaca *paper* account (the client can only address the paper endpoint), and the book is reconciled with
-that account every minute. The `gateways/` package and `execution/SmartOrderRouter` are simulations of
-binary-protocol encoding and decoding (see their class headers). No latency figure is measured or claimed.
+that account every minute. Binary-protocol gateway simulations that earlier versions carried (a market-data
+decoder, a FIX encoder, a smart order router) were removed on 2026-10-10 because nothing used them. No latency
+figure is measured or claimed.
 
 ---
 
@@ -21,7 +22,7 @@ binary-protocol encoding and decoding (see their class headers). No latency figu
 | :--- | :--- |
 | Closed-form pricing | Black-Scholes-Merton with continuous dividend yield; accurate normal CDF; safeguarded Newton implied-volatility solver |
 | Early exercise | Trinomial tree; Crank-Nicolson PDE (Rannacher start, Brennan-Schwartz) in log-spot; discrete-dividend PDE pricer |
-| Monte Carlo | European Monte Carlo pricer used as a cross-check for the closed form; VaR / expected shortfall calculators |
+| Value at risk | Historical VaR from a P&L vector, scaled by the holding period (a tested library function, not on the live path) |
 | Volatility | SVI, SSVI with no-arbitrage conditions and validation, SABR (Hagan), Dupire local vol; a background service fits SSVI, raw SVI and SABR to the same option-chain quotes (Nelder-Mead least squares) and the dashboard shows the fit's source, quotes, RMSE and parameters |
 | Rates | OIS / par-yield curve bootstrap, ACT/365F day count, optional FRED and ESTR providers |
 | Greeks and risk | First, second and higher-order Greeks, portfolio aggregation, limit alerts that halt trading, margin approximation (not an exchange margin model) |
@@ -112,7 +113,7 @@ flowchart LR
 Prerequisites: JDK 25, Maven 3.9+, and Node 22 only if you rebuild the frontend.
 
 ```bash
-# Build and test (509 tests, JaCoCo coverage gate)
+# Build and test (482 tests, JaCoCo coverage gate)
 mvn clean verify
 
 # Configuration: copy config.example.yaml to config.yaml, and put secrets in .env (never committed):
@@ -137,7 +138,7 @@ docker compose up --build -d
 
 Sign in with `OPERATOR_PASSWORD`. The paper-trading panel shows positions and every order with its fill or
 rejection reason, with HALT / RESUME and a strategy switch. `run_all.ps1` runs the same checks as CI locally:
-the Java build with 509 tests and the coverage gate, the Python tests, and the frontend lint, 58 tests and build.
+the Java build with 482 tests and the coverage gate, the Python tests, and the frontend lint, 58 tests and build.
 
 ---
 

@@ -15,7 +15,7 @@ audit/
 .env
 cookie.txt
 config.yaml
-data/
+/data/
 *.dat
 .venv/
 web/assets/

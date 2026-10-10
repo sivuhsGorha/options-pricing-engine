@@ -34,8 +34,7 @@ Per position (`risk/PortfolioPosition`) and aggregated over the book (`risk/Gree
 - Second order: gamma, vanna, volga, charm.
 - Third order: speed, color.
 
-`risk/greeks/AnalyticalHigherGreeks` gives the closed-form higher-order values; `GreekDriftCalculator` projects
-delta decay (charm) and gamma bleed (color) over a horizon.
+`risk/greeks/AnalyticalHigherGreeks` gives the closed-form higher-order values (vanna, volga, charm, speed, color).
 
 `core/PortfolioValuationService` marks the book every five seconds: an option at its quote mid (or the
 Black-Scholes price when there is no two-sided quote) with Greeks from the fitted SVI slice at its strike and
@@ -73,10 +72,7 @@ operator calls `resume()`. The halt state and reason are exposed on `/api/positi
 | Measure | Class | What it computes |
 | :--- | :--- | :--- |
 | Historical VaR | `HistoricalVaRCalculator` | the loss at a confidence level from a vector of historical daily P&L (minimum 10 samples), scaled by `sqrt(holding days)`; a non-positive tail loss reports 0 |
-| Expected shortfall | `ExpectedShortfallCalculator` | the mean loss beyond the VaR quantile of the same P&L vector |
-| Monte Carlo VaR | `MonteCarloVaRCalculator` | P&L quantile from simulated spot paths under Heston dynamics (`SlvParams`), given delta/gamma/vega |
 | Margin approximation | `MarginApproximation` | worst loss over a 3 x 3 grid (spot -15%, 0, +15%; volatility -20, 0, +20 points; the centre excluded) of a delta-gamma-vega Taylor expansion. A four-corner grid missed a long-gamma, short-vega book, which gains at every corner and loses on a pure volatility rise. **This is not Eurex Prisma or SPAN**; it is a first-order stress proxy and is labelled "scenario margin" in the UI |
-| Margin optimizer | `MarginOptimizer` | the delta hedge quantity that minimises the margin approximation above, and the resulting reduction |
 | Liquidity | `LiquidityRiskMonitor` | spread in basis points and a minimum volume, wired into the pre-trade filter from `risk.max_spread_bps` (default 200) and `risk.min_volume` (default 1). A field the data source did not publish is not judged: a spot feed without a book or a volume passes, an option with a quote and zero volume does not |
 
 The engine publishes net delta, gamma, vega and the scenario margin to the memory-mapped state file every

@@ -19,5 +19,5 @@ The pricing engine should avoid allocating objects in its inner loops.
 * **Kernel bypass (Solarflare OpenOnload) and thread pinning** are deployment ideas only. Nothing in the
   code or `scripts/setup_os_tuning.sh` installs or verifies them, and no exchange connection exists to
   benefit from them.
-* **LMAX Disruptor:** `MarketDataRingBuffer` is a single-producer single-consumer ring in the same spirit,
-  not the Disruptor library.
+* **LMAX Disruptor:** not used. A single-producer single-consumer ring buffer that stood in for it was
+  removed on 2026-10-10 because nothing used it.

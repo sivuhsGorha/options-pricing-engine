@@ -24,8 +24,6 @@ tolerance / vega, which is large for short-dated and far-out-of-the-money option
 no-arbitrage bounds return no result. It is a European model: American prices fed to it would attribute the
 early-exercise premium to volatility.
 
-**Monte Carlo** (`MonteCarloPricer`): terminal GBM sampling with standard error; it exists as an independent
-cross-check of the closed form, and tests require agreement within the confidence interval.
 
 ---
 
@@ -37,7 +35,7 @@ the first two moments of log returns with spacing `dx = sigma sqrt(3 dt)`,
 negative probability (large drift, low vol, few steps) are rejected rather than priced. Memory is O(steps).
 Continuous dividend yield only.
 
-**Finite differences** (`models/pde/DiscreteDividendPricer`; `CrankNicolsonPricer` is a deprecated alias):
+**Finite differences** (`models/pde/DiscreteDividendPricer`):
 the single PDE solver. Black-Scholes in x = ln S, `V_tau = 1/2 sigma^2 V_xx + nu V_x - r V`,
 `nu = r - q - sigma^2/2`, on a uniform grid with the strike on a node and the domain covering spot and strike
 +/- 4.5 standard deviations plus drift. Crank-Nicolson time stepping with **Rannacher start-up** (four fully
@@ -73,8 +71,7 @@ clamped Hagan formula, not the Hagan 2014 density correction, and has been remov
 **Local and stochastic-local volatility** (`volatility/SlvApproximation`): Dupire local volatility from an
 implied surface, `sigma_loc^2 = (dw/dT) / (1 - k/w dw/dk + 1/4(-1/4 - 1/w + k^2/w^2)(dw/dk)^2 + 1/2 d^2w/dk^2)`
 in total-variance form, including the dividend yield. Dupire is only defined for an arbitrage-free surface;
-the class detects a negative numerator or denominator and reports it. Heston-parameter structures (`SlvParams`)
-are used by the Monte Carlo VaR simulation.
+the class detects a negative numerator or denominator and reports it.
 
 ---
 
@@ -87,8 +84,8 @@ treatment of FRED series, and the single ACT/365F day count.
 
 ## 5. Risk measures
 
-Historical VaR and expected shortfall from a P&L vector; Monte Carlo VaR from Heston-simulated spot paths and
-a delta-gamma-vega P&L expansion; a four-corner spot/vol stress as a margin proxy. Definitions and limits are
+Historical VaR from a P&L vector, and a 3 x 3 spot/vol stress grid as a margin proxy. Expected shortfall and
+Monte Carlo VaR calculators existed and were removed on 2026-10-10 because nothing used them. Definitions and limits are
 in [RISK.md](RISK.md) section 4.
 
 ---

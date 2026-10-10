@@ -109,11 +109,9 @@ available but not wired into the live pricing path.
 
 ## 4. Dividends
 
-`data/YahooDividendProvider` fetches dividend history from an unofficial Yahoo endpoint (cached for hours,
-symbol validated, URL never logged). `data/DividendForecaster` projects each past dividend one year forward
-with the same amount: a naive model that treats special dividends as recurring. The PDE pricer
-(`models/pde/DiscreteDividendPricer`) accepts discrete cash dividends at exact ex-dates; the live engine uses
-the continuous `market_data.dividend_yield`.
+The PDE pricer (`models/pde/DiscreteDividendPricer`) accepts discrete cash dividends at exact ex-dates; the live
+engine uses the continuous `market_data.dividend_yield`. A Yahoo dividend provider and a naive forecaster
+existed and were removed on 2026-10-10 because nothing used them.
 
 ---
 
@@ -132,4 +130,4 @@ the spot is real. If no provider answers it exits with status 2 and leaves the f
 
 Exchange multicast feeds (EOBI, Optiq MDG, GTP, ITCH), L3 order book reconstruction, continuous surface
 calibration to live chains, multi-currency curve construction (SONIA, SARON, STIBOR), and a corporate-actions
-feed. The `gateways/` package contains simulations of a binary feed decoder only.
+feed.
