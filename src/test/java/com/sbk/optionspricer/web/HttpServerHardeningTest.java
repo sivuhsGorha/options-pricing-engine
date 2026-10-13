@@ -113,6 +113,18 @@ class HttpServerHardeningTest {
     }
 
     @Test
+    void imagesComeFromThePageItselfOnly() throws Exception {
+        start(new OptionsDashboardServer.SecurityOptions(Set.of(), false));
+
+        String csp = get("/index.html").headers().firstValue("Content-Security-Policy").orElseThrow();
+
+        String imgSrc = java.util.Arrays.stream(csp.split(";")).map(String::trim)
+                .filter(d -> d.startsWith("img-src")).findFirst().orElseThrow();
+        // blob: lets the chart's "download as PNG" button show the image it just built; no remote host is allowed
+        assertEquals("img-src 'self' data: blob:", imgSrc);
+    }
+
+    @Test
     void hashedAssetsAreCachedForeverAndTheShellIsAlwaysRevalidated() throws Exception {
         start(new OptionsDashboardServer.SecurityOptions(Set.of(), false));
 
