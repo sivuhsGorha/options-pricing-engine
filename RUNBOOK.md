@@ -85,3 +85,22 @@ hole in it must not quietly produce a different book.
 git pull && mvn clean verify && (cd web-react && npm ci && npm run build)   # or: docker compose up --build -d
 ```
 `run_all.ps1` runs the same checks as CI and stops at the first failure.
+
+## Hosting on a server
+
+The compose file publishes the dashboard to `127.0.0.1` only, and the app serves plain HTTP with no TLS.
+Keep it that way and reach it through an SSH tunnel: `ssh -L 8080:127.0.0.1:8080 user@server`, then open
+http://127.0.0.1:8080. The dashboard can HALT, RESUME and switch strategy, so do not publish the port without
+TLS in front and a strong `OPERATOR_PASSWORD`.
+
+Before the first start on a new host:
+
+1. Put `.env` and `config.yaml` next to `docker-compose.yml`. The config is mounted read-only into the
+   container; `config.yaml` is not in the image, so without the mount the engine would start on defaults.
+2. The ledger lives in the `engine-data` volume, which starts empty. With `execution.transport: alpaca` the
+   Alpaca account must agree with it, or reconciliation halts trading at startup. Either flatten the paper
+   account first, or copy the existing `data/` (above all `fills.csv`) into the volume before starting.
+3. `docker compose up --build -d`, then check `docker compose logs` for `[RECONCILE] OK` and `/api/health`.
+
+`restart: unless-stopped` brings the engine back after a crash or a reboot; the ledger replay and
+reconciliation run again on every start.
