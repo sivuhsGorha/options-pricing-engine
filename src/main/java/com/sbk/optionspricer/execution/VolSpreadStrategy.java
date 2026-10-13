@@ -153,6 +153,11 @@ public final class VolSpreadStrategy {
         if (spot == null || spot.status() == MarketDataStatus.UNAVAILABLE || !(spot.last() > 0.0)) {
             return record(new Decision(now, "WAIT", "no spot price", null, Double.NaN, Double.NaN, Double.NaN, Double.NaN, 0, orders));
         }
+        if (spot.status() == MarketDataStatus.STALE) {
+            // The option chain is reloaded every minute and so reads as fresh even when the market is shut, but the
+            // spot's age shows it: a stale spot means nothing here can be priced, hedged or traded.
+            return record(new Decision(now, "WAIT", "spot quote STALE", null, Double.NaN, Double.NaN, Double.NaN, Double.NaN, 0, orders));
+        }
         hedgeIfNeeded(spot, orders);
 
         if (hasOpenStraddle()) {

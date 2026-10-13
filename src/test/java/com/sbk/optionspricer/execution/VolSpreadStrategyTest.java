@@ -119,6 +119,28 @@ class VolSpreadStrategyTest {
         assertTrue(m.reason().contains("disagrees with the live spot"), m.reason());
     }
 
+    @Test
+    void doesNothingWhileTheSpotIsStaleEvenWithAHugeEdgeAndAnUnhedgedDelta() {
+        // Overnight the option chain still reads as freshly loaded while the spot last printed at the previous close.
+        // Observed live on 2026-10-13: five orders sent before the open on a spot 16 hours old.
+        MarketSnapshot staleSpot = new MarketSnapshot("SPY", 99.99, 100.01, 100.0, 5000L, NOW, NOW, 0L, "TEST", MarketDataStatus.STALE);
+        PositionTracker tracker = new PositionTracker(FillRecorder.NONE);
+        VolSpreadStrategy s = new VolSpreadStrategy(manager(tracker), new FlatChains(0.23, TODAY), referenceSurface(0.20), valuationWithDelta(500.0),
+                () -> staleSpot, tracker, "SPY", R, Q, params(), Clock.fixed(NOW, ZoneOffset.UTC));
+        s.allowSimulatedChains(true);
+
+        VolSpreadStrategy.Decision d = s.step();
+
+        assertEquals("WAIT", d.action(), d.summary());
+        assertTrue(d.reason().contains("spot quote STALE"), d.reason());
+        assertTrue(d.orders().isEmpty(), "no hedge and no straddle leg may be sent: " + d.orders());
+        assertTrue(tracker.getPositions().isEmpty());
+
+        // the same strategy trades again once the spot is fresh
+        VolSpreadStrategy fresh = strategy(tracker, new FlatChains(0.23, TODAY), 0.20, null, Clock.fixed(NOW, ZoneOffset.UTC));
+        assertEquals("SELL_STRADDLE", fresh.step().action());
+    }
+
     /** The strategy's front month: the first loaded expiry at least min_days_to_expiry (14) out. */
     private static LocalDate front() {
         return OptionChainProvider.thirdFridays(TODAY, 3).stream().filter(e -> !e.isBefore(TODAY.plusDays(14))).findFirst().orElseThrow();

@@ -8,7 +8,7 @@ of the shipped deployment and have not been measured.
 ## 1. Build and run
 
 ```bash
-mvn clean verify                 # compile, 487 tests, JaCoCo gate (75%), package jar + target/lib
+mvn clean verify                 # compile, 488 tests, JaCoCo gate (75%), package jar + target/lib
 java --add-modules jdk.incubator.vector -jar target/options-pricing-engine-1.0.0-SNAPSHOT.jar
 ```
 
@@ -21,6 +21,9 @@ image runs it as a non-root user with `-XX:MaxRAMPercentage=75.0`. The container
 a health check on `/`, and keeps its state under `/app/data`. CI builds the image and confirms an
 unauthenticated `/api/health` returns 401. `docker-compose.yml` runs it with your `.env`, publishes the ports
 to `127.0.0.1` only, and keeps `/app/data` (fill ledger, mmap state) in a named volume across restarts.
+
+**AWS**: [infra/aws/AWS.md](infra/aws/AWS.md) runs the same compose setup on one EC2 instance from a
+CloudFormation template, with no inbound ports and secrets in SSM Parameter Store.
 
 **Shutdown.** Ctrl+C (SIGTERM) runs `AppCompositionRoot.close()`: the HTTP and WebSocket servers stop first,
 then the surface calibration thread, then the engine, which closes the mmap state. Each step is guarded so
