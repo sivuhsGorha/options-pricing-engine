@@ -99,8 +99,19 @@ Before the first start on a new host:
    container; `config.yaml` is not in the image, so without the mount the engine would start on defaults.
 2. The ledger lives in the `engine-data` volume, which starts empty. With `execution.transport: alpaca` the
    Alpaca account must agree with it, or reconciliation halts trading at startup. Either flatten the paper
-   account first, or copy the existing `data/` (above all `fills.csv`) into the volume before starting.
+   account first, or copy the existing `data/` (above all `fills.csv`) into the volume before starting:
+   ```bash
+   docker compose create
+   docker cp data/. "$(docker compose ps -aq options-engine):/app/data/"
+   docker run --rm -u root -v <project>_engine-data:/app/data --entrypoint sh options-pricing-engine:local \
+     -c "chown -R appuser:appgroup /app/data"      # the engine runs as appuser and must be able to write
+   ```
 3. `docker compose up --build -d`, then check `docker compose logs` for `[RECONCILE] OK` and `/api/health`.
 
 `restart: unless-stopped` brings the engine back after a crash or a reboot; the ledger replay and
 reconciliation run again on every start.
+
+Verified on 2026-10-13 with Docker Desktop on Windows (the market was closed, so no order was placed): the image
+builds, the container reports healthy, the log shows `3 fills replayed, 1 open positions`, the Alpaca transport
+(so the mounted `config.yaml` is in effect) and `[RECONCILE] OK`, and `/api/health` answers after sign-in. Not
+yet tried: a real Linux VPS, or a fill placed from inside the container.
