@@ -4,6 +4,7 @@ import { secureFetch, securePost } from './lib/api';
 import { formatNumber } from './lib/format';
 import { renderSurfaceCharts, renderHistoryChart } from './lib/surfaceCharts';
 import { surfaceHistoryTitle } from './lib/history';
+import { recorderLabel } from './lib/recorder';
 import { surfaceLabel, surfaceTone } from './lib/surfaceLabel';
 import LoginForm from './components/LoginForm';
 import DataBanner from './components/DataBanner';
@@ -53,6 +54,7 @@ function App() {
   const [loginError, setLoginError] = useState('');
 
   const providers = healthInfo.providers || {};
+  const recorder = recorderLabel(healthInfo.components ? healthInfo.components.recorder : null);
   const spotTone = isFresh(spotInfo.status) ? 'ticker-up' : 'ticker-down';
   // FEEDS OK only when some provider is actually serving a fresh quote; a map of rejected providers is not a feed.
   const feedsServing = Object.values(providers).some(isFresh);
@@ -349,6 +351,12 @@ function App() {
             <span className={item.tone}>{item.change}</span>
           </div>
         ))}
+        {recorder && (
+          <div className="ticker-item" title="every option chain the feed changes is kept under data/chain_snapshots for replay and backtests">
+            <span className="ticker-name">CHAIN RECORDER</span>
+            <span className={recorder.tone}>{recorder.value}</span>
+          </div>
+        )}
       </footer>
     </div>
   );

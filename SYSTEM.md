@@ -98,6 +98,10 @@ Every quote carries a status: LIVE, DELAYED, STALE, UNAVAILABLE or SIMULATED. Se
 
 Newest first. One line per change that alters what the system does or what we know about it.
 
+- **2026-10-14** The dashboard now shows what the reviewed batch computes: a WHY P&L MOVED block (delta,
+  gamma/theta, vega, other) under the P&L figures, and a CHAIN RECORDER status in the footer fed by a new
+  `components.recorder` in `/api/health`. The strategy's decision text (cost hurdle, feed age, RV forecast) already
+  reached the execution panel. 536 Java and 81 front-end tests.
 - **2026-10-14** Reviewed, corrected and wired a batch of code written by Google Gemini (not by this project's
   usual workflow), with 45 new tests (534 in all, without the OPRA package which was left out). Wired and on by
   default: the chain-snapshot recorder (now skips an unchanged feed and no longer loses the last queued snapshot at

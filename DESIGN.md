@@ -21,7 +21,14 @@ form says so. The session is a secure, same-site cookie; SIGN OUT ends it.
 **Left: Portfolio Risk Matrix.** Net delta, gamma, vega (execution book first, engine state as fallback), theta
 and rho from the valuation service with the time and spot they were computed at,
 scenario margin, execution-book notional, the margin optimizer's suggested hedge and reduction, and the
-terminal event log (last 8 lines).
+terminal event log (last 8 lines). Under the P&L figures, a **WHY P&L MOVED** block splits P&L since the engine
+started into delta, gamma/theta, vega and OTHER (the spread paid on fills and anything the Greeks do not explain),
+from the `attribution` block of `/api/pnl`. While the book holds only shares its caption says that only delta can
+explain anything; the figures are in memory and restart with the engine.
+
+**Footer.** The market ribbon, then **CHAIN RECORDER**: `ON · N files · M skipped (feed unchanged) · last <time>`
+from `components.recorder` of `/api/health` (or `OFF`, or `UNAVAILABLE`). It is informational and never changes the
+overall health status; overnight the feed does not change, so a recorder that has not written is expected then.
 
 **Centre: Volatility surface.** A 3D surface plus smile and term-structure charts (Plotly). Buttons switch
 between SSVI (one global fit with closed-form no-arbitrage conditions), SVI (Gatheral's raw form, five

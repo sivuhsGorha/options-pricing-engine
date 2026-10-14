@@ -374,6 +374,27 @@ public class OptionsDashboardServer {
         this.feedStatusSource = source;
     }
 
+    /** What the chain recorder reports for /api/health; null means none is running (reported as OFF). */
+    private volatile java.util.function.Supplier<java.util.Map<String, Object>> recorderStatusSource;
+
+    public void setRecorderStatus(java.util.function.Supplier<java.util.Map<String, Object>> source) {
+        this.recorderStatusSource = source;
+    }
+
+    /** The recorder block of /api/health. It is informational: it never changes the overall status. */
+    private java.util.Map<String, Object> recorderBlock() {
+        var source = recorderStatusSource;
+        if (source == null) {
+            return java.util.Map.of("status", "OFF");
+        }
+        try {
+            java.util.Map<String, Object> block = source.get();
+            return block == null ? java.util.Map.of("status", "UNAVAILABLE") : block;
+        } catch (RuntimeException failing) {
+            return java.util.Map.of("status", "UNAVAILABLE");
+        }
+    }
+
     /**
      * Health of each component plus the fields the original snapshot had. {@code status} is {@code down} when
      * the engine's risk state cannot be read, {@code degraded} when market data is not fresh, the surface
@@ -463,6 +484,7 @@ public class OptionsDashboardServer {
             trading.put("status", "UNAVAILABLE");
         }
         components.put("trading", trading);
+        components.put("recorder", recorderBlock());
         var transport = currentTransport();
         boolean transportDegraded = false;
         if (transport != null) {

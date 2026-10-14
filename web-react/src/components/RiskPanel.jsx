@@ -1,5 +1,6 @@
 import { formatNumber, formatCurrency } from '../lib/format';
 import { pnlTone } from '../lib/history';
+import { attributionRows } from '../lib/attribution';
 
 const timeOf = (ms) => (ms ? new Date(ms).toLocaleTimeString() : '--');
 const dateOf = (ms) => (ms ? new Date(ms).toISOString().slice(0, 10) : '--');
@@ -17,6 +18,7 @@ export default function RiskPanel({ metrics, displayedRisk, logs, valuation, pnl
     const valued = valuation && valuation.ready;
     const pnlReady = Boolean(pnl && pnl.ready);
     const day = pnlReady ? pnl.day : null;
+    const attribution = attributionRows(pnl, valuation);
     return (
         <div className="panel risk-panel">
             <div className="panel-header">
@@ -74,6 +76,17 @@ export default function RiskPanel({ metrics, displayedRisk, logs, valuation, pnl
                     <div style={{ color: '#5C6B73', fontSize: '11px', paddingTop: '4px' }}>
                         {pnlReady ? `${day.sampleCount} marks today · last ${timeOf(pnl.asOf)}` : (pnl && pnl.status) || 'no valuation recorded yet'}
                     </div>
+                    {attribution && (
+                        <div id="attribution-block" style={{ marginTop: '8px' }}>
+                            <div className="margin-label">WHY P&amp;L MOVED</div>
+                            <table className="data-table">
+                                <tbody>
+                                    {attribution.rows.map(r => <PnlRow key={r.label} label={r.label} value={r.value} title={r.title} />)}
+                                </tbody>
+                            </table>
+                            <div style={{ color: '#5C6B73', fontSize: '11px', paddingTop: '4px' }}>{attribution.caption}</div>
+                        </div>
+                    )}
                 </div>
 
                 <div className="margin-block" id="margin-block">

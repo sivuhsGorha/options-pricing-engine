@@ -64,6 +64,20 @@ describe('App', () => {
         expect(await screen.findByText('FEEDS OK')).toBeInTheDocument();
     });
 
+    it('shows the chain recorder in the footer from what /api/health reports, and nothing when it reports none', async () => {
+        mockApi({ '/api/health': { symbol: 'SPY', providers: {}, components: { recorder: { status: 'ON', filesWritten: 7, skippedUnchanged: 3, lastWrittenAt: 1 } } } });
+        signIn();
+        expect(await screen.findByText('CHAIN RECORDER')).toBeInTheDocument();
+        expect(await screen.findByText(/ON · 7 files · 3 skipped/)).toBeInTheDocument();
+    });
+
+    it('has no recorder in the footer when health carries no recorder block', async () => {
+        mockApi({ '/api/health': { symbol: 'SPY', providers: { FINNHUB: 'DELAYED' } } });
+        signIn();
+        expect(await screen.findByText('FEEDS OK')).toBeInTheDocument();
+        expect(screen.queryByText('CHAIN RECORDER')).not.toBeInTheDocument();
+    });
+
     it('names the instrument the engine reports, not a hard-coded one', async () => {
         mockApi({ '/api/spot': { symbol: 'QQQ', spotPrice: 450.12, source: 'FINNHUB', status: 'DELAYED', timestamp: Date.now() } });
 

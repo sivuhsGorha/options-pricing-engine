@@ -78,6 +78,7 @@ public final class CompressedChainSnapshotRecorder implements AutoCloseable {
     private final AtomicLong totalQuotesRecorded = new AtomicLong();
     private final AtomicLong totalFilesWritten = new AtomicLong();
     private final AtomicLong skippedUnchanged = new AtomicLong();
+    private volatile Instant lastWrittenAt;
     /** The feed timestamps of the last batch that was queued; a batch with the same stamps carries nothing new. */
     private volatile List<Instant> lastFeedStamps = List.of();
     private volatile boolean closed;
@@ -125,6 +126,11 @@ public final class CompressedChainSnapshotRecorder implements AutoCloseable {
 
     public long totalFilesWritten() {
         return totalFilesWritten.get();
+    }
+
+    /** When a snapshot file was last completed, by this recorder's clock; empty before the first. */
+    public java.util.Optional<Instant> lastWrittenAt() {
+        return java.util.Optional.ofNullable(lastWrittenAt);
     }
 
     /** Batches left out because the feed had not moved since the last one that was kept. */
@@ -304,6 +310,7 @@ public final class CompressedChainSnapshotRecorder implements AutoCloseable {
 
             totalQuotesRecorded.addAndGet(task.quotes.size());
             totalFilesWritten.incrementAndGet();
+            lastWrittenAt = clock.instant();
         } catch (IOException e) {
             System.err.println("[CHAIN RECORDER] Failed to write snapshot for " + task.symbol + " at " + task.timestamp + ": " + e.getMessage());
         }

@@ -66,6 +66,35 @@ describe('RiskPanel', () => {
         expect(screen.getByText(/12 marks today/)).toBeInTheDocument();
     });
 
+    it('explains where the P&L came from, and is honest that shares alone leave only delta', () => {
+        const pnl = {
+            ready: true, asOf: 1, firstSampleAt: 1, realizedPnl: 0, unrealizedPnl: 0, totalPnl: 0,
+            day: { date: '2026-10-14', timezone: 'America/New_York', pnl: 0, maxDrawdown: 0, baselineIsPreviousClose: true, sampleCount: 1 },
+            attribution: { cumulativeDeltaPnl: 12.34, cumulativeGammaThetaPnl: -3.21, cumulativeVegaPnl: 4.56, cumulativeResidualPnl: -0.78 }
+        };
+        const shares = { ready: true, asOf: 1, spot: 777, positions: [{ kind: 'STOCK', quantity: -20 }] };
+        const { rerender } = render(<RiskPanel metrics={{}} displayedRisk={{}} logs={[]} pnl={pnl} valuation={shares} />);
+
+        expect(screen.getByText(/WHY P&L MOVED/)).toBeInTheDocument();
+        expect(screen.getByText('$12.34')).toBeInTheDocument();
+        expect(screen.getByText('-$3.21')).toBeInTheDocument();
+        expect(screen.getByText('$4.56')).toBeInTheDocument();
+        expect(screen.getByText('-$0.78')).toBeInTheDocument();
+        expect(screen.getByText(/no option positions/i)).toBeInTheDocument();
+
+        rerender(<RiskPanel metrics={{}} displayedRisk={{}} logs={[]} pnl={pnl}
+            valuation={{ ...shares, positions: [{ kind: 'OPTION', quantity: -1 }] }} />);
+        expect(screen.queryByText(/no option positions/i)).not.toBeInTheDocument();
+        expect(screen.getByText(/since engine start/i)).toBeInTheDocument();
+    });
+
+    it('shows no attribution block when the engine does not send one', () => {
+        render(<RiskPanel metrics={{}} displayedRisk={{}} logs={[]} pnl={{ ready: true, asOf: 1, firstSampleAt: 1, realizedPnl: 1, unrealizedPnl: 1, totalPnl: 2,
+            day: { date: '2026-10-14', timezone: 'x', pnl: 0, maxDrawdown: 0, sampleCount: 1 } }} />);
+
+        expect(screen.queryByText(/WHY P&L MOVED/)).not.toBeInTheDocument();
+    });
+
     it('says why there is no P&L yet instead of showing zeros', () => {
         render(<RiskPanel metrics={{}} displayedRisk={{}} logs={[]} pnl={{ ready: false, status: 'no valuation recorded yet' }} />);
 

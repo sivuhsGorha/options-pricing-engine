@@ -117,6 +117,36 @@ class ApiResponseHardeningTest {
     }
 
     @Test
+    void healthReportsTheChainRecorderButNeverLetsItChangeTheOverallStatus() throws Exception {
+        MarketSnapshotAdapter live = symbol -> new MarketSnapshot("SPY", 99.99, 100.01, 100.0, 5000L, Instant.now(), Instant.now(), 0L, "POLYGON", MarketDataStatus.LIVE);
+        start(reader(() -> new MmapStateReader.RiskState(0, 0, 0, 0)), null, null, live, null, null, fixedControls(false));
+
+        JsonNode off = MAPPER.readTree(get("/api/health").body());
+        assertEquals("OFF", off.get("components").get("recorder").get("status").asText(), "no recorder wired in");
+
+        server.setRecorderStatus(() -> {
+            java.util.Map<String, Object> m = new java.util.LinkedHashMap<>();
+            m.put("status", "ON");
+            m.put("filesWritten", 12L);
+            m.put("quotesRecorded", 9600L);
+            m.put("skippedUnchanged", 40L);
+            m.put("lastWrittenAt", 1791977443317L);
+            return m;
+        });
+        JsonNode on = MAPPER.readTree(get("/api/health").body());
+        JsonNode recorder = on.get("components").get("recorder");
+        assertEquals("ON", recorder.get("status").asText());
+        assertEquals(12, recorder.get("filesWritten").asLong());
+        assertEquals(40, recorder.get("skippedUnchanged").asLong());
+        assertEquals(1791977443317L, recorder.get("lastWrittenAt").asLong());
+        assertEquals(off.get("status").asText(), on.get("status").asText(), "a recorder never degrades the engine's health");
+
+        server.setRecorderStatus(() -> { throw new IllegalStateException("boom"); });
+        JsonNode broken = MAPPER.readTree(get("/api/health").body());
+        assertEquals("UNAVAILABLE", broken.get("components").get("recorder").get("status").asText(), "a failing status source is reported, not an error page");
+    }
+
+    @Test
     void healthIsDownWhenTheRiskStateCannotBeReadAndDegradedWhenTradingIsHalted() throws Exception {
         start(reader(() -> { throw new IllegalStateException("UNAVAILABLE"); }), null, null, null, null, null, fixedControls(false));
         JsonNode down = MAPPER.readTree(get("/api/health").body());

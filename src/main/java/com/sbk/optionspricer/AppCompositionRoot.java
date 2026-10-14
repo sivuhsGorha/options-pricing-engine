@@ -138,6 +138,15 @@ public class AppCompositionRoot {
             this.chainRecorder = new com.sbk.optionspricer.data.CompressedChainSnapshotRecorder(snapshotsDir, java.time.Clock.systemUTC());
             surfaceService.setQuoteRefreshListener(chains -> chainRecorder.recordSourced(chains, java.time.Instant.now()));
             System.out.println("[CHAIN RECORDER] keeping a snapshot of the option chains whenever the feed changes, in " + snapshotsDir);
+            dashboard.setRecorderStatus(() -> {
+                java.util.Map<String, Object> status = new java.util.LinkedHashMap<>();
+                status.put("status", "ON");
+                status.put("filesWritten", chainRecorder.totalFilesWritten());
+                status.put("quotesRecorded", chainRecorder.totalQuotesRecorded());
+                status.put("skippedUnchanged", chainRecorder.skippedUnchanged());
+                status.put("lastWrittenAt", chainRecorder.lastWrittenAt().map(java.time.Instant::toEpochMilli).orElse(null));
+                return status;
+            });
         } else {
             this.chainRecorder = null;
             System.out.println("[CHAIN RECORDER] off (market_data.record_chain_snapshots is false)");

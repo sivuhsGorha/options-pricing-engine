@@ -32,6 +32,7 @@ background and the panel badge shows `LOADING` until it does.
 | `components.riskState` | `READY` when the engine's mmap state is readable |
 | `components.surface` | calibration `LOADING` / `READY` / `FAILED`, message, source, whether it is a `DEMO` |
 | `components.trading` | `halted`, `haltReason`, `strategyEnabled` |
+| `components.recorder` | the option-chain recorder: `status` `ON` / `OFF` / `UNAVAILABLE`, `filesWritten`, `quotesRecorded`, `skippedUnchanged`, `lastWrittenAt`. Informational: it never changes `status` |
 | `providers` | last known status per market-data provider, without probing |
 | `uptimeSeconds` | since the server started |
 

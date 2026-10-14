@@ -93,6 +93,22 @@ class CompressedChainSnapshotRecorderTest {
     }
 
     @Test
+    void itRemembersWhenItLastWroteAFileSoTheDashboardCanTellALiveRecorderFromAStalledOne(@TempDir Path tempDir) throws Exception {
+        Instant t0 = Instant.parse("2026-10-14T14:30:00Z");
+        LocalDate expiry = LocalDate.of(2026, 11, 20);
+        OptionChain chain = new OptionChain("SPY", expiry, 580.0, List.of(
+                new OptionQuote("SPY", expiry, 580.0, OptionType.CALL, 12.0, 12.2, 0.18, 50, 100)));
+
+        try (CompressedChainSnapshotRecorder recorder = new CompressedChainSnapshotRecorder(tempDir, Clock.fixed(t0, ZoneOffset.UTC))) {
+            assertTrue(recorder.lastWrittenAt().isEmpty(), "nothing written yet");
+            recorder.record(List.of(chain), "CBOE_DELAYED", t0);
+            recorder.flush(5, TimeUnit.SECONDS);
+
+            assertEquals(t0, recorder.lastWrittenAt().orElseThrow());
+        }
+    }
+
+    @Test
     void aFeedThatHasNotMovedIsNotRecordedAgain(@TempDir Path tempDir) throws Exception {
         // Overnight and at weekends the provider serves the same document every minute; keeping each copy would fill
         // the disk with identical files and make a replay look like it had data it did not.
