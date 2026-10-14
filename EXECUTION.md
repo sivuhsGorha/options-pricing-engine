@@ -188,3 +188,52 @@ are measured from a real mark for the first time.
 
 **Not shown yet.** A fill in vol-spread mode (the edge never left the band), and a full trading day of P&L
 samples with a position on the book.
+
+### 2026-10-13: five orders before the open, then a quiet session with no orders
+
+**Setup.** SPY, `execution.transport: alpaca`, `vol_spread` at its 1.00-point band, one contract per leg. The
+engine ran in Docker (see RUNBOOK.md). Reconciliation OK at every start, 3 fills replayed, 1 open position (short
+20 SPY at 776.583). Option chains from Cboe's delayed feed (799 quotes); spot from Finnhub, labelled DELAYED.
+
+**Before the open (found, fixed).** Between 10:39 and 10:45 UTC, with the US market shut, the strategy sent five
+orders to Alpaca (ids 1 to 5): a buy of 1 `SPY261113C00781000` at a limit of 11.26, the feed's ask, on an edge of
+-1.01 points against the 1.00-point band. Alpaca filled none; each was cancelled after the 10 s wait and the
+second leg was never sent. The cause: the chain is reloaded every minute, so its quotes read DELAYED even with
+the market closed, while the spot, 16 hours old and STALE, was never checked. The strategy now waits while the
+spot is STALE (commit `182db2e`, with a test). These five orders were read from `/api/execution` at 11:57 UTC;
+the container was recreated at 12:09 on the fixed build, so they are no longer in the API or the log.
+
+**The session.** The P&L sampler shows the spot moving from 13:00 to 15:01 UTC (778.1 down to 776.95, 24 and 38
+distinct values in the 13h and 14h hours against one value all night). The engine then stopped; the container
+started again at 06:24 UTC on 2026-10-14. I do not know why it stopped (Docker Desktop or the PC going off, most
+likely); the log has no shutdown line. So this entry covers 13:30 to 15:01 UTC, the first 90 minutes of the session,
+not the whole day. The console log carries no timestamps, so the tallies below are for everything the container
+logged since 12:09.
+
+| Decisions | Count | What they were |
+| :-- | --: | :-- |
+| `WAIT - spot quote STALE` | 175 | The new gate. Most of these should be the 80 minutes before the open, but I cannot prove it from an untimed log |
+| `HOLD` | 98 | All inside the band: edge from -0.54 to +0.01 points, mean -0.17; the 2026-11-13 straddle at strikes 780 (12), 781 (78), 782 (8) |
+| `WAIT - <call>: quote STALE` | 62 | An option quote older than 120 s with a fresh spot |
+| `WAIT - <call>: no two-sided quote` | 10 | No bid or no ask on the call |
+| `WAIT - no loaded expiry` | 1 | At start, before the chain loaded |
+
+No order was sent, so nothing was filled, rejected by a gate or halted; the book and Alpaca agreed throughout.
+The position's unrealised P&L moved with the spot, from -30.34 at 13:00 to -7.34 at 15:01 (range -42.34 to
+-7.34), which is 20 shares times the 0.37 between the average cost and 776.95.
+
+**What it showed.**
+
+1. **The stale-spot gate works on live data.** 175 steps waited on the spot instead of reaching the order path.
+2. **The option quotes were STALE in 62 of the 170 steps that got as far as them (about a third).** On the
+   afternoon of 2026-10-09 the same strategy saw none in 24 steps after the 60 s reload was added. Something is
+   still leaving the quotes older than 120 s part of the time, and I have not found it. Candidates, not
+   conclusions: the Cboe document's own timestamp lagging by more than two minutes at times, a reload that
+   fails and keeps the old chain, or the 30 s cache. The next session's log should carry timestamps to tell them
+   apart.
+3. **The strategy's silence is not evidence that it works.** In 98 decisions the edge never came near the band,
+   so the vol-spread open, the straddle fill, the hedge and the unvalued-position gate (hardening of 2026-10-10)
+   have still not run against the venue.
+
+**Not shown yet.** A vol-spread fill, a straddle fill with its hedge, and a full session on the new build. Open
+question: why the option quotes read STALE a third of the time.

@@ -4,7 +4,7 @@ A living description of the system as it runs today: what it does, what is real 
 state it is in, and what is known to be missing. It is updated with each change that alters behaviour; the
 change log at the end says when. Details live in the linked documents, not here.
 
-**Last updated:** 2026-10-13 · **Build:** 488 tests, JaCoCo gate green · **Orders go to:** an Alpaca *paper* account only
+**Last updated:** 2026-10-14 · **Build:** 488 tests, JaCoCo gate green · **Orders go to:** an Alpaca *paper* account only
 
 ---
 
@@ -57,8 +57,9 @@ Every quote carries a status: LIVE, DELAYED, STALE, UNAVAILABLE or SIMULATED. Se
 | Strategy mode | `vol_spread`; trigger band 1.00 vol point; one contract per leg |
 | Running as | Docker container with a restart policy; the `engine-data` volume holds the ledger |
 | Data providers | Finnhub and Alpha Vantage delayed; Polygon/Massive off (plan has no snapshot endpoint); Marketstack rate limited |
-| Live evidence | 2026-10-09: two fills, one cancel-then-fill race, one reconciliation halt (see EXECUTION.md section 5) |
-| Not yet seen live | The 2026-10-10 hardening at a market open; a vol-spread fill; a straddle fill |
+| Live evidence | 2026-10-09: two fills, one cancel-then-fill race, one reconciliation halt. 2026-10-13: the stale-spot gate held on live data (175 waits), 98 decisions all inside the band, no orders, book matched Alpaca (see EXECUTION.md section 5) |
+| Open question | Option quotes read STALE in about a third of the steps that reached them on 2026-10-13 (none in 24 steps on 2026-10-09); cause not found |
+| Not yet seen live | A vol-spread fill; a straddle fill with its hedge; the unvalued-position gate under a real fill; a full session on the current build (2026-10-13 covered 13:30 to 15:01 UTC) |
 
 ## 5. Known limits
 
@@ -84,6 +85,9 @@ Every quote carries a status: LIVE, DELAYED, STALE, UNAVAILABLE or SIMULATED. Se
 
 Newest first. One line per change that alters what the system does or what we know about it.
 
+- **2026-10-14** Session log for 2026-10-13 written: no orders in the session, stale-spot gate confirmed live, and
+  an unexplained rate of STALE option quotes recorded as an open question. The engine stopped at about 15:02 UTC
+  for a reason not yet known.
 - **2026-10-13** The vol-spread strategy now waits while the spot is STALE. Found live: between 10:39 and 10:45 UTC,
   before the open, it sent five buy orders for a call on a chain that read fresh while the spot was 16 hours old;
   Alpaca filled none. Fixed in `182db2e` with a test.

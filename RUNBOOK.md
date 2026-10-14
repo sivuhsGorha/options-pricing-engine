@@ -108,6 +108,10 @@ Before the first start on a new host:
    ```
 3. `docker compose up --build -d`, then check `docker compose logs` for `[RECONCILE] OK` and `/api/health`.
 
+Start it with `docker compose up -d`, never with the Run button in Docker Desktop. Run starts a new container from
+the bare image, without `.env`, `config.yaml` or the `engine-data` volume, so it crashes on `API_SECRET is missing`
+(and, had it started, would have run the simulator against an empty ledger). Remove any such stray container.
+
 `restart: unless-stopped` brings the engine back after a crash or a reboot; the ledger replay and
 reconciliation run again on every start.
 
