@@ -121,3 +121,59 @@ Verified on 2026-10-13 with Docker Desktop on Windows (the market was closed, so
 builds, the container reports healthy, the log shows `3 fills replayed, 1 open positions`, the Alpaca transport
 (so the mounted `config.yaml` is in effect) and `[RECONCILE] OK`, and `/api/health` answers after sign-in. Not
 yet tried: a real Linux VPS, or a fill placed from inside the container.
+
+## Backup and recovery
+
+What the engine needs, and where each piece lives:
+
+| Piece | Lives in | In git? | If it is lost |
+| :--- | :--- | :--- | :--- |
+| Code, tests, docs | GitHub | yes | `git clone`; nothing else is needed to rebuild |
+| `.env` (API keys, `API_SECRET`, `OPERATOR_PASSWORD`) | the project folder | **no, on purpose** | the engine will not start. Keep a copy in a password manager. The provider keys can be regenerated from the providers' own sites; `API_SECRET` and the password are yours to choose again |
+| `config.yaml` | the project folder | no | rebuild it from `config.example.yaml` (SYSTEM.md lists the local changes), or restore the copy in a backup |
+| `fills.csv` (the ledger) | the `engine-data` Docker volume | no | the book is rebuilt from it at every start. Without it the engine starts flat while Alpaca still holds the position, and the first reconciliation **halts trading**. See "If the ledger itself is lost" |
+| `pnl_history.csv`, `surface_history.csv`, `chain_snapshots/` | the same volume | no | history only; the engine runs without it |
+
+### Back up
+
+```powershell
+.\scripts\backup.ps1 -Destination D:\aura-backups
+```
+
+It writes `D:\aura-backups\<UTC time>\` with `data.tar.gz` (the whole volume), a copy of `config.yaml` and a
+`manifest.txt` (commit, ledger row count, ledger SHA-256). It reads the volume read-only, so the engine can keep
+running, and it never deletes or overwrites anything. It does **not** copy `.env`. Run it after every session, and
+keep the backups somewhere that survives the laptop: a USB drive or a private cloud folder, not the same disk.
+The default destination is `%USERPROFILE%\aura-opt-backups`, which is the same disk, so choose another one.
+
+### Restore on a new machine
+
+1. Install Docker Desktop and Git. `git clone https://github.com/sivuhsGorha/options-pricing-engine` and `cd` into it.
+2. Put `.env` back from the password manager and `config.yaml` from the backup folder (or rebuild it).
+3. `docker compose build` (the restore script uses the image for `tar`).
+4. `.\scripts\restore.ps1 -BackupDir D:\aura-backups\<UTC time>`. It refuses to restore into a volume that already
+   holds files, and it compares the restored ledger with the manifest (it fails if they differ).
+5. `docker compose up -d`, then check `docker compose logs` for `N fills replayed` and `[RECONCILE] OK`.
+
+To try a restore without touching the live volume, add `-Volume some_scratch_name`, then `docker volume rm` it.
+
+### If the ledger itself is lost
+
+Alpaca's account is the source of truth. Either flatten the paper account on Alpaca and start with an empty
+ledger, or recreate `fills.csv` from Alpaca's order history, one row per fill
+(`timestamp,symbol,executedQty,multiplier,price`, quantity signed, as on 2026-10-09 in EXECUTION.md). The
+reconciliation check on the next start says whether the rebuilt book matches the account.
+
+### If the laptop is lost or stolen
+
+`.env` is plain text, so treat every key in it as exposed. The Alpaca keys reach a paper account only, but still:
+
+1. Regenerate the Alpaca paper API keys, and the Finnhub, Alpha Vantage and Massive keys, at their sites.
+2. Choose a new `API_SECRET` and `OPERATOR_PASSWORD`.
+3. Check Alpaca's order history for anything you did not place.
+4. Turn on disk encryption (BitLocker) on the replacement.
+
+Verified on 2026-10-14 on Windows with Docker Desktop: a backup of the live volume, a restore into a new scratch
+volume (files owned by the engine's user, ledger SHA-256 equal to the manifest), a refusal to restore into a volume
+that already held files, and a refusal when the manifest did not match. Not tried: starting the engine on a restored
+volume on a second machine, or restoring from a cloud folder.

@@ -73,7 +73,9 @@ Every quote carries a status: LIVE, DELAYED, STALE, UNAVAILABLE or SIMULATED. Se
   down on holidays and halts, but it has no notion of session times.
 - **Round trip.** The trip to Alpaca from the development machine takes 3 to 5 s, so a 10 s fill wait leaves the
   order resting for about 5 s.
-- **One process, one underlying.** No redundancy; state is files under `data/`.
+- **One process, one underlying.** No redundancy; state is files under `data/`. The ledger, config and keys are
+  not in git: `scripts/backup.ps1` and `restore.ps1` cover the data volume and `config.yaml`; `.env` must be kept in a
+  password manager (RUNBOOK, "Backup and recovery"). No backup is scheduled; one has to be run by hand.
 - **No TLS.** The dashboard binds to localhost; reach it through an SSH tunnel ([RUNBOOK.md](RUNBOOK.md)).
 - **Hosting.** Verified on Docker Desktop on Windows only, not on a Linux server.
 - **A short straddle may not be placeable on Alpaca at all.** Alpaca's documentation says a multi-leg order must
@@ -98,6 +100,11 @@ Every quote carries a status: LIVE, DELAYED, STALE, UNAVAILABLE or SIMULATED. Se
 
 Newest first. One line per change that alters what the system does or what we know about it.
 
+- **2026-10-14** Added `scripts/backup.ps1` and `scripts/restore.ps1` and a RUNBOOK recovery section: what to do
+  after a lost laptop, a lost ledger or a new machine. Tried on Windows: a real backup, a restore into a scratch
+  volume with the ledger hash matching, a refusal to restore over existing files, and a refusal on a manifest
+  mismatch. The rehearsal caught two bugs in the first versions (mangled shell quoting that left the ledger fields
+  empty while reporting success, and a fatal error on "no such volume"). `.env` is deliberately not backed up.
 - **2026-10-14** The dashboard now shows what the reviewed batch computes: a WHY P&L MOVED block (delta,
   gamma/theta, vega, other) under the P&L figures, and a CHAIN RECORDER status in the footer fed by a new
   `components.recorder` in `/api/health`. The strategy's decision text (cost hurdle, feed age, RV forecast) already
