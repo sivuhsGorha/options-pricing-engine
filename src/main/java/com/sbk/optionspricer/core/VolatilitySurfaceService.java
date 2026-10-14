@@ -87,6 +87,7 @@ public final class VolatilitySurfaceService implements VolatilitySurfaceSource, 
     private Thread worker;
     private volatile boolean closed;
     private volatile Consumer<Snapshot> snapshotListener = snapshot -> { };
+    private volatile Consumer<List<OptionChainProvider.SourcedChain>> quoteRefreshListener = chains -> { };
 
     /** Calibrates every {@code refreshInterval} and reloads the chains every {@link #DEFAULT_QUOTE_REFRESH}. */
     public VolatilitySurfaceService(OptionChainProvider provider, String symbol, double riskFreeRate, double dividendYield,
@@ -122,6 +123,11 @@ public final class VolatilitySurfaceService implements VolatilitySurfaceSource, 
         this.snapshotListener = listener == null ? snapshot -> { } : listener;
     }
 
+    /** Receives every batch of chains loaded by quote refreshes or calibrations (e.g. for snapshot recording). */
+    public void setQuoteRefreshListener(Consumer<List<OptionChainProvider.SourcedChain>> listener) {
+        this.quoteRefreshListener = listener == null ? chains -> { } : listener;
+    }
+
     /** What one pass over the provider produced; {@code chains} is empty when nothing loaded. */
     private record Loaded(List<OptionChain> chains, List<OptionChainProvider.SourcedChain> sourced, Set<String> sources, boolean marketData) {}
 
@@ -147,6 +153,11 @@ public final class VolatilitySurfaceService implements VolatilitySurfaceSource, 
         }
         latestChains = List.copyOf(loaded.sourced());
         lastQuoteRefreshAt = now;
+        try {
+            quoteRefreshListener.accept(latestChains);
+        } catch (RuntimeException e) {
+            System.err.println("[SURFACE] quote refresh listener error: " + rootMessage(e));
+        }
         return true;
     }
 
@@ -233,6 +244,11 @@ public final class VolatilitySurfaceService implements VolatilitySurfaceSource, 
 
         latestChains = List.copyOf(sourcedChains); // quotes are usable even if no surface can be fitted to them
         lastQuoteRefreshAt = now;
+        try {
+            quoteRefreshListener.accept(latestChains);
+        } catch (RuntimeException e) {
+            System.err.println("[SURFACE] quote refresh listener error: " + rootMessage(e));
+        }
 
         SurfaceFitter.Extraction extraction = SurfaceFitter.extractPoints(chains, riskFreeRate, dividendYield, today);
         warnings.addAll(extraction.warnings());
