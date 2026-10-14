@@ -61,7 +61,7 @@ Every quote carries a status: LIVE, DELAYED, STALE, UNAVAILABLE or SIMULATED. Se
 | Data providers | Finnhub and Alpha Vantage delayed; Polygon/Massive off (plan has no snapshot endpoint); Marketstack rate limited |
 | Live evidence | 2026-10-09: two fills, one cancel-then-fill race, one reconciliation halt. 2026-10-13: the stale-spot gate held on live data (175 waits), 98 decisions all inside the band, no orders, book matched Alpaca (see EXECUTION.md section 5) |
 | Open question | Option quotes read STALE in about a third of the steps that reached them on 2026-10-13, mostly in the first hour after the open (none in 24 steps on 2026-10-09). Hypothesis: Cboe's own timestamp lags the fetch by 60 to 120 s or more, so the quote's age straddles the 120 s limit. Unmeasured; the log now prints the age |
-| Built, not yet run live | The chain-snapshot recorder (data/chain_snapshots), the cost hurdle, the P&L attribution at `/api/pnl/attribution`, the parity-forward surface fit, and the realized-vol shadow readout. All pass their tests (534); none has run against the market |
+| Running since 2026-10-14 11:28 UTC | The build with the recorder, cost hurdle, attribution, parity-forward fit and the HAR shadow readout. Seen so far, market closed: the recorder wrote a first snapshot and skipped the unchanged feed after it; 250 daily closes loaded from Alpaca's bars; `/api/pnl/attribution` answers (flat). Not yet seen with the market open |
 | Off by default | `use_multi_leg` (Alpaca multi-leg buy order; never sent), `fair_vol_model` (shadow only) |
 | Not yet seen live | A vol-spread fill; a straddle fill with its hedge; the unvalued-position gate under a real fill; a full session on the current build (2026-10-13 covered 13:30 to 15:01 UTC) |
 
