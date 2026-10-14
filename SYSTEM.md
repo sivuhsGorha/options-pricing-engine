@@ -58,7 +58,7 @@ Every quote carries a status: LIVE, DELAYED, STALE, UNAVAILABLE or SIMULATED. Se
 | Running as | Docker container with a restart policy; the `engine-data` volume holds the ledger |
 | Data providers | Finnhub and Alpha Vantage delayed; Polygon/Massive off (plan has no snapshot endpoint); Marketstack rate limited |
 | Live evidence | 2026-10-09: two fills, one cancel-then-fill race, one reconciliation halt. 2026-10-13: the stale-spot gate held on live data (175 waits), 98 decisions all inside the band, no orders, book matched Alpaca (see EXECUTION.md section 5) |
-| Open question | Option quotes read STALE in about a third of the steps that reached them on 2026-10-13 (none in 24 steps on 2026-10-09); cause not found |
+| Open question | Option quotes read STALE in about a third of the steps that reached them on 2026-10-13, mostly in the first hour after the open (none in 24 steps on 2026-10-09). Hypothesis: Cboe's own timestamp lags the fetch by 60 to 120 s or more, so the quote's age straddles the 120 s limit. Unmeasured; the log now prints the age |
 | Not yet seen live | A vol-spread fill; a straddle fill with its hedge; the unvalued-position gate under a real fill; a full session on the current build (2026-10-13 covered 13:30 to 15:01 UTC) |
 
 ## 5. Known limits
@@ -85,6 +85,9 @@ Every quote carries a status: LIVE, DELAYED, STALE, UNAVAILABLE or SIMULATED. Se
 
 Newest first. One line per change that alters what the system does or what we know about it.
 
+- **2026-10-14** A STALE option-quote wait now says how old the feed's stamp was and the limit, so the next
+  session can show whether the staleness is feed lag or a failed reload. The engine was found to have been
+  interrupted twice on 2026-10-13 (a four-minute gap at 14:25 and a stop at 15:01), cause unknown.
 - **2026-10-14** Session log for 2026-10-13 written: no orders in the session, stale-spot gate confirmed live, and
   an unexplained rate of STALE option quotes recorded as an open question. The engine stopped at about 15:02 UTC
   for a reason not yet known.

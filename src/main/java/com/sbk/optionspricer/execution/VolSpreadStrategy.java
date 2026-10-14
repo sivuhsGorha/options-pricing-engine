@@ -9,6 +9,7 @@ import com.sbk.optionspricer.instruments.OccSymbol;
 import com.sbk.optionspricer.market.MarketDataStatus;
 import com.sbk.optionspricer.market.MarketSnapshot;
 import com.sbk.optionspricer.market.OptionMarketData;
+import com.sbk.optionspricer.market.OptionQuoteSnapshots;
 import com.sbk.optionspricer.volatility.SurfaceFitter;
 import com.sbk.optionspricer.volatility.VolatilitySurfaceSource;
 
@@ -335,7 +336,9 @@ public final class VolSpreadStrategy {
                 return null;
             }
             if (quote.status() == MarketDataStatus.STALE || quote.status() == MarketDataStatus.UNAVAILABLE) {
-                lastEdgeProblem = leg + ": quote " + quote.status();
+                lastEdgeProblem = leg + ": quote " + quote.status() + (quote.status() == MarketDataStatus.STALE
+                        ? String.format(Locale.ROOT, " (feed %d s old, limit %d s)", quote.derivedQuoteAgeMs() / 1000L, OptionQuoteSnapshots.STALE_AFTER_MS / 1000L)
+                        : "");
                 return null;
             }
             if (quote.status() == MarketDataStatus.SIMULATED && !allowSimulated) {

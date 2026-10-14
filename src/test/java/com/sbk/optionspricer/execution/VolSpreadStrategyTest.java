@@ -141,6 +141,29 @@ class VolSpreadStrategyTest {
         assertEquals("SELL_STRADDLE", fresh.step().action());
     }
 
+    @Test
+    void aStaleOptionQuoteSaysHowOldTheFeedWasSoALogCanTellLagFromAFailedReload() {
+        // 2026-10-13: a third of the steps with a fresh spot read "quote STALE", flipping with every 30 s step.
+        // Whether the feed's own stamp lags the fetch or the reload fails needs the age in the log.
+        FlatChains base = new FlatChains(0.23, TODAY);
+        OptionMarketData aged = new OptionMarketData() {
+            @Override public List<LocalDate> loadedExpiries() { return base.loadedExpiries(); }
+            @Override public Optional<OptionChain> chain(LocalDate expiry) { return base.chain(expiry); }
+            @Override public Optional<MarketSnapshot> optionQuote(String contractSymbol) {
+                return base.optionQuote(contractSymbol).map(q -> new MarketSnapshot(q.symbol(), q.bid(), q.ask(), q.last(), q.volume(),
+                        q.timestamp(), q.sourceTimestamp(), 150_000L, q.source(), MarketDataStatus.STALE, q.instrument()));
+            }
+        };
+        PositionTracker tracker = new PositionTracker(FillRecorder.NONE);
+        VolSpreadStrategy s = strategy(tracker, aged, 0.20, null, Clock.fixed(NOW, ZoneOffset.UTC));
+
+        VolSpreadStrategy.Decision d = s.step();
+
+        assertEquals("WAIT", d.action(), d.summary());
+        assertTrue(d.reason().contains("quote STALE (feed 150 s old, limit 120 s)"), d.reason());
+        assertTrue(tracker.getPositions().isEmpty());
+    }
+
     /** The strategy's front month: the first loaded expiry at least min_days_to_expiry (14) out. */
     private static LocalDate front() {
         return OptionChainProvider.thirdFridays(TODAY, 3).stream().filter(e -> !e.isBefore(TODAY.plusDays(14))).findFirst().orElseThrow();

@@ -204,11 +204,13 @@ spot is STALE (commit `182db2e`, with a test). These five orders were read from 
 the container was recreated at 12:09 on the fixed build, so they are no longer in the API or the log.
 
 **The session.** The P&L sampler shows the spot moving from 13:00 to 15:01 UTC (778.1 down to 776.95, 24 and 38
-distinct values in the 13h and 14h hours against one value all night). The engine then stopped; the container
-started again at 06:24 UTC on 2026-10-14. I do not know why it stopped (Docker Desktop or the PC going off, most
-likely); the log has no shutdown line. So this entry covers 13:30 to 15:01 UTC, the first 90 minutes of the session,
-not the whole day. The console log carries no timestamps, so the tallies below are for everything the container
-logged since 12:09.
+distinct values in the 13h and 14h hours against one value all night). The engine was interrupted twice and I do
+not know why: the log goes silent from 14:25:25 to 14:29:42, when the engine starts again from the top (3 fills
+replayed, reconciliation OK, a four-minute gap in the P&L samples), and it ends at 15:01:31. The container's
+restart policy brought it back the first time, which fits Docker Desktop or the PC pausing; the log has no
+shutdown line either time. So this entry covers 13:30 to 15:01 UTC, the first 90 minutes of the session, not the
+whole day. The tallies below are from `docker compose logs -t`, which timestamps each line; the engine's own
+console lines carry none.
 
 | Decisions | Count | What they were |
 | :-- | --: | :-- |
@@ -225,12 +227,19 @@ The position's unrealised P&L moved with the spot, from -30.34 at 13:00 to -7.34
 **What it showed.**
 
 1. **The stale-spot gate works on live data.** 175 steps waited on the spot instead of reaching the order path.
-2. **The option quotes were STALE in 62 of the 170 steps that got as far as them (about a third).** On the
-   afternoon of 2026-10-09 the same strategy saw none in 24 steps after the 60 s reload was added. Something is
-   still leaving the quotes older than 120 s part of the time, and I have not found it. Candidates, not
-   conclusions: the Cboe document's own timestamp lagging by more than two minutes at times, a reload that
-   fails and keeps the old chain, or the 30 s cache. The next session's log should carry timestamps to tell them
-   apart.
+2. **The option quotes were STALE in 62 of the 170 steps that got as far as them (about a third), and the
+   timestamps show the shape.** Spot staleness ends exactly at 13:30. Option-quote staleness is heaviest right
+   after the open and fades: in 10-minute buckets from 13:30 the STALE steps were 16, 10, 11, 11, 7, 3, then 1 or
+   2 per bucket, while HOLDs rose from 4 to about 20 per bucket (steps are 30 s, so 20 is every step). From 14:19
+   the strategy alternates HOLD, WAIT-STALE, HOLD, WAIT-STALE on consecutive steps. That is what a quote whose age
+   cycles across the 120 s limit looks like: the age is the time since Cboe stamped the document, the chains reload
+   every 60 s, so the age sweeps from the feed's lag L to L + 60 s between reloads. With L near 60 to 90 s the
+   quote is fresh right after a reload and stale 30 s later; with L above 120 s it is stale at every step. It
+   fits the open, when Cboe's stamp would lag most, but **I have not measured the lag**, so this is a hypothesis.
+   The 2026-10-09 afternoon (none in 24 steps) is consistent with a smaller lag then. The log now prints the
+   feed's age on every such wait (`quote STALE (feed 150 s old, limit 120 s)`) so the next session settles it.
+   Whether 120 s is the right limit for a feed that is delayed by design is a separate question about the
+   data-quality policy, and I have not changed it.
 3. **The strategy's silence is not evidence that it works.** In 98 decisions the edge never came near the band,
    so the vol-spread open, the straddle fill, the hedge and the unvalued-position gate (hardening of 2026-10-10)
    have still not run against the venue.
