@@ -97,6 +97,14 @@ public class BlackScholesPricer {
         }
     }
 
+    public static double vega(double spot, double strike, double timeToExpiry, double riskFreeRate, double volatility, double dividendYield) {
+        if (timeToExpiry <= NEAR_ZERO || volatility <= NEAR_ZERO) {
+            return 0.0;
+        }
+        double d1 = d1(spot, strike, timeToExpiry, riskFreeRate, volatility, dividendYield);
+        return spot * Math.exp(-dividendYield * timeToExpiry) * NormalDistribution.pdf(d1) * Math.sqrt(timeToExpiry);
+    }
+
     private static boolean isDegenerate(double timeToExpiry, double volatility) {
         return timeToExpiry <= NEAR_ZERO || volatility <= NEAR_ZERO;
     }

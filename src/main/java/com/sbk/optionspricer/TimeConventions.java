@@ -24,4 +24,12 @@ public final class TimeConventions {
         }
         return ChronoUnit.DAYS.between(from, to) / DAYS_PER_YEAR;
     }
+
+    /** ACT/365F year fraction with sub-second precision between two instants. */
+    public static double yearFraction(java.time.Instant from, java.time.Instant to) {
+        if (from == null || to == null) {
+            throw new IllegalArgumentException("instants must not be null");
+        }
+        return java.time.Duration.between(from, to).toMillis() / (DAYS_PER_YEAR * 86_400_000.0);
+    }
 }

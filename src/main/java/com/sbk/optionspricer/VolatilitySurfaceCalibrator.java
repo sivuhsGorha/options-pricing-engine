@@ -39,6 +39,19 @@ public final class VolatilitySurfaceCalibrator {
             OptionType type,
             double marketPrice
     ) {
+        return impliedVolatility(spot, strike, timeToExpiry, riskFreeRate, dividendYield, type, marketPrice, false);
+    }
+
+    public static OptionalDouble impliedVolatility(
+            double spot,
+            double strike,
+            double timeToExpiry,
+            double riskFreeRate,
+            double dividendYield,
+            OptionType type,
+            double marketPrice,
+            boolean isAmerican
+    ) {
         if (!Double.isFinite(spot) || spot <= 0.0) {
             throw new IllegalArgumentException("spot must be finite and positive");
         }
@@ -60,6 +73,9 @@ public final class VolatilitySurfaceCalibrator {
         if (!Double.isFinite(marketPrice) || marketPrice <= 0.0) {
             return OptionalDouble.empty();
         }
+        if (isAmerican) {
+            return AmericanImpliedVolatilitySolver.solve(type, spot, strike, timeToExpiry, riskFreeRate, dividendYield, marketPrice);
+        }
         return ImpliedVolatilitySolver.solve(type, spot, strike, timeToExpiry, riskFreeRate, dividendYield, marketPrice, new double[5]);
     }
 
@@ -75,6 +91,19 @@ public final class VolatilitySurfaceCalibrator {
             double riskFreeRate,
             double dividendYield,
             LocalDate asOf
+    ) {
+        return calibrateChain(symbol, expiry, spot, quotes, riskFreeRate, dividendYield, asOf, false);
+    }
+
+    public static List<OptionQuote> calibrateChain(
+            String symbol,
+            LocalDate expiry,
+            double spot,
+            List<OptionQuote> quotes,
+            double riskFreeRate,
+            double dividendYield,
+            LocalDate asOf,
+            boolean isAmerican
     ) {
         if (symbol == null || symbol.isBlank()) {
             throw new IllegalArgumentException("symbol must not be blank");
@@ -98,7 +127,7 @@ public final class VolatilitySurfaceCalibrator {
             if (!expiry.equals(quote.expiry())) {
                 continue;
             }
-            OptionalDouble iv = impliedVolatility(spot, quote.strike(), timeToExpiry, riskFreeRate, dividendYield, quote.type(), quote.midPrice());
+            OptionalDouble iv = impliedVolatility(spot, quote.strike(), timeToExpiry, riskFreeRate, dividendYield, quote.type(), quote.midPrice(), isAmerican);
             if (iv.isEmpty()) {
                 continue;
             }

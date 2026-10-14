@@ -109,7 +109,10 @@ public final class SurfaceFitter {
                 warnings.add("expiry " + chain.expiry() + " is not after " + asOf + "; chain ignored");
                 continue;
             }
-            double forward = chain.spot() * Math.exp((riskFreeRate - dividendYield) * t);
+            PutCallParityForwardSolver.ParityResult parity = PutCallParityForwardSolver.solve(chain, riskFreeRate, dividendYield, asOf);
+            double forward = parity.forward();
+            double r = parity.riskFreeRate();
+            double q = parity.dividendYield();
             for (OptionQuote quote : chain.quotes()) {
                 boolean otm = quote.type() == OptionType.PUT ? quote.strike() < forward : quote.strike() >= forward;
                 if (!otm) {
@@ -120,7 +123,7 @@ public final class SurfaceFitter {
                     continue;
                 }
                 OptionalDouble iv = VolatilitySurfaceCalibrator.impliedVolatility(chain.spot(), quote.strike(), t,
-                        riskFreeRate, dividendYield, quote.type(), quote.midPrice());
+                        r, q, quote.type(), quote.midPrice(), false);
                 if (iv.isEmpty() || !(iv.getAsDouble() > 0.01) || !(iv.getAsDouble() < 3.0)) {
                     skipped++;
                     continue;
