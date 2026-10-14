@@ -32,7 +32,7 @@ Every quote carries a status: LIVE, DELAYED, STALE, UNAVAILABLE or SIMULATED. Se
 
 ## 3. How a decision becomes an order
 
-1. **Data in.** The option chain is reloaded every 60 s and the surface refitted every 15 min (SSVI, SVI, SABR).
+1. **Data in.** The option chain is reloaded every 60 s and the surface refitted every 15 min by default, every 5 min in the local config (SSVI, SVI, SABR; a fit takes about 25 s).
    The spot comes from the configured providers.
 2. **Decision.** Every 30 s the vol-spread strategy compares market and reference vol for the front-month
    at-the-money straddle. Inside the 1.00-point band it holds; outside it buys (market cheap) or sells (market
@@ -85,6 +85,10 @@ Every quote carries a status: LIVE, DELAYED, STALE, UNAVAILABLE or SIMULATED. Se
 
 Newest first. One line per change that alters what the system does or what we know about it.
 
+- **2026-10-14** Local config now refits the surface every 5 minutes instead of 15 (`market_data.refresh_interval_seconds: 300`;
+  the default is unchanged). Reason: the strategy compares one-minute-fresh quotes with a reference surface up to
+  15 minutes old, so a vol move shows up as edge that is partly the reference lagging. Not yet seen to matter in a
+  live session; the 2026-10-13 edges were small (-0.54 to +0.01 points).
 - **2026-10-14** A STALE option-quote wait now says how old the feed's stamp was and the limit, so the next
   session can show whether the staleness is feed lag or a failed reload. The engine was found to have been
   interrupted twice on 2026-10-13 (a four-minute gap at 14:25 and a stop at 15:01), cause unknown.
