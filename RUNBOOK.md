@@ -74,6 +74,7 @@ you care about the paper-trading history. The startup log reports each file:
 | `fills.csv` | one row per fill with its price; the book, average cost and realised P&L are rebuilt from it | starts the book flat |
 | `pnl_history.csv` | the valuation sampled once a minute (and when realised P&L changes); today's P&L and drawdown come from it | loses the P&L history, not the book |
 | `surface_history.csv` | one row per model per calibration: front ATM vol, skew, RMSE, quotes used, parameters | loses the surface history chart |
+| `chain_snapshots/SPY/<date>/quotes_<HHmmss>.csv.gz` | every option chain the feed changed (a batch whose feed timestamps equal the last one kept is skipped, so nights and weekends add nothing): bid, ask, the feed's IV, volume, source. Raw material for replay and backtests | loses the history a backtest would use; the engine does not read it back. Nothing prunes it and its growth per trading day has not been measured yet: check `du -sh data/chain_snapshots` after a session |
 | `shm_state.dat` (`MMAP_STATE_FILE`) | the engine-to-web shared state | recreated at start |
 
 A row in any CSV that cannot be parsed stops startup naming the file and line, on purpose: a record with a

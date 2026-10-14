@@ -16,8 +16,15 @@ them for features. `strategy.mode` selects which one runs; the operator switch s
   The reference is the global SSVI fit (`strategy.reference_model`, `SSVI` or `SVI`): a per-slice SVI fit sits on
   the quotes it was fitted to and carries no signal about them, whereas the three-parameter global surface is a
   smoothed value the market deviates from. `edge = market IV - reference IV`.
-- **Entry**: edge above `vol_edge` (default 1 vol point) sells `contracts` straddles; below `-vol_edge` buys.
-  One straddle at a time. The second leg is never sent if the first is refused by the order gates. If the first
+- **Cost hurdle**: the edge must also beat the cost of getting in and out, in vol points:
+  `2 x (half-spread of both legs + 2 x fee_per_contract / 100) / straddle vega`. The straddle's exit is the edge
+  reverting, so it always pays the spread twice. A wide-spread option therefore holds at any edge the spread would
+  eat; the decision says `does not exceed break-even hurdle`.
+- **Stand-down**: the strategy waits, sending nothing, while the spot is `STALE` (the chain is reloaded every minute
+  and reads as fresh even with the market shut), and says how old a stale option quote was
+  (`quote STALE (feed 150 s old, limit 120 s)`).
+- **Entry**: edge above the larger of `vol_edge` (default 1 vol point) and the cost hurdle sells `contracts`
+  straddles; below minus that, it buys. One straddle at a time. The second leg is never sent if the first is refused by the order gates. If the first
   leg fills and the second is refused, the first is closed in the same step; if that close is refused too, the
   next step closes the lone leg before doing anything else, whatever the edge says. A single option leg is
   never held as if it were a straddle.
@@ -30,8 +37,24 @@ them for features. `strategy.mode` selects which one runs; the operator switch s
   paper-trading panel and in the log as `[VOL SPREAD] ...`. Positions go through the same gates as any order;
   a generated (synthetic) chain yields SIMULATED quotes that the default policy will not trade.
 
+- **Risk exits**: a short straddle is closed when an in-the-money short leg has under $0.10 of extrinsic value
+  (early-assignment risk); a straddle is closed within a day of expiry with spot within 0.5 % of the strike (pin
+  risk). With the default `max_days_to_expiry 7` the expiry exit fires first, so the pin rule only matters if that
+  setting is lowered to 1 or 0.
+- **Realized-vol shadow**: with `fair_vol_model: EWMA` or `HAR` each hold also reports a forecast from daily
+  closes (`| RV forecast 14.2%, VRP +1.9 pts`). It never trades. Implied volatility is above realized volatility
+  on average, so a forecast used as the reference would call the market rich on most days; the readout is there to
+  collect evidence. The HAR weights are illustrative, not fitted. `VrpSignalBacktester` can replay recorded chains
+  against it at the touch with fees, but there is no replay command yet and little recorded data.
+- **Multi-leg (experimental, `use_multi_leg`, off)**: a buy straddle goes as one Alpaca order with `buy_to_open` on
+  each leg, and the ledger books the legs so their cost adds up to the venue's net price. A multi-leg order with a
+  short leg is refused by the Alpaca transport: Alpaca documents no sign for a credit price and requires short legs
+  to be covered inside the order. It has not been tried on the paper account. Alpaca may refuse a short straddle
+  (two uncovered short options) as single legs too; that has not been tried either.
+
 Configuration (defaults): `vol_edge 0.01`, `reference_model SSVI`, `hedge_band 50`, `min_days_to_expiry 14`,
-`max_days_to_expiry 7`, `contracts 1`, `option_interval_seconds 30`.
+`max_days_to_expiry 7`, `contracts 1`, `option_interval_seconds 30`, `fee_per_contract 0.65`,
+`fair_vol_model NONE`, `use_multi_leg false`.
 
 ## 2. Momentum (`strategy.mode: momentum`): shares on a price move
 

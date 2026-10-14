@@ -35,8 +35,10 @@ Every quote carries a status: LIVE, DELAYED, STALE, UNAVAILABLE or SIMULATED. Se
 1. **Data in.** The option chain is reloaded every 60 s and the surface refitted every 15 min by default, every 5 min in the local config (SSVI, SVI, SABR; a fit takes about 25 s).
    The spot comes from the configured providers.
 2. **Decision.** Every 30 s the vol-spread strategy compares market and reference vol for the front-month
-   at-the-money straddle. Inside the 1.00-point band it holds; outside it buys (market cheap) or sells (market
-   rich) the straddle and delta-hedges with shares. Each decision is logged with its reason.
+   at-the-money straddle. Inside the larger of the 1.00-point band and the cost hurdle (round-trip half-spread
+   plus fees, divided by vega) it holds; outside it buys (market cheap) or sells (market rich) the straddle and
+   delta-hedges with shares. Each decision is logged with its reason. With `fair_vol_model` set, a hold also shows
+   a realized-vol forecast and the gap to it, as a readout only.
 3. **Stand-down rules.** The strategy waits, and sends nothing, when the spot is STALE or unavailable, when an
    option quote is STALE or one-sided, when the chain is simulated or disagrees with the spot, or when no
    surface exists. A lone straddle leg is flattened before anything else.
@@ -59,6 +61,8 @@ Every quote carries a status: LIVE, DELAYED, STALE, UNAVAILABLE or SIMULATED. Se
 | Data providers | Finnhub and Alpha Vantage delayed; Polygon/Massive off (plan has no snapshot endpoint); Marketstack rate limited |
 | Live evidence | 2026-10-09: two fills, one cancel-then-fill race, one reconciliation halt. 2026-10-13: the stale-spot gate held on live data (175 waits), 98 decisions all inside the band, no orders, book matched Alpaca (see EXECUTION.md section 5) |
 | Open question | Option quotes read STALE in about a third of the steps that reached them on 2026-10-13, mostly in the first hour after the open (none in 24 steps on 2026-10-09). Hypothesis: Cboe's own timestamp lags the fetch by 60 to 120 s or more, so the quote's age straddles the 120 s limit. Unmeasured; the log now prints the age |
+| Built, not yet run live | The chain-snapshot recorder (data/chain_snapshots), the cost hurdle, the P&L attribution at `/api/pnl/attribution`, the parity-forward surface fit, and the realized-vol shadow readout. All pass their tests (534); none has run against the market |
+| Off by default | `use_multi_leg` (Alpaca multi-leg buy order; never sent), `fair_vol_model` (shadow only) |
 | Not yet seen live | A vol-spread fill; a straddle fill with its hedge; the unvalued-position gate under a real fill; a full session on the current build (2026-10-13 covered 13:30 to 15:01 UTC) |
 
 ## 5. Known limits
@@ -72,6 +76,15 @@ Every quote carries a status: LIVE, DELAYED, STALE, UNAVAILABLE or SIMULATED. Se
 - **One process, one underlying.** No redundancy; state is files under `data/`.
 - **No TLS.** The dashboard binds to localhost; reach it through an SSH tunnel ([RUNBOOK.md](RUNBOOK.md)).
 - **Hosting.** Verified on Docker Desktop on Windows only, not on a Linux server.
+- **A short straddle may not be placeable on Alpaca at all.** Alpaca's documentation says a multi-leg order must
+  cover its short legs inside the order, and a short straddle is two uncovered short options. Whether it accepts
+  them as single legs on this paper account has not been tried; the strategy can decide to sell one.
+- **No evidence of edge yet.** The reference is a surface fitted to the same chain, so most of the edge is fit
+  residual and staleness. The realized-vol forecast and the backtester exist to test a real signal, but the
+  recorder only started collecting data on this build, and there is no replay command.
+- **The straddle's IV uses the assumed rate and dividend.** The surface now uses the options' own forward, but the
+  strategy inverts its straddle with the assumed ones; averaging the call and put cancels the difference to first
+  order, so it is small, and it has not been measured.
 
 ## 6. Where to look next
 
@@ -85,6 +98,18 @@ Every quote carries a status: LIVE, DELAYED, STALE, UNAVAILABLE or SIMULATED. Se
 
 Newest first. One line per change that alters what the system does or what we know about it.
 
+- **2026-10-14** Reviewed, corrected and wired a batch of code written by Google Gemini (not by this project's
+  usual workflow), with 45 new tests (534 in all, without the OPRA package which was left out). Wired and on by
+  default: the chain-snapshot recorder (now skips an unchanged feed and no longer loses the last queued snapshot at
+  shutdown), the cost hurdle (now counts the exit as well as the entry), the P&L attribution (history now bounded),
+  and a parity forward in the surface fit (rewritten: the discount factor is no longer regressed from American
+  options, which misread early-exercise premium as a rate error several times too large). Wired but off:
+  multi-leg orders (now refuse any short leg, name `position_intent`, and book fills at the venue's net price),
+  and a realized-vol shadow readout with real daily closes. Fixed in the library: a HAR forecast with under 22 days
+  no longer silently becomes an EWMA; a fair-vol reference with no provider is refused at start instead of
+  quietly using SSVI under another name; the VRP backtester now fills at the touch with fees and dates trades from
+  the snapshots. Left out: `data/opra/` (an unused decoder for a feed the project does not have; the README says
+  the gateway simulations were removed because nothing used them).
 - **2026-10-14** The surface-history panel header now says how the latest fit differs from the one before it
   (`last fit vs 5 min earlier: ATM -0.36, skew -0.16`, or `unchanged` when a refit returns the same surface, as it
   does overnight). Front end only, computed from the points the panel already loads; 67 frontend tests.
