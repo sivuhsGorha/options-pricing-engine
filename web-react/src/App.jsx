@@ -3,7 +3,7 @@ import './App.css';
 import { secureFetch, securePost } from './lib/api';
 import { formatNumber } from './lib/format';
 import { renderSurfaceCharts, renderHistoryChart } from './lib/surfaceCharts';
-import { surfaceHistorySummary } from './lib/history';
+import { surfaceHistoryTitle } from './lib/history';
 import { surfaceLabel, surfaceTone } from './lib/surfaceLabel';
 import LoginForm from './components/LoginForm';
 import DataBanner from './components/DataBanner';
@@ -333,7 +333,7 @@ function App() {
             <ChartPanel id="volatilityChartTerm" chartRef={chartRefTerm} className="sub-chart" title="TERM STRUCTURE (2D)"
               expanded={expandedChart === 'TERM'} onToggle={() => toggleChart('TERM')} />
             <ChartPanel id="volatilityChartHistory" chartRef={chartRefHistory} className="sub-chart"
-              title={`HISTORY 24H · ${surfaceHistorySummary(surfaceHistory ? surfaceHistory.points : [])}`}
+              title={surfaceHistoryTitle(surfaceHistory ? surfaceHistory.points : [])}
               expanded={expandedChart === 'HISTORY'} onToggle={() => toggleChart('HISTORY')} />
           </div>
         </div>

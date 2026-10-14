@@ -31,6 +31,34 @@ export function surfaceHistorySummary(points) {
         + (Number.isFinite(skewLast) ? ` · skew ${skewLast.toFixed(2)} pts` : '');
 }
 
+const signed = (v) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}`;
+
+/**
+ * How the latest calibration differs from the one before it: ATM vol and skew moves in vol points, and how many
+ * minutes apart the two fits were. Empty until two calibrations exist. "Unchanged" is a real answer: with the
+ * market shut, each refit fits the same delayed chain and returns the same surface.
+ */
+export function surfaceHistoryLastChange(points) {
+    const rows = (Array.isArray(points) ? points : [])
+        .filter(p => p && Number.isFinite(p.at) && Number.isFinite(p.atmVol))
+        .sort((a, b) => a.at - b.at);
+    if (rows.length < 2) return '';
+    const prev = rows[rows.length - 2];
+    const last = rows[rows.length - 1];
+    const minutes = Math.max(1, Math.round((last.at - prev.at) / 60000));
+    const atm = pct(last.atmVol) - pct(prev.atmVol);
+    const skew = Number.isFinite(last.skew) && Number.isFinite(prev.skew) ? pct(last.skew) - pct(prev.skew) : NaN;
+    const moved = (d) => Number.isFinite(d) && Math.abs(d) >= 0.005;
+    if (!moved(atm) && !moved(skew)) return `last fit unchanged from ${minutes} min earlier`;
+    return `last fit vs ${minutes} min earlier: ATM ${signed(atm)}` + (Number.isFinite(skew) ? `, skew ${signed(skew)}` : '');
+}
+
+/** The history chart's header: the window summary, then how the latest fit differs from the previous one. */
+export function surfaceHistoryTitle(points) {
+    const change = surfaceHistoryLastChange(points);
+    return `HISTORY 24H · ${surfaceHistorySummary(points)}` + (change ? ` · ${change}` : '');
+}
+
 /** CSS class for a signed P&L figure; empty when the figure is unknown. */
 export function pnlTone(value) {
     if (!Number.isFinite(value)) return '';

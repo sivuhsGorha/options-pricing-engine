@@ -85,6 +85,9 @@ Every quote carries a status: LIVE, DELAYED, STALE, UNAVAILABLE or SIMULATED. Se
 
 Newest first. One line per change that alters what the system does or what we know about it.
 
+- **2026-10-14** The surface-history panel header now says how the latest fit differs from the one before it
+  (`last fit vs 5 min earlier: ATM -0.36, skew -0.16`, or `unchanged` when a refit returns the same surface, as it
+  does overnight). Front end only, computed from the points the panel already loads; 67 frontend tests.
 - **2026-10-14** Local config now refits the surface every 5 minutes instead of 15 (`market_data.refresh_interval_seconds: 300`;
   the default is unchanged). Reason: the strategy compares one-minute-fresh quotes with a reference surface up to
   15 minutes old, so a vol move shows up as edge that is partly the reference lagging. Not yet seen to matter in a
