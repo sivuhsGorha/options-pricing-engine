@@ -52,6 +52,7 @@ public final class PortfolioValuationService implements ValuationSource, AutoClo
     private final Duration interval;
     private final Clock clock;
 
+    private final com.sbk.optionspricer.execution.PnlAttributionEngine attributionEngine = new com.sbk.optionspricer.execution.PnlAttributionEngine();
     private volatile Valuation latest;
     private volatile String status = "valuation has not run yet";
     private Thread worker;
@@ -135,6 +136,7 @@ public final class PortfolioValuationService implements ValuationSource, AutoClo
         Valuation valuation = new Valuation(now, spot, spotSource, List.copyOf(rows), unrealized, tracker.getRealizedPnl(),
                 netDelta, netGamma, netVega, netTheta, netRho, List.copyOf(warnings));
         latest = valuation;
+        attributionEngine.update(valuation);
         status = "";
         try {
             valuationListener.accept(valuation);
@@ -272,5 +274,14 @@ public final class PortfolioValuationService implements ValuationSource, AutoClo
     @Override
     public String valuationStatus() {
         return status;
+    }
+
+    @Override
+    public Optional<com.sbk.optionspricer.execution.PnlAttribution> latestAttribution() {
+        return Optional.ofNullable(attributionEngine.latest());
+    }
+
+    public com.sbk.optionspricer.execution.PnlAttributionEngine attributionEngine() {
+        return attributionEngine;
     }
 }

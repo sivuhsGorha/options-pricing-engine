@@ -182,6 +182,29 @@ public final class AlpacaPaperClient {
         return order(call("POST", "/v2/orders", body));
     }
 
+    public record OptionLeg(String symbol, int ratioQty, boolean buy) {}
+
+    /** A multi-leg complex limit order (e.g. straddle or spread) sent atomically to Alpaca. */
+    public OrderState submitMultiLegOrder(List<OptionLeg> legs, int quantity, double limitPrice, String clientOrderId) {
+        if (legs == null || legs.isEmpty() || quantity <= 0 || !Double.isFinite(limitPrice) || limitPrice <= 0.0) {
+            throw new IllegalArgumentException("legs, a positive quantity and a positive limit price are required");
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append(String.format(Locale.ROOT,
+                "{\"order_class\":\"mleg\",\"qty\":\"%d\",\"type\":\"limit\",\"time_in_force\":\"day\",\"limit_price\":\"%.2f\",\"client_order_id\":\"%s\",\"legs\":[",
+                quantity, limitPrice, clientOrderId));
+        for (int i = 0; i < legs.size(); i++) {
+            OptionLeg leg = legs.get(i);
+            if (i > 0) sb.append(",");
+            // every example in Alpaca's multi-leg documentation names the intent; these orders only ever open
+            sb.append(String.format(Locale.ROOT, "{\"symbol\":\"%s\",\"ratio_qty\":\"%d\",\"side\":\"%s\",\"position_intent\":\"%s\"}",
+                    leg.symbol().trim().toUpperCase(Locale.ROOT), leg.ratioQty(), leg.buy() ? "buy" : "sell",
+                    leg.buy() ? "buy_to_open" : "sell_to_open"));
+        }
+        sb.append("]}");
+        return order(call("POST", "/v2/orders", sb.toString()));
+    }
+
     public OrderState order(String id) {
         return order(call("GET", "/v2/orders/" + id, null));
     }
@@ -213,6 +236,37 @@ public final class AlpacaPaperClient {
             throw new IllegalStateException("Alpaca returned no quote for " + sym);
         }
         return new Quote(number(q, "bp"), number(q, "ap"), java.time.Instant.parse(q.get("t").asText()));
+    }
+
+    /** One trading day: its date (the bar's own, in New York) and its split-adjusted close. */
+    public record DailyBar(java.time.LocalDate date, double close) {}
+
+    /**
+     * Daily bars from {@code start} on, oldest first, from the IEX feed (a free feed, so its closes can differ a
+     * little from the consolidated close; fine for a volatility estimate). The last bar may be today's, still
+     * forming. No bars at all is an error, never an empty series that would read as a calm market.
+     */
+    public List<DailyBar> dailyBars(String symbol, java.time.LocalDate start) {
+        if (symbol == null || symbol.isBlank() || start == null) {
+            throw new IllegalArgumentException("symbol and start are required");
+        }
+        String sym = symbol.trim().toUpperCase(Locale.ROOT);
+        JsonNode bars = callData("/v2/stocks/" + sym + "/bars?timeframe=1Day&start=" + start
+                + "&limit=1000&feed=iex&adjustment=split").path("bars");
+        List<DailyBar> out = new ArrayList<>();
+        if (bars.isArray()) {
+            for (JsonNode bar : bars) {
+                if (bar.hasNonNull("t") && bar.hasNonNull("c")) {
+                    out.add(new DailyBar(java.time.LocalDate.ofInstant(java.time.Instant.parse(bar.get("t").asText()),
+                            java.time.ZoneOffset.UTC), number(bar, "c")));
+                }
+            }
+        }
+        if (out.isEmpty()) {
+            throw new IllegalStateException("Alpaca returned no daily bars for " + sym);
+        }
+        out.sort(java.util.Comparator.comparing(DailyBar::date));
+        return List.copyOf(out);
     }
 
     // ------------------------------------------------------------------ plumbing

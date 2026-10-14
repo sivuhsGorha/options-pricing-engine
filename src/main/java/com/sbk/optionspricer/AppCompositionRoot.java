@@ -32,6 +32,7 @@ public class AppCompositionRoot {
     public final com.sbk.optionspricer.core.VolatilitySurfaceService surfaceService;
     public final com.sbk.optionspricer.core.PortfolioValuationService valuationService;
     public final com.sbk.optionspricer.execution.VolSpreadStrategy volSpreadStrategy;
+    public final com.sbk.optionspricer.data.CompressedChainSnapshotRecorder chainRecorder;
 
     public AppCompositionRoot() throws Exception {
         this.config = new ConfigManager();
@@ -129,6 +130,18 @@ public class AppCompositionRoot {
         surfaceService.setSnapshotListener(surfaceHistory);
         dashboard.setSurfaceHistory(surfaceHistory);
         System.out.println("[SURFACE HISTORY] " + surfaceHistory.path() + ": " + surfaceHistory.size() + " model calibrations on file");
+
+        // Every chain the service loads is kept (gzip, one file per change in the feed) so a strategy can later be
+        // tested on what the market really showed. Off with market_data.record_chain_snapshots: false.
+        if (config.getBoolean("market_data.record_chain_snapshots", true)) {
+            java.nio.file.Path snapshotsDir = dataDir.resolve("chain_snapshots");
+            this.chainRecorder = new com.sbk.optionspricer.data.CompressedChainSnapshotRecorder(snapshotsDir, java.time.Clock.systemUTC());
+            surfaceService.setQuoteRefreshListener(chains -> chainRecorder.recordSourced(chains, java.time.Instant.now()));
+            System.out.println("[CHAIN RECORDER] keeping a snapshot of the option chains whenever the feed changes, in " + snapshotsDir);
+        } else {
+            this.chainRecorder = null;
+            System.out.println("[CHAIN RECORDER] off (market_data.record_chain_snapshots is false)");
+        }
         com.sbk.optionspricer.core.OperatorConsole console = new com.sbk.optionspricer.core.OperatorConsole(tradingHalt, harness, strategyLoop);
         dashboard.setOperatorControls(console);
         dashboard.setFeedStatusSource(spotProvider::lastKnownFeedStatus);
@@ -148,12 +161,20 @@ public class AppCompositionRoot {
 
         // The options strategy: front-month ATM straddle against the fitted surface, hedged with shares.
         String strategyMode = config.getString("strategy.mode", "vol_spread");
+        boolean useMultiLeg = config.getBoolean("strategy.use_multi_leg", false);
         com.sbk.optionspricer.execution.VolSpreadStrategy.Params strategyParams = new com.sbk.optionspricer.execution.VolSpreadStrategy.Params(
                 config.getDouble("strategy.vol_edge", 0.01), config.getDouble("strategy.hedge_band", 50.0),
                 (int) config.getDouble("strategy.max_days_to_expiry", 7.0), (int) config.getDouble("strategy.min_days_to_expiry", 14.0),
-                (int) config.getDouble("strategy.contracts", 1.0), config.getString("strategy.reference_model", "SSVI"));
-        this.volSpreadStrategy = new com.sbk.optionspricer.execution.VolSpreadStrategy(orderManager, surfaceService, surfaceService, valuationService,
-                () -> marketAdapter.getSnapshot(symbol), positionTracker, symbol, riskFreeRate, dividendYield, strategyParams, java.time.Clock.systemUTC());
+                (int) config.getDouble("strategy.contracts", 1.0), config.getString("strategy.reference_model", "SSVI"),
+                config.getDouble("strategy.fee_per_contract", 0.65), useMultiLeg);
+        if (useMultiLeg) {
+            System.out.println("[STRATEGY] multi-leg orders are ON (experimental): a buy straddle goes as one order; "
+                    + "Alpaca transport refuses a short leg, so a sell straddle will be rejected, not legged");
+        }
+        com.sbk.optionspricer.volatility.FairVolProvider fairVol = fairVolShadow(config, symbol);
+        this.volSpreadStrategy = new com.sbk.optionspricer.execution.VolSpreadStrategy(orderManager, surfaceService, surfaceService, fairVol,
+                valuationService, () -> marketAdapter.getSnapshot(symbol), positionTracker, symbol, riskFreeRate, dividendYield, strategyParams,
+                java.time.Clock.systemUTC());
         harness.setStrategyMode(strategyMode);
         harness.setOptionStrategy(volSpreadStrategy::step, java.time.Duration.ofSeconds((long) config.getDouble("strategy.option_interval_seconds", 30.0)));
         console.describeStrategy(harness::getStrategyMode,
@@ -165,6 +186,33 @@ public class AppCompositionRoot {
             System.out.println("[RECONCILE] " + first.status() + ": " + first.message());
             bookReconciler.start();
         }
+    }
+
+    /**
+     * The realized-vol forecast the strategy reports next to each hold ({@code strategy.fair_vol_model}), or null
+     * for NONE. It never trades: the reference stays the fitted surface. Its daily closes come from Alpaca's bars with
+     * the keys in .env; without them, or when the load fails, the forecast stays empty and the readout is simply absent.
+     */
+    private com.sbk.optionspricer.volatility.FairVolProvider fairVolShadow(ConfigManager config, String symbol) {
+        String name = config.getString("strategy.fair_vol_model", "NONE").trim().toUpperCase(java.util.Locale.ROOT);
+        if ("NONE".equals(name)) {
+            return null;
+        }
+        com.sbk.optionspricer.volatility.RealizedVolForecast forecast = new com.sbk.optionspricer.volatility.RealizedVolForecast(
+                "HAR".equals(name) ? com.sbk.optionspricer.volatility.RealizedVolForecast.Model.HAR
+                        : com.sbk.optionspricer.volatility.RealizedVolForecast.Model.EWMA);
+        try {
+            AlpacaPaperClient client = AlpacaPaperClient.fromEnv();
+            this.dailyCloseFeed = new com.sbk.optionspricer.volatility.DailyCloseFeed(forecast,
+                    start -> client.dailyBars(symbol, start).stream()
+                            .map(b -> new com.sbk.optionspricer.volatility.DailyCloseFeed.DailyClose(b.date(), b.close())).toList(),
+                    java.time.Clock.systemUTC(), java.time.Duration.ofHours(6));
+            dailyCloseFeed.start();
+            System.out.println("[FAIR VOL] " + name + " realized-vol forecast reported beside each hold (shadow only, never trades)");
+        } catch (RuntimeException e) {
+            System.err.println("[FAIR VOL] needs ALPACA_KEY_ID and ALPACA_SECRET for daily closes: " + e.getMessage() + "; no forecast will be shown");
+        }
+        return forecast;
     }
 
     /**
@@ -199,11 +247,18 @@ public class AppCompositionRoot {
         }
         step("valuation", valuationService::close);
         step("surface calibration", surfaceService::close);
+        if (dailyCloseFeed != null) {
+            step("daily closes", dailyCloseFeed::close);
+        }
+        if (chainRecorder != null) {
+            step("chain recorder", chainRecorder::close);
+        }
         step("engine", harness::stop);
         System.out.println("[SHUTDOWN] done");
     }
 
     private boolean closed;
+    private com.sbk.optionspricer.volatility.DailyCloseFeed dailyCloseFeed;
 
     private static void step(String name, Runnable action) {
         try {

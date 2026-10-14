@@ -110,6 +110,52 @@ public final class AlpacaPaperTransport implements ExchangeTransport {
         return remember(report(state, venueSymbol, order, null));
     }
 
+    @Override
+    public ExecutionResult transmitMultiLeg(List<Order> legs, List<String> symbols, List<Double> bids, List<Double> asks, double netLimitPrice) {
+        if (legs == null || symbols == null || legs.isEmpty() || legs.size() != symbols.size()) {
+            return remember(new ExecutionResult("UNKNOWN", 0, 0.0, false, "Invalid multi-leg parameters"));
+        }
+        if (legs.stream().anyMatch(leg -> !leg.isBuy())) {
+            // Alpaca documents no sign for a net-credit limit price, and a multi-leg order must cover every short leg
+            // inside itself, which a short straddle does not. Nothing of the kind is sent until a paper order shows it works.
+            return remember(new ExecutionResult(symbols.get(0), 0, 0.0, false,
+                    "multi-leg orders with a short leg (a net credit) are not enabled: Alpaca documents no credit price convention and requires short legs to be covered"));
+        }
+        List<AlpacaPaperClient.OptionLeg> clientLegs = new java.util.ArrayList<>();
+        for (int i = 0; i < legs.size(); i++) {
+            clientLegs.add(new AlpacaPaperClient.OptionLeg(symbols.get(i), 1, legs.get(i).isBuy()));
+        }
+        int quantity = legs.get(0).quantity();
+        String clientOrderId = "aura-mleg-" + clock.millis() + "-" + sequence.incrementAndGet();
+
+        AlpacaPaperClient.OrderState state;
+        try {
+            state = client.submitMultiLegOrder(clientLegs, quantity, netLimitPrice, clientOrderId);
+        } catch (AlpacaPaperClient.AlpacaException rejected) {
+            return remember(new ExecutionResult(symbols.get(0), 0, 0.0, false, "Alpaca rejected multi-leg order: " + rejected.getMessage()));
+        } catch (RuntimeException unreachable) {
+            return remember(new ExecutionResult(symbols.get(0), 0, 0.0, false, "Alpaca unreachable: " + rootMessage(unreachable)));
+        }
+        lastVenueOrderId = state.id();
+
+        Instant deadline = clock.instant().plus(fillWait);
+        try {
+            while (state.isWorking() && !clock.instant().isAfter(deadline)) {
+                sleeper.sleep(pollInterval);
+                state = client.order(state.id());
+            }
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return remember(cancelAndReport(state, symbols.get(0), legs.get(0), "interrupted while waiting for multi-leg fill"));
+        } catch (RuntimeException lost) {
+            return remember(cancelAndReport(state, symbols.get(0), legs.get(0), "lost contact while waiting for multi-leg fill (" + rootMessage(lost) + ")"));
+        }
+        if (state.isWorking()) {
+            return remember(cancelAndReport(state, symbols.get(0), legs.get(0), "no multi-leg fill within " + fillWait.toSeconds() + " s at limit " + netLimitPrice));
+        }
+        return remember(report(state, symbols.get(0), legs.get(0), null));
+    }
+
     /**
      * The venue's own quote when it is two-sided and fresh; otherwise the feed's book (which may be empty, in
      * which case {@link #limitPrice} falls back to the order's price). The venue's quote is a better price, not a

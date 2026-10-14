@@ -47,20 +47,37 @@ public final class VolSpreadStrategy {
      * @param maxDaysToExpiry  close an open straddle when its expiry is this close
      * @param minDaysToExpiry  do not open on an expiry closer than this
      * @param contracts        straddle size per leg
-     * @param referenceModel   {@code SSVI} or {@code SVI}
+     * @param referenceModel   {@code SSVI}, {@code SVI}, {@code HAR}, {@code EWMA}, {@code REALIZED} or {@code VRP}
+     * @param feePerContract   broker/exchange fee per contract in dollars (e.g. 0.65)
+     * @param useMultiLeg      if true, transmits the straddle legs as a single atomic order
      */
-    public record Params(double volEdge, double hedgeBand, int maxDaysToExpiry, int minDaysToExpiry, int contracts, String referenceModel) {
+    public record Params(double volEdge, double hedgeBand, int maxDaysToExpiry, int minDaysToExpiry, int contracts,
+                         String referenceModel, double feePerContract, boolean useMultiLeg) {
+        public Params(double volEdge, double hedgeBand, int maxDaysToExpiry, int minDaysToExpiry, int contracts, String referenceModel) {
+            this(volEdge, hedgeBand, maxDaysToExpiry, minDaysToExpiry, contracts, referenceModel, 0.65, false);
+        }
+
+        public Params(double volEdge, double hedgeBand, int maxDaysToExpiry, int minDaysToExpiry, int contracts, String referenceModel, double feePerContract) {
+            this(volEdge, hedgeBand, maxDaysToExpiry, minDaysToExpiry, contracts, referenceModel, feePerContract, false);
+        }
+
         public Params {
-            if (!(volEdge > 0.0) || !(hedgeBand >= 0.0) || maxDaysToExpiry < 0 || minDaysToExpiry < 0 || contracts < 1) {
-                throw new IllegalArgumentException("volEdge > 0, hedgeBand >= 0, day limits >= 0, contracts >= 1");
+            if (!(volEdge > 0.0) || !(hedgeBand >= 0.0) || maxDaysToExpiry < 0 || minDaysToExpiry < 0 || contracts < 1 || feePerContract < 0.0) {
+                throw new IllegalArgumentException("volEdge > 0, hedgeBand >= 0, day limits >= 0, contracts >= 1, feePerContract >= 0");
             }
             if (minDaysToExpiry <= maxDaysToExpiry) {
                 throw new IllegalArgumentException("minDaysToExpiry must exceed maxDaysToExpiry, or a straddle would be opened and closed at once");
             }
             referenceModel = referenceModel == null || referenceModel.isBlank() ? "SSVI" : referenceModel.trim().toUpperCase(Locale.ROOT);
-            if (!referenceModel.equals("SSVI") && !referenceModel.equals("SVI")) {
-                throw new IllegalArgumentException("referenceModel must be SSVI or SVI");
+            if (!referenceModel.equals("SSVI") && !referenceModel.equals("SVI") && !referenceModel.equals("HAR")
+                    && !referenceModel.equals("EWMA") && !referenceModel.equals("REALIZED") && !referenceModel.equals("VRP")) {
+                throw new IllegalArgumentException("referenceModel must be SSVI, SVI, HAR, EWMA, REALIZED or VRP");
             }
+        }
+
+        /** True when the reference is a realized-vol forecast and not a fitted surface. */
+        public boolean usesFairVolReference() {
+            return !referenceModel.equals("SSVI") && !referenceModel.equals("SVI");
         }
     }
 
@@ -78,6 +95,7 @@ public final class VolSpreadStrategy {
     private final OrderManager orderManager;
     private volatile OptionMarketData chains;
     private final VolatilitySurfaceSource surfaces;
+    private final com.sbk.optionspricer.volatility.FairVolProvider fairVolProvider;
     private final ValuationSource valuation;
     private final Supplier<MarketSnapshot> spotSupplier;
     private final PositionTracker tracker;
@@ -105,12 +123,24 @@ public final class VolSpreadStrategy {
     public VolSpreadStrategy(OrderManager orderManager, OptionMarketData chains, VolatilitySurfaceSource surfaces, ValuationSource valuation,
                              Supplier<MarketSnapshot> spotSupplier, PositionTracker tracker, String symbol,
                              double riskFreeRate, double dividendYield, Params params, Clock clock) {
+        this(orderManager, chains, surfaces, null, valuation, spotSupplier, tracker, symbol, riskFreeRate, dividendYield, params, clock);
+    }
+
+    public VolSpreadStrategy(OrderManager orderManager, OptionMarketData chains, VolatilitySurfaceSource surfaces,
+                             com.sbk.optionspricer.volatility.FairVolProvider fairVolProvider, ValuationSource valuation,
+                             Supplier<MarketSnapshot> spotSupplier, PositionTracker tracker, String symbol,
+                             double riskFreeRate, double dividendYield, Params params, Clock clock) {
         if (orderManager == null || chains == null || surfaces == null || spotSupplier == null || tracker == null || symbol == null || params == null || clock == null) {
             throw new IllegalArgumentException("all dependencies except valuation must be provided");
+        }
+        if (params.usesFairVolReference() && fairVolProvider == null) {
+            // Without this the strategy would price against the SSVI surface while its decisions said "HAR".
+            throw new IllegalArgumentException("reference model " + params.referenceModel() + " needs a fair-vol provider");
         }
         this.orderManager = orderManager;
         this.chains = chains;
         this.surfaces = surfaces;
+        this.fairVolProvider = fairVolProvider;
         this.valuation = valuation;
         this.spotSupplier = spotSupplier;
         this.tracker = tracker;
@@ -192,27 +222,64 @@ public final class VolSpreadStrategy {
             return record(new Decision(now, "CLOSE", "only one leg is held; flattening it", openExpiry, openStrike,
                     Double.NaN, Double.NaN, Double.NaN, sign, orders));
         }
-        double t = TimeConventions.yearFraction(today, openExpiry);
+        LocalDate exp = openExpiry;
+        double strk = openStrike;
+        double t = TimeConventions.yearFraction(today, exp);
         long daysLeft = Math.round(t * TimeConventions.DAYS_PER_YEAR);
         if (daysLeft <= params.maxDaysToExpiry()) {
             closeStraddle(orders);
             return record(new Decision(now, "CLOSE", "expiry within " + params.maxDaysToExpiry() + " days (" + daysLeft + " left)",
-                    openExpiry, openStrike, Double.NaN, Double.NaN, Double.NaN, sign, orders));
+                    exp, strk, Double.NaN, Double.NaN, Double.NaN, sign, orders));
         }
-        Edge edge = edgeFor(openExpiry, openStrike, spot.last(), t);
+
+        // Pin risk monitor: DTE <= 1 and spot within 0.5% of strike
+        if (daysLeft <= 1 && Math.abs(spot.last() - strk) / strk <= 0.005) {
+            closeStraddle(orders);
+            return record(new Decision(now, "CLOSE", String.format(Locale.ROOT,
+                    "pin risk: DTE <= 1 (%d days) and spot %.2f within 0.5%% of strike %.2f", daysLeft, spot.last(), strk),
+                    exp, strk, Double.NaN, Double.NaN, Double.NaN, sign, orders));
+        }
+
+        // Early assignment monitor for short straddles: ITM short option with extrinsic value < $0.10
+        if (sign < 0) {
+            Optional<MarketSnapshot> callQuote = chains.optionQuote(openCall);
+            Optional<MarketSnapshot> putQuote = chains.optionQuote(openPut);
+            if (callQuote.isPresent() && spot.last() > strk) {
+                double intrinsic = spot.last() - strk;
+                double extrinsic = callQuote.get().last() - intrinsic;
+                if (extrinsic < 0.10) {
+                    closeStraddle(orders);
+                    return record(new Decision(now, "CLOSE", String.format(Locale.ROOT,
+                            "early assignment risk: short ITM call extrinsic value $%.2f < $0.10", extrinsic),
+                            exp, strk, Double.NaN, Double.NaN, Double.NaN, sign, orders));
+                }
+            }
+            if (putQuote.isPresent() && spot.last() < strk) {
+                double intrinsic = strk - spot.last();
+                double extrinsic = putQuote.get().last() - intrinsic;
+                if (extrinsic < 0.10) {
+                    closeStraddle(orders);
+                    return record(new Decision(now, "CLOSE", String.format(Locale.ROOT,
+                            "early assignment risk: short ITM put extrinsic value $%.2f < $0.10", extrinsic),
+                            exp, strk, Double.NaN, Double.NaN, Double.NaN, sign, orders));
+                }
+            }
+        }
+
+        Edge edge = edgeFor(exp, strk, spot.last(), t);
         if (edge == null) {
             return record(new Decision(now, "HOLD", "cannot evaluate the open straddle (no quotes or surface); holding",
-                    openExpiry, openStrike, Double.NaN, Double.NaN, Double.NaN, sign, orders));
+                    exp, strk, Double.NaN, Double.NaN, Double.NaN, sign, orders));
         }
         // A short straddle (sign -1) was opened on a positive edge, a long one on a negative edge: the trade has done
         // its work once the edge has crossed back to zero (sign * edge >= 0) or come inside half the band.
         if (sign * edge.value() >= 0.0 || Math.abs(edge.value()) < params.volEdge() / 2.0) {
             closeStraddle(orders);
             return record(new Decision(now, "CLOSE", String.format(Locale.ROOT, "edge reverted inside half the band (%.2f pts)", 100 * params.volEdge() / 2.0),
-                    openExpiry, openStrike, edge.marketIv(), edge.referenceIv(), edge.value(), sign, orders));
+                    exp, strk, edge.marketIv(), edge.referenceIv(), edge.value(), sign, orders));
         }
         return record(new Decision(now, "HOLD", sign < 0 ? "short straddle; market still rich to the reference" : "long straddle; market still cheap to the reference",
-                openExpiry, openStrike, edge.marketIv(), edge.referenceIv(), edge.value(), sign, orders));
+                exp, strk, edge.marketIv(), edge.referenceIv(), edge.value(), sign, orders));
     }
 
     private void closeStraddle(List<String> orders) {
@@ -267,20 +334,47 @@ public final class VolSpreadStrategy {
         if (edge == null) {
             return record(new Decision(now, "WAIT", lastEdgeProblem, front, strike, Double.NaN, Double.NaN, Double.NaN, 0, orders));
         }
-        if (Math.abs(edge.value()) <= params.volEdge()) {
-            return record(new Decision(now, "HOLD", String.format(Locale.ROOT, "edge within the %.2f-point band", 100 * params.volEdge()),
+        double hurdle = Math.max(params.volEdge(), edge.breakEvenEdge());
+        if (Math.abs(edge.value()) <= hurdle) {
+            String reason = edge.breakEvenEdge() > params.volEdge()
+                    ? String.format(Locale.ROOT, "edge %.2f pts does not exceed break-even hurdle %.2f pts (round-trip half-spread+fees)/vega", 100 * Math.abs(edge.value()), 100 * hurdle)
+                    : String.format(Locale.ROOT, "edge within the %.2f-point band", 100 * params.volEdge());
+            return record(new Decision(now, "HOLD", reason + shadowReadout(front, strike, t, edge.marketIv()),
                     front, strike, edge.marketIv(), edge.referenceIv(), edge.value(), 0, orders));
         }
         boolean sell = edge.value() > 0.0;
         String call = OccSymbol.format(symbol, front, OptionType.CALL, strike);
         String put = OccSymbol.format(symbol, front, OptionType.PUT, strike);
+        MarketSnapshot callQuote = chains.optionQuote(call).orElse(null);
+        MarketSnapshot putQuote = chains.optionQuote(put).orElse(null);
+        if (callQuote == null || putQuote == null) {
+            orders.add((callQuote == null ? call : put) + ": no quote");
+            return record(new Decision(now, sell ? "SELL_STRADDLE_REJECTED" : "BUY_STRADDLE_REJECTED", String.join("; ", orders),
+                    front, strike, edge.marketIv(), edge.referenceIv(), edge.value(), 0, orders));
+        }
+
+        if (params.useMultiLeg()) {
+            Order legCall = new Order(0, !sell, params.contracts(), callQuote.last());
+            Order legPut = new Order(0, !sell, params.contracts(), putQuote.last());
+            OrderManager.OrderDecision dec = orderManager.submitMultiLeg(List.of(legCall, legPut), List.of(callQuote, putQuote), callQuote.last() + putQuote.last());
+            orders.add((!sell ? "BUY " : "SELL ") + params.contracts() + " " + call + "/" + put + " MLEG " + (dec.accepted() ? "filled" : "rejected: " + dec.message()));
+            if (!dec.accepted()) {
+                return record(new Decision(now, sell ? "SELL_STRADDLE_REJECTED" : "BUY_STRADDLE_REJECTED", dec.message(),
+                        front, strike, edge.marketIv(), edge.referenceIv(), edge.value(), 0, orders));
+            }
+            openCall = call;
+            openPut = put;
+            openExpiry = front;
+            openStrike = strike;
+            String action = sell ? "SELL_STRADDLE" : "BUY_STRADDLE";
+            String reason = "market " + (sell ? "rich" : "cheap") + " to the " + params.referenceModel() + " reference by more than the break-even hurdle";
+            return record(new Decision(now, action, reason, front, strike, edge.marketIv(), edge.referenceIv(), edge.value(), sell ? -1 : 1, orders));
+        }
+
+        // Sequential submission with fallback flattening for non-mleg transports
         int filledLegs = 0;
         for (String leg : new String[]{call, put}) {
-            MarketSnapshot quote = chains.optionQuote(leg).orElse(null);
-            if (quote == null) {
-                orders.add(leg + ": no quote");
-                break;
-            }
+            MarketSnapshot quote = leg.equals(call) ? callQuote : putQuote;
             if (!submit(new Order(0, !sell, params.contracts(), quote.last()), quote, orders)) {
                 break; // never leg into a straddle when the first leg already failed the gates
             }
@@ -308,6 +402,23 @@ public final class VolSpreadStrategy {
         return record(new Decision(now, action, reason, front, strike, edge.marketIv(), edge.referenceIv(), edge.value(), sell ? -1 : 1, orders));
     }
 
+    /**
+     * With a surface as the reference and a realized-vol forecast available, the forecast is only reported:
+     * " | RV forecast 14.2%, VRP +1.9 pts". Implied volatility sits above realized volatility on average, so a
+     * forecast used as the reference would call the market rich almost every day; this keeps the evidence
+     * coming without letting it trade.
+     */
+    private String shadowReadout(LocalDate expiry, double strike, double t, double marketIv) {
+        if (fairVolProvider == null || params.usesFairVolReference()) {
+            return "";
+        }
+        OptionalDouble fair = fairVolProvider.fairVol(symbol, expiry, strike, t);
+        if (fair.isEmpty() || !Double.isFinite(marketIv)) {
+            return "";
+        }
+        return String.format(Locale.ROOT, " | RV forecast %.1f%%, VRP %+.1f pts", 100 * fair.getAsDouble(), 100 * (marketIv - fair.getAsDouble()));
+    }
+
     private static OptionalDouble nearestStrike(OptionChain chain, double forward) {
         OptionalDouble best = OptionalDouble.empty();
         for (OptionQuote q : chain.quotes()) {
@@ -320,7 +431,7 @@ public final class VolSpreadStrategy {
 
     // ------------------------------------------------------------------ edge
 
-    private record Edge(double marketIv, double referenceIv, double value) {}
+    public record Edge(double marketIv, double referenceIv, double value, double breakEvenEdge) {}
 
     private String lastEdgeProblem = "";
 
@@ -328,9 +439,11 @@ public final class VolSpreadStrategy {
     private Edge edgeFor(LocalDate expiry, double strike, double spot, double t) {
         String call = OccSymbol.format(symbol, expiry, OptionType.CALL, strike);
         String put = OccSymbol.format(symbol, expiry, OptionType.PUT, strike);
+        MarketSnapshot callQuote = chains.optionQuote(call).orElse(null);
+        MarketSnapshot putQuote = chains.optionQuote(put).orElse(null);
         double sum = 0.0;
         for (String leg : new String[]{call, put}) {
-            MarketSnapshot quote = chains.optionQuote(leg).orElse(null);
+            MarketSnapshot quote = leg.equals(call) ? callQuote : putQuote;
             if (quote == null || !quote.hasBook()) {
                 lastEdgeProblem = leg + ": no two-sided quote";
                 return null;
@@ -354,14 +467,34 @@ public final class VolSpreadStrategy {
             sum += iv.getAsDouble();
         }
         double marketIv = sum / 2.0;
-        SurfaceFitter.Fit fit = surfaces.latest()
-                .map(s -> "SVI".equals(params.referenceModel()) ? s.svi() : s.ssvi()).orElse(null);
-        OptionalDouble reference = SurfaceFitter.volAt(fit, t, strike, 3.0);
-        if (reference.isEmpty()) {
-            lastEdgeProblem = "no " + params.referenceModel() + " reference surface for " + expiry;
-            return null;
+
+        // Cost-aware break-even edge: (half-spread + fees) / vega, paid on the way in and again on the way out,
+        // because every straddle this strategy opens it also closes (the edge reverting is the exit).
+        double callHalf = (callQuote.ask() - callQuote.bid()) / 2.0;
+        double putHalf = (putQuote.ask() - putQuote.bid()) / 2.0;
+        double oneWayFrictionPerShare = Math.max(0.0, callHalf) + Math.max(0.0, putHalf) + (2.0 * params.feePerContract() / 100.0);
+        double totalFrictionPerShare = 2.0 * oneWayFrictionPerShare;
+        double callVega = com.sbk.optionspricer.BlackScholesPricer.vega(spot, strike, t, riskFreeRate, marketIv, dividendYield);
+        double straddleVega = 2.0 * callVega;
+        double breakEvenEdge = straddleVega > 1e-6 ? (totalFrictionPerShare / straddleVega) : Double.POSITIVE_INFINITY;
+
+        OptionalDouble reference;
+        if (params.usesFairVolReference()) {
+            reference = fairVolProvider.fairVol(symbol, expiry, strike, t);
+            if (reference.isEmpty()) {
+                lastEdgeProblem = "no " + params.referenceModel() + " reference forecast for " + expiry;
+                return null;
+            }
+        } else {
+            SurfaceFitter.Fit fit = surfaces.latest()
+                    .map(s -> "SVI".equals(params.referenceModel()) ? s.svi() : s.ssvi()).orElse(null);
+            reference = SurfaceFitter.volAt(fit, t, strike, 3.0);
+            if (reference.isEmpty()) {
+                lastEdgeProblem = "no " + params.referenceModel() + " reference surface for " + expiry;
+                return null;
+            }
         }
-        return new Edge(marketIv, reference.getAsDouble(), marketIv - reference.getAsDouble());
+        return new Edge(marketIv, reference.getAsDouble(), marketIv - reference.getAsDouble(), breakEvenEdge);
     }
 
     // ------------------------------------------------------------------ hedge and orders

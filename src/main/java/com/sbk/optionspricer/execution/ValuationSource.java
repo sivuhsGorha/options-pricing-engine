@@ -8,4 +8,9 @@ public interface ValuationSource {
 
     /** Why there is no valuation yet, or the last problem; empty when all is well. */
     String valuationStatus();
+
+    /** The latest quantitative P&L attribution breakdown. */
+    default Optional<PnlAttribution> latestAttribution() {
+        return Optional.empty();
+    }
 }

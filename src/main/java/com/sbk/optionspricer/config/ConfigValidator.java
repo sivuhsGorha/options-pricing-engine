@@ -22,7 +22,8 @@ public final class ConfigValidator {
             "risk", java.util.Set.of("max_notional", "max_delta", "max_gamma", "max_vega", "max_position", "max_concentration",
                     "max_spread_bps", "min_volume"),
             "strategy", java.util.Set.of("mode", "trigger_pct", "base_quantity", "vol_edge", "reference_model", "hedge_band",
-                    "min_days_to_expiry", "max_days_to_expiry", "contracts", "option_interval_seconds"),
+                    "min_days_to_expiry", "max_days_to_expiry", "contracts", "option_interval_seconds",
+                    "fee_per_contract", "use_multi_leg", "fair_vol_model"),
             "execution", java.util.Set.of("symbol", "transport", "fill_wait_seconds", "slippage_bps", "contract_multiplier"));
     /** Renamed risk keys: they have their own, more helpful message below. */
     private static final java.util.Set<String> LEGACY_RISK_KEYS = java.util.Set.of("delta_limit", "gamma_limit", "vega_limit");
@@ -133,6 +134,14 @@ public final class ConfigValidator {
         if (!"SSVI".equalsIgnoreCase(reference) && !"SVI".equalsIgnoreCase(reference)) {
             errors.add("strategy.reference_model must be SSVI or SVI (found " + reference + ")");
         }
+        number(config, errors, "strategy.fee_per_contract", 0.65, v -> Double.isFinite(v) && v >= 0.0 && v <= 10.0,
+                "must be a dollar fee per contract between 0 and 10");
+        bool(config, errors, "strategy.use_multi_leg");
+        bool(config, errors, "market_data.record_chain_snapshots");
+        String fairVolModel = config.getString("strategy.fair_vol_model", "NONE");
+        if (!"NONE".equalsIgnoreCase(fairVolModel) && !"EWMA".equalsIgnoreCase(fairVolModel) && !"HAR".equalsIgnoreCase(fairVolModel)) {
+            errors.add("strategy.fair_vol_model must be NONE, EWMA or HAR (found " + fairVolModel + ")");
+        }
         try {
             if (config.getDouble("strategy.min_days_to_expiry", 14.0) <= config.getDouble("strategy.max_days_to_expiry", 7.0)) {
                 errors.add("strategy.min_days_to_expiry must exceed strategy.max_days_to_expiry, or a straddle would open and close at once");
@@ -168,6 +177,14 @@ public final class ConfigValidator {
             if (!ok.test(value)) {
                 errors.add(key + " " + rule + " (found " + value + ")");
             }
+        } catch (ConfigException e) {
+            errors.add(e.getMessage());
+        }
+    }
+
+    private static void bool(ConfigManager config, List<String> errors, String key) {
+        try {
+            config.getBoolean(key, false);
         } catch (ConfigException e) {
             errors.add(e.getMessage());
         }

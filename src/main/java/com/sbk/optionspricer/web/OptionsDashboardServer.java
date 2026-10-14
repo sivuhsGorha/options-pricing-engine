@@ -201,6 +201,11 @@ public class OptionsDashboardServer {
 
     /** The /api/pnl body: totals since the ledger began and today's P&L and drawdown, from the sampled record. */
     static java.util.Map<String, Object> pnlBody(com.sbk.optionspricer.execution.PnlHistory history, java.time.Instant now) {
+        return pnlBody(history, null, now);
+    }
+
+    static java.util.Map<String, Object> pnlBody(com.sbk.optionspricer.execution.PnlHistory history,
+                                                 com.sbk.optionspricer.execution.ValuationSource source, java.time.Instant now) {
         java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
         if (history == null) {
             body.put("ready", false);
@@ -220,6 +225,21 @@ public class OptionsDashboardServer {
         body.put("realizedPnl", Json.round(s.realized(), 2));
         body.put("unrealizedPnl", Json.round(s.unrealized(), 2));
         body.put("totalPnl", Json.round(s.total(), 2));
+
+        if (source != null && source.latestAttribution().isPresent()) {
+            var a = source.latestAttribution().get();
+            java.util.Map<String, Object> attr = new java.util.LinkedHashMap<>();
+            attr.put("deltaPnl", Json.round(a.deltaPnl(), 2));
+            attr.put("gammaThetaPnl", Json.round(a.gammaThetaPnl(), 2));
+            attr.put("vegaPnl", Json.round(a.vegaPnl(), 2));
+            attr.put("residualPnl", Json.round(a.residualPnl(), 2));
+            attr.put("cumulativeDeltaPnl", Json.round(a.cumulativeDeltaPnl(), 2));
+            attr.put("cumulativeGammaThetaPnl", Json.round(a.cumulativeGammaThetaPnl(), 2));
+            attr.put("cumulativeVegaPnl", Json.round(a.cumulativeVegaPnl(), 2));
+            attr.put("cumulativeResidualPnl", Json.round(a.cumulativeResidualPnl(), 2));
+            body.put("attribution", attr);
+        }
+
         java.util.Map<String, Object> day = new java.util.LinkedHashMap<>();
         day.put("date", s.day().toString());
         day.put("timezone", com.sbk.optionspricer.execution.PnlHistory.TRADING_DAY_ZONE.getId());
@@ -242,6 +262,35 @@ public class OptionsDashboardServer {
         }
         day.put("samples", samples);
         body.put("day", day);
+        return body;
+    }
+
+    static java.util.Map<String, Object> pnlAttributionBody(com.sbk.optionspricer.execution.ValuationSource source) {
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        if (source == null || source.latestAttribution().isEmpty()) {
+            body.put("ready", false);
+            body.put("status", "no attribution available yet");
+            return body;
+        }
+        var a = source.latestAttribution().get();
+        body.put("ready", true);
+        body.put("asOf", a.timestamp().toEpochMilli());
+        body.put("spotChange", Json.round(a.spotChange(), 4));
+        body.put("timeChangeYears", Json.round(a.timeChangeYears(), 6));
+        body.put("totalPnlChange", Json.round(a.totalPnlChange(), 2));
+        body.put("deltaPnl", Json.round(a.deltaPnl(), 2));
+        body.put("gammaPnl", Json.round(a.gammaPnl(), 2));
+        body.put("thetaPnl", Json.round(a.thetaPnl(), 2));
+        body.put("gammaThetaPnl", Json.round(a.gammaThetaPnl(), 2));
+        body.put("vegaPnl", Json.round(a.vegaPnl(), 2));
+        body.put("residualPnl", Json.round(a.residualPnl(), 2));
+        body.put("cumulativeTotalPnl", Json.round(a.cumulativeTotalPnl(), 2));
+        body.put("cumulativeDeltaPnl", Json.round(a.cumulativeDeltaPnl(), 2));
+        body.put("cumulativeGammaPnl", Json.round(a.cumulativeGammaPnl(), 2));
+        body.put("cumulativeThetaPnl", Json.round(a.cumulativeThetaPnl(), 2));
+        body.put("cumulativeGammaThetaPnl", Json.round(a.cumulativeGammaThetaPnl(), 2));
+        body.put("cumulativeVegaPnl", Json.round(a.cumulativeVegaPnl(), 2));
+        body.put("cumulativeResidualPnl", Json.round(a.cumulativeResidualPnl(), 2));
         return body;
     }
 
@@ -805,7 +854,13 @@ public class OptionsDashboardServer {
         server.createContext("/api/pnl", guarded(exchange -> {
             applySecurityHeaders(exchange, true, isSecureRequest(exchange));
             if (!authorizeApi(exchange)) return;
-            sendJson(exchange, 200, pnlBody(pnlHistory, java.time.Instant.now()));
+            sendJson(exchange, 200, pnlBody(pnlHistory, valuationSource, java.time.Instant.now()));
+        }));
+
+        server.createContext("/api/pnl/attribution", guarded(exchange -> {
+            applySecurityHeaders(exchange, true, isSecureRequest(exchange));
+            if (!authorizeApi(exchange)) return;
+            sendJson(exchange, 200, pnlAttributionBody(valuationSource));
         }));
 
         server.createContext("/api/control", guarded(exchange -> {

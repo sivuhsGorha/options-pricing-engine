@@ -140,6 +140,33 @@ class ConfigHardeningTest {
     }
 
     @Test
+    void theCostFairVolAndMultiLegSettingsAreKnownAndChecked() throws Exception {
+        List<String> valid = ConfigValidator.validate(ConfigManager.fromFile(yaml(
+                "market_data:\n  refresh_interval_seconds: 900\n  record_chain_snapshots: true\n"
+                        + "strategy:\n  fee_per_contract: 0.65\n  use_multi_leg: false\n  fair_vol_model: HAR\n")));
+        assertTrue(valid.isEmpty(), valid.toString());
+
+        List<String> bad = ConfigValidator.validate(ConfigManager.fromFile(yaml(
+                "market_data:\n  refresh_interval_seconds: 900\n  record_chain_snapshots: sometimes\n"
+                        + "strategy:\n  fee_per_contract: -1\n  use_multi_leg: maybe\n  fair_vol_model: GARCH\n")));
+        assertTrue(bad.stream().anyMatch(e -> e.contains("strategy.fee_per_contract")), bad.toString());
+        assertTrue(bad.stream().anyMatch(e -> e.contains("strategy.use_multi_leg")), bad.toString());
+        assertTrue(bad.stream().anyMatch(e -> e.contains("strategy.fair_vol_model") && e.contains("GARCH")), bad.toString());
+        assertTrue(bad.stream().anyMatch(e -> e.contains("market_data.record_chain_snapshots")), bad.toString());
+
+        List<String> misspelt = ConfigValidator.validate(ConfigManager.fromFile(yaml(BASE + "strategy:\n  fee_per_contrct: 0.65\n")));
+        assertTrue(misspelt.stream().anyMatch(e -> e.contains("strategy.fee_per_contrct") && e.contains("strategy.fee_per_contract")), misspelt.toString());
+    }
+
+    @Test
+    void aFairVolModelMayForecastButNeverBeTheReferenceThatTrades() throws Exception {
+        // The strategy would sell the market as rich on most days: implied vol sits above realized on average.
+        List<String> errors = ConfigValidator.validate(ConfigManager.fromFile(yaml(BASE + "strategy:\n  reference_model: HAR\n")));
+
+        assertTrue(errors.stream().anyMatch(e -> e.contains("strategy.reference_model")), errors.toString());
+    }
+
+    @Test
     void theShippedExampleConfigIsValidAndAdvertisesOnlySettingsTheApplicationReads() {
         ConfigManager example = ConfigManager.fromFile(java.nio.file.Path.of("config.example.yaml"));
 

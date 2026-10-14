@@ -223,6 +223,110 @@ public class OrderManager {
         return new OrderDecision(true, status, status == OrderStatus.FILLED ? "order filled" : "order partially filled", orderId);
     }
 
+    /**
+     * Submits a multi-leg complex order (e.g. straddle) atomically. All legs are admitted and executed together,
+     * eliminating legging risk and the need for flatten fallbacks.
+     */
+    public synchronized OrderDecision submitMultiLeg(java.util.List<Order> legOrders,
+                                                     java.util.List<com.sbk.optionspricer.market.MarketSnapshot> snapshots,
+                                                     double netLimitPrice) {
+        if (legOrders == null || snapshots == null || legOrders.isEmpty() || legOrders.size() != snapshots.size()) {
+            return new OrderDecision(false, OrderStatus.REJECTED, "legOrders and snapshots must not be null and match in size", -1L);
+        }
+
+        long orderId = sequence.getAndIncrement();
+        java.util.Optional<TradingHalt.Reason> halted = tradingHalt.reason();
+        if (halted.isPresent()) {
+            String reason = "trading halted: " + halted.get().message();
+            return reject(orderId, snapshots.get(0).status(), reason, reason);
+        }
+
+        java.util.List<String> symbols = new java.util.ArrayList<>();
+        java.util.List<Double> bids = new java.util.ArrayList<>();
+        java.util.List<Double> asks = new java.util.ArrayList<>();
+
+        for (int i = 0; i < legOrders.size(); i++) {
+            Order order = legOrders.get(i);
+            com.sbk.optionspricer.market.MarketSnapshot snapshot = snapshots.get(i);
+            com.sbk.optionspricer.market.MarketDataStatus mds = snapshot.status();
+
+            if (!marketDataPolicy.tradable().contains(mds)) {
+                String reason = "market data not tradable for leg " + snapshot.symbol() + ": " + mds;
+                return reject(orderId, mds, reason, reason);
+            }
+            if (snapshot.derivedQuoteAgeMs() > marketDataPolicy.maxQuoteAgeMs()) {
+                String reason = "market data too old for leg " + snapshot.symbol() + ": " + snapshot.derivedQuoteAgeMs() + "ms";
+                return reject(orderId, mds, reason, reason);
+            }
+
+            int multiplier = snapshot.multiplierOr(contractMultiplier);
+            String underlying = snapshot.underlying();
+
+            if (portfolioAdmission != null && positionTracker != null) {
+                int signedRequest = order.isBuy() ? order.quantity() : -order.quantity();
+                if (!portfolioAdmission.canAdmitOrder(snapshot.symbol(), signedRequest, order.price(), positionTracker, multiplier)) {
+                    return reject(orderId, mds, "failed portfolio risk admission on leg " + snapshot.symbol(), "order failed portfolio risk admission");
+                }
+            }
+
+            if (!riskFilter.checkRisk(order, underlying, snapshot.bid(), snapshot.ask(), snapshot.volume(), multiplier)) {
+                return reject(orderId, mds, "failed pre-trade risk validation on leg " + snapshot.symbol(), "order failed pre-trade risk validation");
+            }
+
+            symbols.add(snapshot.symbol());
+            bids.add(snapshot.bid());
+            asks.add(snapshot.ask());
+        }
+
+        ExecutionResult result = transport.transmitMultiLeg(legOrders, symbols, bids, asks, netLimitPrice);
+        if (!result.executed()) {
+            return reject(orderId, snapshots.get(0).status(), result.message(), "execution transport rejected multi-leg order: " + result.message());
+        }
+
+        int filled = result.filledQuantity();
+        OrderStatus status = filled == legOrders.get(0).quantity() ? OrderStatus.FILLED : OrderStatus.PARTIALLY_FILLED;
+
+        // The venue reports one net price for the whole order. Booking each leg at its own limit price would make the
+        // book's cost differ from what the account was charged, so the net price is split in proportion to the legs'
+        // limit prices. Only meaningful when every leg is on the same side (a pair of buys); otherwise limits stand.
+        double legScale = 1.0;
+        boolean sameSide = legOrders.stream().allMatch(o -> o.isBuy() == legOrders.get(0).isBuy());
+        double limitSum = legOrders.stream().mapToDouble(Order::price).sum();
+        if (sameSide && limitSum > 0.0 && Double.isFinite(result.executionPrice()) && result.executionPrice() > 0.0) {
+            legScale = result.executionPrice() / limitSum;
+        }
+
+        try {
+            if (positionTracker != null) {
+                for (int i = 0; i < legOrders.size(); i++) {
+                    Order order = legOrders.get(i);
+                    com.sbk.optionspricer.market.MarketSnapshot snapshot = snapshots.get(i);
+                    int mult = snapshot.multiplierOr(contractMultiplier);
+                    int signedQuantity = order.isBuy() ? filled : -filled;
+                    double bookedPrice = order.price() * legScale;
+                    positionTracker.applyFill(new PositionTracker.ExecutionFill(snapshot.symbol(), signedQuantity, mult, bookedPrice));
+                    double notional = (double) filled * bookedPrice * mult;
+                    riskFilter.recordFill(snapshot.underlying(), order.isBuy() ? notional : -notional);
+                }
+            }
+        } catch (RuntimeException e) {
+            tradingHalt.halt("multi-leg fill booking failed for order " + orderId + ": " + e.getMessage());
+            recordAudit(orderId, true, snapshots.get(0).status(), "EXECUTED_BOOKING_FAILED: " + e.getMessage(), result.executionPrice(), filled);
+            orderStatuses.put(orderId, status);
+            return new OrderDecision(true, status, "multi-leg executed but booking failed; trading halted", orderId);
+        }
+
+        recordAudit(orderId, true, snapshots.get(0).status(), "EXECUTED_MULTI_LEG", result.executionPrice(), filled);
+        orderStatuses.put(orderId, status);
+
+        try {
+            fillListener.run();
+        } catch (RuntimeException e) {
+            System.err.println("[ORDER MANAGER] post-fill listener failed: " + e.getMessage());
+        }
+        return new OrderDecision(true, status, "multi-leg order filled", orderId);
+    }
+
     private OrderDecision reject(long orderId, com.sbk.optionspricer.market.MarketDataStatus mds, String auditReason, String message) {
         recordAudit(orderId, false, mds, auditReason, 0.0, 0);
         orderStatuses.put(orderId, OrderStatus.REJECTED);

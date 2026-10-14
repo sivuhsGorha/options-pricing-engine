@@ -59,6 +59,65 @@ class AlpacaPaperTransportTest {
     }
 
     @Test
+    void dailyBarsComeBackOldestFirstWithTheirDatesAndCloses() {
+        // out of order on purpose: the caller is promised an ascending series
+        String body = "{\"bars\":["
+                + "{\"c\":776.50,\"h\":778.0,\"l\":775.0,\"n\":1000,\"o\":777.0,\"t\":\"2026-10-13T04:00:00Z\",\"v\":50000,\"vw\":776.9},"
+                + "{\"c\":778.10,\"h\":779.0,\"l\":776.0,\"n\":1200,\"o\":776.5,\"t\":\"2026-10-12T04:00:00Z\",\"v\":60000,\"vw\":777.4}"
+                + "],\"symbol\":\"SPY\",\"next_page_token\":null}";
+        FakeAlpaca fake = new FakeAlpaca().quote(body);
+
+        List<AlpacaPaperClient.DailyBar> bars = new AlpacaPaperClient(fake).dailyBars("spy", java.time.LocalDate.of(2026, 5, 1));
+
+        assertEquals(2, bars.size());
+        assertEquals(java.time.LocalDate.of(2026, 10, 12), bars.get(0).date());
+        assertEquals(778.10, bars.get(0).close(), 1e-9);
+        assertEquals(java.time.LocalDate.of(2026, 10, 13), bars.get(1).date());
+        String path = fake.dataCalls.get(0);
+        assertTrue(path.contains("/v2/stocks/SPY/bars"), path);
+        assertTrue(path.contains("timeframe=1Day") && path.contains("start=2026-05-01") && path.contains("adjustment=split"), path);
+    }
+
+    @Test
+    void noDailyBarsIsAnErrorNeverAnEmptySeriesThatLooksLikeACalmMarket() {
+        FakeAlpaca fake = new FakeAlpaca().quote("{\"bars\":[],\"symbol\":\"SPY\",\"next_page_token\":null}");
+
+        assertThrows(IllegalStateException.class, () -> new AlpacaPaperClient(fake).dailyBars("SPY", java.time.LocalDate.of(2026, 5, 1)));
+    }
+
+    @Test
+    void aMultiLegBuyGoesAsOneMlegOrderWithAnIntentOnEveryLeg() {
+        FakeAlpaca fake = new FakeAlpaca().post(200, FakeAlpaca.orderJson(ID, "filled", 1, 1, 8.10, "", "buy"));
+
+        ExecutionResult r = transport(fake).transmitMultiLeg(
+                List.of(new Order(0, true, 1, 4.4), new Order(0, true, 1, 3.7)),
+                List.of("SPY261120C00780000", "SPY261120P00780000"), List.of(4.3, 3.6), List.of(4.5, 3.8), 8.10);
+
+        assertTrue(r.executed(), r.message());
+        assertEquals(8.10, r.executionPrice(), 1e-9);
+        assertEquals(1, fake.calls.size(), "one order, not one per leg");
+        String request = fake.calls.get(0);
+        assertTrue(request.contains("\"order_class\":\"mleg\""), request);
+        assertTrue(request.contains("\"limit_price\":\"8.10\""), request);
+        assertEquals(2, request.split("\"position_intent\":\"buy_to_open\"", -1).length - 1, "both legs open long: " + request);
+    }
+
+    @Test
+    void aMultiLegCreditIsRefusedBeforeItReachesTheVenue() {
+        // Alpaca documents no sign convention for a net credit, and a short straddle is two uncovered short options,
+        // which a multi-leg order must not be. Until a paper order proves it, nothing like it is sent.
+        FakeAlpaca fake = new FakeAlpaca();
+
+        ExecutionResult r = transport(fake).transmitMultiLeg(
+                List.of(new Order(0, false, 1, 4.4), new Order(0, false, 1, 3.7)),
+                List.of("SPY261120C00780000", "SPY261120P00780000"), List.of(4.3, 3.6), List.of(4.5, 3.8), 8.10);
+
+        assertFalse(r.executed());
+        assertTrue(r.message().contains("credit"), r.message());
+        assertEquals(0, fake.calls.size(), "no request may leave for the venue");
+    }
+
+    @Test
     void aSellIsPricedAtTheBidAndAnOrderWithoutABookAtItsOwnPrice() {
         FakeAlpaca fake = new FakeAlpaca().post(200, FakeAlpaca.orderJson(ID, "filled", 3, 3, 9.85, "SPY261120C00780000", "sell"));
         transport(fake).transmit(new Order(0, false, 3, 9.9), "SPY261120C00780000", 9.85, 9.95);

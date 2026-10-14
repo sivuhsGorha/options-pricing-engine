@@ -6,6 +6,7 @@ market_data:
   sources: [cboe]
   refresh_interval_seconds: 900      # how often the surface is re-fitted
   quote_refresh_seconds: 60          # how often the option chain is reloaded between re-fits; a quote is STALE 120 s after the feed stamped it
+  record_chain_snapshots: true       # keep a gzip snapshot of every chain the feed changes, under data/chain_snapshots, for replay and backtests
   risk_free_rate: 0.05               # flat rate used for forwards and pricing
   dividend_yield: 0.012              # continuous yield of the underlying (SPY pays ~1.2%)
 volatility:
@@ -33,6 +34,9 @@ strategy:
   min_days_to_expiry: 14             # never open on an expiry closer than this
   max_days_to_expiry: 7              # close an open straddle when its expiry is this close
   contracts: 1                       # straddle size per leg
+  fee_per_contract: 0.65             # dollars per contract per leg; the edge must also beat (half-spread + fee) / vega, in and out
+  fair_vol_model: NONE               # NONE | EWMA | HAR: a realized-vol forecast shown beside each hold (needs ALPACA keys for daily closes); never trades
+  use_multi_leg: false               # EXPERIMENTAL: send a buy straddle as one Alpaca order; a short leg is refused by the transport
   option_interval_seconds: 30        # how often the straddle is evaluated (the quotes it reads are reloaded every quote_refresh_seconds)
   # momentum parameters
   base_quantity: 10
