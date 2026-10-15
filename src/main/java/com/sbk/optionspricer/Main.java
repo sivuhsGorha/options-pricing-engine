@@ -46,7 +46,7 @@ public class Main {
             return;
         }
         if (args.length > 0 && "--test-buy-straddle".equals(args[0])) {
-            System.exit(runTestBuyStraddle());
+            System.exit(runTestBuyStraddle(args.length > 1 && "--confirm".equals(args[1])));
             return;
         }
         System.out.println("=========================================================================");
@@ -111,7 +111,25 @@ public class Main {
         }
     }
 
+    /** The symbol the replay asks Alpaca for daily closes of; it is the symbol the engine trades by default. */
+    private static final String REPLAY_SYMBOL = "SPY";
+
+    /** The replay with real daily closes from Alpaca's bars; needs ALPACA_KEY_ID and ALPACA_SECRET in .env. */
     public static int runReplay(java.nio.file.Path targetDir) {
+        return runReplay(targetDir, start -> {
+            com.sbk.optionspricer.execution.AlpacaPaperClient client = com.sbk.optionspricer.execution.AlpacaPaperClient.fromEnv();
+            return client.dailyBars(REPLAY_SYMBOL, start).stream()
+                    .map(b -> new com.sbk.optionspricer.volatility.DailyCloseFeed.DailyClose(b.date(), b.close())).toList();
+        });
+    }
+
+    /**
+     * Replays the recorded chains against a realized-volatility forecast built from real daily closes. It reports
+     * what the replay covers, and stops without a result when it has no real closes: a forecast made up for the
+     * purpose would make every number below it meaningless.
+     */
+    public static int runReplay(java.nio.file.Path targetDir,
+                                java.util.function.Function<java.time.LocalDate, java.util.List<com.sbk.optionspricer.volatility.DailyCloseFeed.DailyClose>> closesSource) {
         System.out.println("=========================================================================");
         System.out.println("              AURA-OPT RECORDED CHAIN REPLAY & VRP BACKTEST              ");
         System.out.println("=========================================================================");
@@ -124,68 +142,89 @@ public class Main {
             System.err.println("[REPLAY] Failed to load snapshots: " + e.getMessage());
             return 1;
         }
-
         if (snapshots.isEmpty()) {
             System.err.println("[REPLAY] No snapshot files (.csv.gz) found under " + targetDir);
             System.err.println("[REPLAY] Note: In Docker, recorded snapshots reside in volume 'engine-data' at /app/data/chain_snapshots.");
             return 1;
         }
 
-        System.out.println("[REPLAY] Loaded " + snapshots.size() + " chain snapshots ("
-                + snapshots.get(0).at() + " to " + snapshots.get(snapshots.size() - 1).at() + ")");
+        long moments = snapshots.stream().map(com.sbk.optionspricer.risk.VrpSignalBacktester.Snapshot::at).distinct().count();
+        long days = snapshots.stream().map(s -> java.time.LocalDate.ofInstant(s.at(), java.time.ZoneOffset.UTC)).distinct().count();
+        java.time.LocalDate firstDay = java.time.LocalDate.ofInstant(snapshots.get(0).at(), java.time.ZoneOffset.UTC);
+        System.out.printf(java.util.Locale.ROOT, "[REPLAY] Loaded %d chains at %d moments over %d trading day%s (%s to %s)%n",
+                snapshots.size(), moments, days, days == 1 ? "" : "s", snapshots.get(0).at(), snapshots.get(snapshots.size() - 1).at());
 
-        com.sbk.optionspricer.volatility.RealizedVolForecast forecast =
-                new com.sbk.optionspricer.volatility.RealizedVolForecast(com.sbk.optionspricer.volatility.RealizedVolForecast.Model.EWMA);
-        double spot = snapshots.get(0).chain().spot();
-        for (int i = 0; i < 30; i++) {
-            forecast.observeSpot(spot * (1.0 + 0.005 * Math.sin(i * 0.4)));
+        List<com.sbk.optionspricer.volatility.DailyCloseFeed.DailyClose> closes;
+        try {
+            closes = closesSource.apply(firstDay.minusDays(400));
+        } catch (RuntimeException e) {
+            System.err.println("[REPLAY] Cannot get real daily closes, which the realized-volatility forecast needs: " + e.getMessage());
+            System.err.println("[REPLAY] The replay never invents closes. Put ALPACA_KEY_ID and ALPACA_SECRET in .env and run it from the project folder.");
+            return 2;
         }
+        long usable = closes.stream().filter(c -> c.date().isBefore(firstDay)).count();
+        if (usable < com.sbk.optionspricer.volatility.RealizedVolForecast.MIN_EWMA_RETURNS + 1) {
+            System.err.println("[REPLAY] Only " + usable + " daily closes before " + firstDay + "; the forecast needs at least "
+                    + (com.sbk.optionspricer.volatility.RealizedVolForecast.MIN_EWMA_RETURNS + 1) + ".");
+            return 2;
+        }
+        System.out.println("[REPLAY] Realized vol: EWMA (lambda 0.94) of " + usable + " real daily closes; each day's forecast uses only earlier days.");
 
+        var model = com.sbk.optionspricer.volatility.RealizedVolForecast.Model.EWMA;
         var rawResult = com.sbk.optionspricer.risk.VrpSignalBacktester.run(
-                snapshots, forecast, new com.sbk.optionspricer.risk.VrpSignalBacktester.ReplayConfig(0.01, 1, 0.65, false, 0, false));
-
+                snapshots, closes, model, new com.sbk.optionspricer.risk.VrpSignalBacktester.ReplayConfig(0.01, 1, 0.65, false, 0, false));
         var demeanedResult = com.sbk.optionspricer.risk.VrpSignalBacktester.run(
-                snapshots, forecast, new com.sbk.optionspricer.risk.VrpSignalBacktester.ReplayConfig(0.01, 1, 0.65, true, 20, false));
-
+                snapshots, closes, model, new com.sbk.optionspricer.risk.VrpSignalBacktester.ReplayConfig(0.01, 1, 0.65, true, 20, false));
         var hurdleResult = com.sbk.optionspricer.risk.VrpSignalBacktester.run(
-                snapshots, forecast, new com.sbk.optionspricer.risk.VrpSignalBacktester.ReplayConfig(0.01, 1, 0.65, true, 20, true));
+                snapshots, closes, model, new com.sbk.optionspricer.risk.VrpSignalBacktester.ReplayConfig(0.01, 1, 0.65, true, 20, true));
 
-        System.out.println("\n-----------------------------------------------------------------------------------------------");
-        System.out.println(" EMPIRICAL RESEARCH RESULTS: VRP PREDICTABILITY & FRICTION HURDLES");
-        System.out.println("-----------------------------------------------------------------------------------------------");
-        System.out.printf(java.util.Locale.ROOT, "Average ATM VRP Observed: %+.2f vol points\n\n", 100 * rawResult.meanVrp());
+        System.out.println();
+        System.out.printf(java.util.Locale.ROOT, "Moments with a usable straddle and forecast: %d of %d. Mean ATM VRP over them: %+.2f vol points (implied minus forecast).%n%n",
+                rawResult.evaluatedSteps(), rawResult.totalSnapshots(), 100 * rawResult.meanVrp());
+        System.out.println("| Configuration (1 contract, fills at the touch, 0.65 a contract) | Trades | Win Rate | Total P&L   | Avg P&L/Trd | Max Drawdown |");
+        System.out.println("| :-------------------------------------------------------------- | -----: | -------: | ----------: | ----------: | -----------: |");
+        printReplayRow("1. Raw VRP (the level itself)", rawResult);
+        printReplayRow("2. Demeaned VRP (vs 20-moment average)", demeanedResult);
+        printReplayRow("3. Demeaned VRP + cost hurdle", hurdleResult);
+        System.out.printf(java.util.Locale.ROOT, "%nThe cost hurdle (round-trip half-spread + fees over vega) rejected %d candidate entries in row 3.%n", hurdleResult.hurdlesRejected());
 
-        System.out.println("| Model / Strategy Configuration          | Trades | Win Rate | Total P&L   | Avg P&L/Trd | Max Drawdown |");
-        System.out.println("| :-------------------------------------- | -----: | -------: | ----------: | ----------: | -----------: |");
-        printReplayRow("1. Raw VRP (Structural Level)", rawResult);
-        printReplayRow("2. Demeaned VRP (vs 20-period avg)", demeanedResult);
-        printReplayRow("3. Demeaned VRP + Cost Hurdle Filter", hurdleResult);
-
-        System.out.println("\nQuantitative Synthesis:");
-        System.out.printf(java.util.Locale.ROOT, "1. Structural VRP level (%+.2f pts): Alone it reflects the permanent variance risk premium.\n", 100 * rawResult.meanVrp());
-        System.out.println("2. Demeaned VRP (deviation from recent mean): Isolates relative volatility expansion/compression.");
-        System.out.printf(java.util.Locale.ROOT, "3. Cost Hurdle Filter: %d trades passed break-even vega hurdle; %d trades filtered by friction.\n",
-                hurdleResult.hurdlesPassed(), hurdleResult.hurdlesRejected());
-
+        System.out.println();
+        if (days < 20) {
+            System.out.printf(java.util.Locale.ROOT, "TOO FEW DAYS: %d trading day%s of snapshots is far too few to say whether any signal predicts anything. "
+                    + "Read the figures as a check of the mechanics, not as evidence.%n", days, days == 1 ? "" : "s");
+        }
+        System.out.println("Not modelled: slippage beyond the touch, partial fills, assignment, a delta hedge; the forward and the rate are assumed.");
         return 0;
     }
 
     private static void printReplayRow(String label, com.sbk.optionspricer.risk.VrpSignalBacktester.VrpBacktestResult r) {
-        System.out.printf(java.util.Locale.ROOT, "| %-39s | %6d | %7.1f%% | $%10.2f | $%10.2f | $%11.2f |\n",
+        System.out.printf(java.util.Locale.ROOT, "| %-63s | %6d | %7.1f%% | $%10.2f | $%10.2f | $%11.2f |\n",
                 label, r.totalTrades(), 100 * r.winRate(), r.totalPnl(), r.averagePnlPerTrade(), r.maxDrawdown());
     }
 
-    public static int runTestBuyStraddle() {
+    /** The paper multi-leg order test from the command line: a dry run unless {@code confirm} is true. */
+    public static int runTestBuyStraddle(boolean confirm) {
+        try {
+            return runTestBuyStraddle(com.sbk.optionspricer.execution.AlpacaPaperClient.fromEnv(), confirm);
+        } catch (Exception e) {
+            System.err.println("[ERROR] Test buy-straddle failed: " + e.getMessage());
+            return 1;
+        }
+    }
+
+    /**
+     * Builds a one-contract buy straddle at the venue's touch and, only when {@code confirm} is true, sends it to the
+     * Alpaca paper account as one multi-leg order. It bypasses the engine, so the engine's ledger never records the fill and
+     * its reconciliation will halt trading until the position is flattened: a dry run is the default for that reason.
+     */
+    public static int runTestBuyStraddle(com.sbk.optionspricer.execution.AlpacaPaperClient client, boolean confirm) {
         System.out.println("=========================================================================");
         System.out.println("          ALPACA PAPER MULTI-LEG ORDER PATH TEST (BUY STRADDLE)          ");
         System.out.println("=========================================================================");
         try {
-            com.sbk.optionspricer.execution.AlpacaPaperClient client =
-                    com.sbk.optionspricer.execution.AlpacaPaperClient.fromEnv();
             var account = client.account();
             System.out.println("[ACCOUNT] Status: " + account.status() + " | Options Level: " + account.optionsTradingLevel()
                     + " | Buying Power: " + String.format(java.util.Locale.ROOT, "%.2f %s", account.buyingPower(), account.currency()));
-
             if (account.tradingBlocked()) {
                 System.err.println("[ERROR] Account trading is blocked at venue.");
                 return 1;
@@ -200,28 +239,31 @@ public class Main {
             while (expiry.getDayOfWeek() != java.time.DayOfWeek.FRIDAY) {
                 expiry = expiry.plusDays(1);
             }
-
             String callSymbol = com.sbk.optionspricer.instruments.OccSymbol.format("SPY", expiry, OptionType.CALL, strike);
             String putSymbol = com.sbk.optionspricer.instruments.OccSymbol.format("SPY", expiry, OptionType.PUT, strike);
-
             System.out.println("[STRADDLE] Candidate legs: " + callSymbol + " and " + putSymbol);
             var callQuote = client.latestQuote(callSymbol);
             var putQuote = client.latestQuote(putSymbol);
-
             double limitPrice = Math.round((callQuote.ask() + putQuote.ask()) * 100.0) / 100.0;
             System.out.printf(java.util.Locale.ROOT, "[TOUCH] Call Ask: %.2f | Put Ask: %.2f | Net Debit Limit: %.2f\n",
                     callQuote.ask(), putQuote.ask(), limitPrice);
 
+            if (!confirm) {
+                System.out.println("[DRY RUN] No order was sent. This would send a 1-contract multi-leg buy straddle to the Alpaca PAPER account.");
+                System.out.println("[DRY RUN] It bypasses the engine, so the engine's ledger will not record the fill and its reconciliation will halt");
+                System.out.println("[DRY RUN] trading until the position is flattened on Alpaca. Stop the engine first (docker compose stop), then add --confirm.");
+                return 0;
+            }
+
             List<com.sbk.optionspricer.execution.AlpacaPaperClient.OptionLeg> legs = List.of(
                     new com.sbk.optionspricer.execution.AlpacaPaperClient.OptionLeg(callSymbol, 1, true),
-                    new com.sbk.optionspricer.execution.AlpacaPaperClient.OptionLeg(putSymbol, 1, true)
-            );
-
+                    new com.sbk.optionspricer.execution.AlpacaPaperClient.OptionLeg(putSymbol, 1, true));
             String clientOrderId = "test_straddle_" + System.currentTimeMillis();
             System.out.println("[SUBMIT] Sending 1-contract multi-leg limit order to Alpaca Paper (ID: " + clientOrderId + ")...");
             var orderState = client.submitMultiLegOrder(legs, 1, limitPrice, clientOrderId);
             System.out.println("[RESPONSE] Alpaca Order ID: " + orderState.id() + " | Status: " + orderState.status());
-
+            System.out.println("[NOTE] The engine's ledger does not know about this order. If it fills, flatten the position on Alpaca's paper dashboard,");
+            System.out.println("[NOTE] or the engine's reconciliation will halt trading at its next check.");
             return 0;
         } catch (Exception e) {
             System.err.println("[ERROR] Test buy-straddle failed: " + e.getMessage());

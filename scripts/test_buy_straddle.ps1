@@ -1,27 +1,32 @@
-# Safe verification script for testing Alpaca Paper Multi-Leg Order Path (Buy Straddle)
-# Complies with Alpaca Level 3 permissions (long debit straddles only; naked short straddles are strictly prohibited).
+# Verifies the Alpaca PAPER multi-leg order path with a one-contract buy straddle at the venue's touch.
+#
+# By default this is a DRY RUN: it prints the account, the quotes and the order it would send, and sends nothing.
+# With -Place it sends ONE REAL ORDER to the paper account. That order bypasses the engine, so the engine's ledger never
+# records the fill and its reconciliation will HALT TRADING until you flatten the position on Alpaca's paper dashboard.
+# Stop the engine first (docker compose stop), and run it only with the market open.
+#
+#   .\scripts\test_buy_straddle.ps1                  dry run
+#   .\scripts\test_buy_straddle.ps1 -Place           place the order (after docker compose stop)
+#   .\scripts\test_buy_straddle.ps1 -Docker          dry run inside the running container
 
 param(
+    [switch]$Place = $false,
     [switch]$Docker = $false
 )
 
 $ErrorActionPreference = "Stop"
-
-Write-Host "=========================================================================" -ForegroundColor Cyan
-Write-Host "          ALPACA PAPER MULTI-LEG ORDER PATH VERIFICATION                " -ForegroundColor Cyan
-Write-Host "=========================================================================" -ForegroundColor Cyan
+$extra = @()
+if ($Place) { $extra += "--confirm" }
 
 if ($Docker) {
-    Write-Host "[MODE] Executing inside Docker container options-pricing-engine-options-engine-1..." -ForegroundColor Yellow
-    docker compose exec options-engine java --enable-preview --add-modules jdk.incubator.vector -jar /app/options-pricing-engine-1.0.0-SNAPSHOT.jar --test-buy-straddle
+    if ($Place) { throw "-Place with -Docker would trade from inside the running engine's container. Stop the engine and run it locally instead." }
+    docker compose exec options-engine java --add-modules jdk.incubator.vector -jar /app/app.jar --test-buy-straddle @extra
 } else {
     $JarPath = Join-Path $PSScriptRoot "..\target\options-pricing-engine-1.0.0-SNAPSHOT.jar"
     if (-not (Test-Path $JarPath)) {
-        Write-Host "[BUILD] Packaging jar before test..." -ForegroundColor Yellow
-        Push-Location (Join-Path $PSScriptRoot "..")
-        mvn -B -DskipTests package
-        Pop-Location
+        throw "No jar at $JarPath. Build it first: mvn -B -DskipTests package"
     }
-    Write-Host "[MODE] Executing local jar $JarPath..." -ForegroundColor Yellow
-    java --enable-preview --add-modules jdk.incubator.vector -jar $JarPath --test-buy-straddle
+    # run from the project folder so .env (the Alpaca keys) is found
+    Push-Location (Join-Path $PSScriptRoot "..")
+    try { java --add-modules jdk.incubator.vector -jar $JarPath --test-buy-straddle @extra } finally { Pop-Location }
 }

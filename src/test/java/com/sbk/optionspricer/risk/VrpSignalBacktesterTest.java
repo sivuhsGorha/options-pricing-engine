@@ -38,6 +38,110 @@ class VrpSignalBacktesterTest {
         return new VrpSignalBacktester.Snapshot(T0.plusSeconds(60L * minute), new OptionChain("SPY", EXPIRY, 500.0, quotes));
     }
 
+    /** A chain for any expiry; {@code scale} multiplies its prices so a mix-up between expiries shows up as a big number. */
+    private static VrpSignalBacktester.Snapshot snapshotOn(LocalDate expiry, int minute, double iv, double halfSpread, double scale) {
+        double callPrice = scale * 14.0 * (iv / 0.20);
+        double putPrice = scale * 13.5 * (iv / 0.20);
+        List<OptionQuote> quotes = List.of(
+                new OptionQuote("SPY", expiry, 500.0, OptionType.CALL, callPrice - halfSpread, callPrice + halfSpread, iv, 100, 1000),
+                new OptionQuote("SPY", expiry, 500.0, OptionType.PUT, putPrice - halfSpread, putPrice + halfSpread, iv, 100, 1000));
+        return new VrpSignalBacktester.Snapshot(T0.plusSeconds(60L * minute), new OptionChain("SPY", expiry, 500.0, quotes));
+    }
+
+    @Test
+    void severalExpiriesAtOneInstantAreOneTimeStepAndAnOpenPositionIsMarkedOnItsOwnExpiry() {
+        // The recorder keeps every expiry of a chain in one file, so the reader returns one snapshot per expiry with
+        // the same timestamp. They are one moment in time, not consecutive ones: opening on one expiry and closing
+        // against another produced losses of thousands of dollars on a single contract.
+        LocalDate far = LocalDate.of(2027, 1, 15);
+        List<VrpSignalBacktester.Snapshot> sequence = List.of(
+                snapshotOn(EXPIRY, 0, 0.26, 0.10, 1.0), snapshotOn(far, 0, 0.26, 0.10, 3.0),
+                snapshotOn(EXPIRY, 1, 0.17, 0.10, 1.0), snapshotOn(far, 1, 0.17, 0.10, 3.0));
+
+        VrpSignalBacktester.VrpBacktestResult result = VrpSignalBacktester.run(sequence, forecastFromDailyCloses(), 0.02, 1, 0.65);
+
+        assertEquals(2, result.totalSnapshots(), "two moments in time, each with two expiries");
+        assertEquals(1, result.totalTrades());
+        assertEquals(EXPIRY, result.trades().get(0).expiry(), "the front expiry at least 14 days out");
+        double soldAtBids = (18.2 - 0.10) + (17.55 - 0.10);       // iv 26%
+        double boughtBackAtAsks = (11.9 + 0.10) + (11.475 + 0.10); // iv 17%
+        assertEquals((soldAtBids - boughtBackAtAsks) * 100.0 - 4 * 0.65, result.totalPnl(), 1e-6);
+    }
+
+    @Test
+    void aPositionIsMarkedAtItsOwnStrikeNotAtWhicheverStrikeIsAtTheMoneyNow() {
+        // Spot rises from 500 to 520 between the two steps, so the at-the-money strike moves from 500 to 520.
+        double iv0 = 0.26, iv1 = 0.17;
+        List<OptionQuote> step0 = List.of(
+                new OptionQuote("SPY", EXPIRY, 500.0, OptionType.CALL, 18.1, 18.3, iv0, 100, 1000),
+                new OptionQuote("SPY", EXPIRY, 500.0, OptionType.PUT, 17.45, 17.65, iv0, 100, 1000));
+        List<OptionQuote> step1 = List.of(
+                new OptionQuote("SPY", EXPIRY, 500.0, OptionType.CALL, 30.0, 30.2, iv1, 100, 1000),   // the position's strike
+                new OptionQuote("SPY", EXPIRY, 500.0, OptionType.PUT, 0.5, 0.7, iv1, 100, 1000),
+                new OptionQuote("SPY", EXPIRY, 520.0, OptionType.CALL, 14.0, 14.2, iv1, 100, 1000),   // the new at-the-money strike
+                new OptionQuote("SPY", EXPIRY, 520.0, OptionType.PUT, 13.5, 13.7, iv1, 100, 1000));
+        List<VrpSignalBacktester.Snapshot> sequence = List.of(
+                new VrpSignalBacktester.Snapshot(T0, new OptionChain("SPY", EXPIRY, 500.0, step0)),
+                new VrpSignalBacktester.Snapshot(T0.plusSeconds(60), new OptionChain("SPY", EXPIRY, 520.0, step1)));
+
+        VrpSignalBacktester.VrpBacktestResult result = VrpSignalBacktester.run(sequence, forecastFromDailyCloses(), 0.02, 1, 0.65);
+
+        assertEquals(1, result.totalTrades());
+        assertEquals(500.0, result.trades().get(0).strike(), 1e-9);
+        assertEquals(30.2 + 0.7, result.trades().get(0).exitStraddlePrice(), 1e-9, "bought back at the asks of strike 500, not of 520");
+        assertEquals(((18.1 + 17.45) - (30.2 + 0.7)) * 100.0 - 4 * 0.65, result.totalPnl(), 1e-6);
+    }
+
+    @Test
+    void aPositionStillOpenWhenItsExpiryStopsAppearingIsClosedAtTheLastQuotesSeenNotAtItsEntryPrice() {
+        LocalDate far = LocalDate.of(2027, 1, 15);
+        List<VrpSignalBacktester.Snapshot> sequence = List.of(
+                snapshotOn(EXPIRY, 0, 0.26, 0.10, 1.0),
+                snapshotOn(far, 1, 0.26, 0.10, 3.0)); // the front expiry is not in the second step
+
+        VrpSignalBacktester.VrpBacktestResult result = VrpSignalBacktester.run(sequence, forecastFromDailyCloses(), 0.02, 1, 0.65);
+
+        assertEquals(1, result.totalTrades());
+        double crossedSpread = 4 * 0.10 * 100.0;
+        assertEquals(-(crossedSpread + 4 * 0.65), result.totalPnl(), 1e-6,
+                "sold at the bids and marked at the asks last seen: the spread is lost, not just the fees");
+    }
+
+    @Test
+    void anExpiryUnderTheMinimumDaysIsNeverOpenedOn() {
+        LocalDate near = LocalDate.of(2026, 10, 19); // five days out
+        VrpSignalBacktester.VrpBacktestResult result = VrpSignalBacktester.run(
+                List.of(snapshotOn(near, 0, 0.26, 0.10, 1.0), snapshotOn(near, 1, 0.26, 0.10, 1.0)), forecastFromDailyCloses(), 0.02, 1, 0.65);
+
+        assertEquals(0, result.totalTrades());
+        assertEquals(0, result.evaluatedSteps());
+    }
+
+    @Test
+    void theForecastOnADayUsesOnlyEarlierClosesNeverThatDaysOwn() {
+        LocalDate day = LocalDate.of(2026, 10, 14);
+        List<com.sbk.optionspricer.volatility.DailyCloseFeed.DailyClose> closes = new ArrayList<>();
+        double price = 500.0;
+        for (int k = 30; k >= 1; k--) {
+            price *= 1.0 + (k % 2 == 0 ? 0.01 : -0.01);
+            closes.add(new com.sbk.optionspricer.volatility.DailyCloseFeed.DailyClose(day.minusDays(k), price));
+        }
+        List<VrpSignalBacktester.Snapshot> sequence = List.of(snapshot(0, 0.26, 0.10), snapshot(1, 0.26, 0.10));
+        VrpSignalBacktester.ReplayConfig config = new VrpSignalBacktester.ReplayConfig(0.02, 1, 0.65, false, 0, false);
+
+        VrpSignalBacktester.VrpBacktestResult baseline = VrpSignalBacktester.run(sequence, closes, RealizedVolForecast.Model.EWMA, config);
+
+        List<com.sbk.optionspricer.volatility.DailyCloseFeed.DailyClose> withToday = new ArrayList<>(closes);
+        withToday.add(new com.sbk.optionspricer.volatility.DailyCloseFeed.DailyClose(day, 1.0)); // a crash that has not happened yet
+        VrpSignalBacktester.VrpBacktestResult sameDay = VrpSignalBacktester.run(sequence, withToday, RealizedVolForecast.Model.EWMA, config);
+        assertEquals(baseline.meanVrp(), sameDay.meanVrp(), 1e-12, "the day's own close must not leak into its own forecast");
+
+        List<com.sbk.optionspricer.volatility.DailyCloseFeed.DailyClose> withYesterday = new ArrayList<>(closes);
+        withYesterday.set(closes.size() - 1, new com.sbk.optionspricer.volatility.DailyCloseFeed.DailyClose(day.minusDays(1), 1.0));
+        VrpSignalBacktester.VrpBacktestResult earlier = VrpSignalBacktester.run(sequence, withYesterday, RealizedVolForecast.Model.EWMA, config);
+        assertNotEquals(baseline.meanVrp(), earlier.meanVrp(), 1e-6, "an earlier close does move the forecast");
+    }
+
     @Test
     void backtesterProcessesChainsAndGeneratesTradesOnVrpSignal() {
         // implied vol starts far above the realized forecast and falls back to it: a short straddle should win

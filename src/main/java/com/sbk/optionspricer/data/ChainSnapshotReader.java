@@ -129,6 +129,9 @@ public final class ChainSnapshotReader {
     /**
      * Loads all chain snapshot files (.csv.gz) from a directory or single file, ordered by timestamp.
      *
+     * <p>One entry per timestamp <b>and expiry</b>: a recorded file holds every expiry of the chain, so several entries
+     * share a timestamp and are one moment in time, not consecutive ones. {@link VrpSignalBacktester} groups them.
+     *
      * @param rootOrFile path to a directory containing snapshots or a single .csv.gz file
      * @return chronological list of snapshots ready for replay
      * @throws IOException on I/O error
