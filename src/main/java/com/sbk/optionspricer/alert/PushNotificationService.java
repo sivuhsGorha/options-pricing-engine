@@ -53,11 +53,15 @@ public final class PushNotificationService implements AutoCloseable {
         this.staleAlertThresholdMs = Math.max(60_000L, staleThreshold != null ? staleThreshold.toMillis() : 300_000L);
         this.httpClient = httpClient != null ? httpClient : HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
 
+        // Neither the topic nor the URL is printed: a webhook URL usually carries its own token, and anyone who
+        // knows a public ntfy topic can read what is sent to it.
         if (this.ntfyTopic != null) {
-            System.out.println("[ALERT] Push notifications enabled via ntfy.sh topic: " + this.ntfyTopic);
-        } else if (this.webhookUrl != null) {
-            System.out.println("[ALERT] Push notifications enabled via webhook: " + this.webhookUrl);
-        } else {
+            System.out.println("[ALERT] Push notifications enabled via ntfy.sh (NTFY_TOPIC is set; use a long random name, a public topic is readable by anyone who knows it)");
+        }
+        if (this.webhookUrl != null) {
+            System.out.println("[ALERT] Push notifications enabled via webhook (ALERT_WEBHOOK_URL is set)");
+        }
+        if (this.ntfyTopic == null && this.webhookUrl == null) {
             System.out.println("[ALERT] Push notifications: local log only (set NTFY_TOPIC or ALERT_WEBHOOK_URL to enable mobile push)");
         }
 
