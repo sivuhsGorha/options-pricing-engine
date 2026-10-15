@@ -355,6 +355,23 @@ class VolSpreadStrategyTest {
     }
 
     @Test
+    void everyDecisionReachesTheListenerAndAFailingListenerNeverBreaksTheStep() {
+        PositionTracker tracker = new PositionTracker(FillRecorder.NONE);
+        VolSpreadStrategy s = strategy(tracker, new FlatChains(0.20, TODAY), 0.20, valuationWithDelta(0.0), Clock.fixed(NOW, ZoneOffset.UTC));
+        java.util.List<VolSpreadStrategy.Decision> seen = new java.util.ArrayList<>();
+        s.setDecisionListener(seen::add);
+
+        VolSpreadStrategy.Decision d = s.step();
+
+        assertEquals(1, seen.size());
+        assertSame(d, seen.get(0));
+
+        s.setDecisionListener(decision -> { throw new IllegalStateException("disk full"); });
+        VolSpreadStrategy.Decision again = assertDoesNotThrow(s::step);
+        assertEquals(again, s.lastDecision().orElseThrow());
+    }
+
+    @Test
     void aMisspeltSideIsAnErrorNotSilentlyTheMostPermissiveChoice() {
         // "long_onyl" used to become BOTH, which is the setting that allows short straddles
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> VolSpreadStrategy.AllowedSide.parse("long_onyl"));

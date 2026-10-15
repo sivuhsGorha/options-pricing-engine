@@ -207,6 +207,10 @@ public class AppCompositionRoot {
         this.volSpreadStrategy = new com.sbk.optionspricer.execution.VolSpreadStrategy(orderManager, surfaceService, surfaceService, fairVol,
                 valuationService, () -> marketAdapter.getSnapshot(symbol), positionTracker, symbol, riskFreeRate, dividendYield, strategyParams,
                 java.time.Clock.systemUTC(), legQuoteSource);
+        // every decision is also appended to data/decisions.csv: the console log does not survive a rebuild
+        com.sbk.optionspricer.execution.DecisionJournal decisionJournal = new com.sbk.optionspricer.execution.DecisionJournal(dataDir.resolve("decisions.csv"));
+        volSpreadStrategy.setDecisionListener(decisionJournal::record);
+        System.out.println("[JOURNAL] strategy decisions are appended to " + decisionJournal.path());
         harness.setStrategyMode(strategyMode);
         harness.setOptionStrategy(volSpreadStrategy::step, java.time.Duration.ofSeconds((long) config.getDouble("strategy.option_interval_seconds", 30.0)));
         console.describeStrategy(harness::getStrategyMode,

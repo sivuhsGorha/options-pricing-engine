@@ -75,6 +75,7 @@ you care about the paper-trading history. The startup log reports each file:
 | `fills.csv` | one row per fill with its price; the book, average cost and realised P&L are rebuilt from it | starts the book flat |
 | `pnl_history.csv` | the valuation sampled once a minute (and when realised P&L changes); today's P&L and drawdown come from it | loses the P&L history, not the book |
 | `surface_history.csv` | one row per model per calibration: front ATM vol, skew, RMSE, quotes used, parameters | loses the surface history chart |
+| `decisions.csv` | one row per strategy decision (every 30 s): time, action, expiry, strike, market and reference vol, edge, orders sent, and the reason in the strategy's own words. Unlike the console log it survives a rebuild. The input to the session report | the history of what the strategy decided is gone (the console log only reaches back to the last rebuild); nothing else is affected |
 | `chain_snapshots/SPY/<date>/quotes_<HHmmss>.csv.gz` | every option chain the feed changed (a batch whose feed timestamps equal the last one kept is skipped, so nights and weekends add nothing): bid, ask, the feed's IV, volume, source. Raw material for replay and backtests | loses the history a backtest would use; the engine does not read it back. Measured on 2026-10-14: about 36 KB a file (106 files, 3.8 MB by 15:00 UTC, with the laptop asleep for parts of it). Nothing prunes it; check `du -sh data/chain_snapshots` now and then |
 | `shm_state.dat` (`MMAP_STATE_FILE`) | the engine-to-web shared state | recreated at start |
 
@@ -253,3 +254,18 @@ would fire every night, weekend and close.
 
 When the engine starts at least 30 minutes after its last recorded P&L sample, the dashboard shows
 `DOWNTIME GAP: engine was off ...` above the data banner. It is computed once at start-up.
+
+## Session report
+
+`--session-report [YYYY-MM-DD]` prints one UTC day of the strategy's decisions from `data/decisions.csv` (and the day's P&L
+from `pnl_history.csv`): how many decisions, how many holds, how often stale data stopped it, how old the stale option
+quotes were, the edge it saw on its holds, the realized-vol readout, any gap where the engine recorded nothing, and the
+coverage of the 30-second steps the day should have had. With no date it reports the latest day in the journal.
+
+```powershell
+docker compose exec options-engine java --add-modules jdk.incubator.vector -jar /app/app.jar --session-report 2026-10-15
+```
+
+It states what the journal holds and nothing more: a day with no rows is "no decisions recorded", not "quiet". The journal
+starts with the build that added it, so earlier days have no report; those can only be reconstructed from whatever console
+log survived.

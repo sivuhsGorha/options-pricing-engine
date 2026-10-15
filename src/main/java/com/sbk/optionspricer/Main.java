@@ -45,6 +45,20 @@ public class Main {
             System.exit(runReplay(targetDir));
             return;
         }
+        if (args.length > 0 && "--session-report".equals(args[0])) {
+            java.time.LocalDate day = null;
+            if (args.length > 1) {
+                try {
+                    day = java.time.LocalDate.parse(args[1]);
+                } catch (java.time.format.DateTimeParseException e) {
+                    System.err.println("[REPORT] Give the day as YYYY-MM-DD (UTC), for example --session-report 2026-10-15");
+                    System.exit(2);
+                    return;
+                }
+            }
+            System.exit(runSessionReport(java.nio.file.Path.of(com.sbk.optionspricer.config.EnvironmentConfigLoader.getOrDefault("DATA_DIR", "data")), day));
+            return;
+        }
         if (args.length > 0 && "--test-buy-straddle".equals(args[0])) {
             System.exit(runTestBuyStraddle(args.length > 1 && "--confirm".equals(args[1])));
             return;
@@ -202,6 +216,29 @@ public class Main {
                 label, r.totalTrades(), 100 * r.winRate(), r.totalPnl(), r.averagePnlPerTrade(), r.maxDrawdown());
     }
 
+    /**
+     * Prints one UTC day of the strategy's decisions from the journal in {@code dataDir} ({@code decisions.csv}), with the
+     * day's P&L from {@code pnl_history.csv}. With no day it reports the latest day the journal holds.
+     */
+    public static int runSessionReport(java.nio.file.Path dataDir, java.time.LocalDate day) {
+        java.nio.file.Path journal = dataDir.resolve("decisions.csv");
+        try {
+            List<com.sbk.optionspricer.execution.DecisionJournal.Row> rows = com.sbk.optionspricer.execution.DecisionJournal.read(journal);
+            if (rows.isEmpty()) {
+                System.err.println("[REPORT] No decisions in " + journal.toAbsolutePath() + ": the decision journal is written by the build that added it, "
+                        + "once the engine has made a decision. In Docker: docker compose exec options-engine java -jar /app/app.jar --session-report");
+                return 1;
+            }
+            java.time.LocalDate reportDay = day != null ? day : rows.stream()
+                    .map(r -> java.time.LocalDate.ofInstant(r.at(), java.time.ZoneOffset.UTC)).max(java.util.Comparator.naturalOrder()).orElseThrow();
+            System.out.print(com.sbk.optionspricer.execution.SessionReport.build(rows,
+                    com.sbk.optionspricer.execution.SessionReport.readPnl(dataDir.resolve("pnl_history.csv")), reportDay));
+            return 0;
+        } catch (java.io.IOException e) {
+            System.err.println("[REPORT] Cannot read " + journal + ": " + e.getMessage());
+            return 1;
+        }
+    }
     /** The paper multi-leg order test from the command line: a dry run unless {@code confirm} is true. */
     public static int runTestBuyStraddle(boolean confirm) {
         try {

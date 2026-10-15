@@ -601,9 +601,24 @@ public final class VolSpreadStrategy {
         return decision.accepted();
     }
 
+    private volatile java.util.function.Consumer<Decision> decisionListener;
+
+    /** Told of every decision (the journal). A listener that fails is reported and ignored: it must never stop a step. */
+    public void setDecisionListener(java.util.function.Consumer<Decision> listener) {
+        this.decisionListener = listener;
+    }
+
     private Decision record(Decision decision) {
         lastDecision = decision;
         System.out.println("[VOL SPREAD] " + decision.summary() + (decision.orders().isEmpty() ? "" : " | " + String.join("; ", decision.orders())));
+        java.util.function.Consumer<Decision> listener = decisionListener;
+        if (listener != null) {
+            try {
+                listener.accept(decision);
+            } catch (RuntimeException e) {
+                System.err.println("[VOL SPREAD] decision listener failed: " + e.getMessage());
+            }
+        }
         return decision;
     }
 }
