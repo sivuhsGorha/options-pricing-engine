@@ -258,9 +258,10 @@ the surface refitted every 5 minutes, `fair_vol_model: HAR` as a readout only. R
 rest of the day is missing, for two reasons the Windows event log shows:
 
 1. **Modern Standby, 14 times.** Between 12:00 and 15:00 UTC the laptop went into Modern Standby 14 times (about 34
-   minutes asleep in all, the longest 11 minutes before the open and 9 minutes at 14:23), and a standby pauses Docker
-   and the engine with it. Windows' Balanced plan puts this machine to sleep after 5 minutes without input on mains
-   power.
+   minutes asleep in all, the longest 11 minutes before the open and 9 minutes at 14:23). A standby can stall the engine:
+   the only two gaps in its log that day (3.5 and 4.7 minutes) lined up with standbys, but the 9-minute one left no gap, so
+   it does not always. The trigger on this machine is probably the screen, which switches off after 5 minutes on mains
+   power, and on a Modern Standby machine that drops the system into standby even when the sleep timer is set to never.
 2. **A restart at 14:58:59 UTC (16:58 local).** The PC was restarted from the Start menu. Docker Desktop does not
    start by itself after a reboot, so the engine stayed off until Docker was started by hand at 06:51 the next
    morning, about 16 hours later. 2026-10-13 ended the same way (an OS shutdown at 15:01).

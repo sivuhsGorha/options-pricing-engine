@@ -182,16 +182,19 @@ volume on a second machine, or restoring from a cloud folder.
 Two things stopped the engine from seeing most of the US session on 2026-10-13 and 2026-10-14 (EXECUTION.md,
 section 5), and neither is a code fault:
 
-- **Sleep.** On this machine the Balanced power plan puts the laptop into Modern Standby after 5 minutes without
-  input on mains power. Docker and the engine pause with it, so the record has holes and the option quotes go stale
-  across them. The US session runs 13:30 to 20:00 UTC, which is 15:30 to 22:00 in South Africa.
+- **Sleep and standby.** This laptop drops into Modern Standby every few minutes. It can stall Docker and the engine
+  (two stalls of 3 to 5 minutes on 2026-10-14 lined up with standbys, and a 17-minute standby on 2026-10-15 left no gap
+  at all), so the record may have holes and the option quotes can go stale across them. Setting the sleep timer to never
+  is not enough: on a Modern Standby machine the **screen** switching off (5 minutes on mains by default) is what
+  starts it, so also set the screen-off timeout on mains to never (`powercfg /change monitor-timeout-ac 0`). The US session runs 13:30 to 20:00 UTC, which is 15:30 to 22:00 in South Africa.
 - **Reboots and shutdowns.** After a restart Docker Desktop does not start by itself, so the engine stays off until
   someone opens Docker Desktop. Its restart policy then brings the container back.
 
 To keep it running through a session:
 
-1. Settings, System, Power: set "Screen and sleep" on mains power to **Never** for the session (or run
-   `powercfg /change standby-timeout-ac 0`; restore it with `powercfg /change standby-timeout-ac 5`). Leave the
+1. Settings, System, Power: set "Screen and sleep" on mains power to **Never** for the session, both the screen and
+   the sleep timer (or run `powercfg /change monitor-timeout-ac 0` and `powercfg /change standby-timeout-ac 0`; restore with
+   `powercfg /change monitor-timeout-ac 5` and `powercfg /change standby-timeout-ac 5`). Leave the
    charger in. On battery the same sleep rule applies, so a laptop running on battery will still stop.
 2. Docker Desktop, Settings, General: tick **Start Docker Desktop when you sign in**.
 3. Do not restart or shut the laptop down before 22:00 local, and close the lid only if the lid action is set to
