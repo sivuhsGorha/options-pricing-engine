@@ -49,10 +49,22 @@ public final class PnlHistory implements Consumer<Valuation> {
                           LocalDate day, Instant dayStart, double dayBaseline, boolean baselineIsPreviousClose,
                           double dayPnl, double dayPeak, double dayTrough, double dayMaxDrawdown, List<Sample> today) {}
 
+    public record EngineDowntimeGap(Instant from, Instant to, Duration duration) {
+        public String summary() {
+            long totalMinutes = duration.toMinutes();
+            long hours = totalMinutes / 60;
+            long mins = totalMinutes % 60;
+            String durStr = hours > 0 ? (hours + "h " + (mins > 0 ? mins + "m" : "")) : mins + "m";
+            return "engine was off " + durStr + " (from " + from + " to " + to + ")";
+        }
+    }
+
     private final Path file;
     private final Duration minInterval;
     private final List<Sample> samples = new ArrayList<>();
     private Instant firstSampleAt;
+    private final Instant lastSampleBeforeStart;
+    private volatile EngineDowntimeGap downtimeGap;
 
     public PnlHistory(Path file, Duration minInterval) {
         if (file == null || minInterval == null || minInterval.isNegative()) {
@@ -70,9 +82,12 @@ public final class PnlHistory implements Consumer<Valuation> {
         } catch (IOException e) {
             throw new IllegalStateException("cannot initialise the P&L history at " + file + ": " + e.getMessage(), e);
         }
+        Instant lastLoaded = null;
         for (Sample s : load()) {
             remember(s);
+            lastLoaded = s.at();
         }
+        this.lastSampleBeforeStart = lastLoaded;
     }
 
     public Path path() {
@@ -81,6 +96,28 @@ public final class PnlHistory implements Consumer<Valuation> {
 
     public synchronized int size() {
         return samples.size();
+    }
+
+    /**
+     * Gap between the last sample before this startup and the first sample of this session.
+     * Reports when the gap is 30 minutes or more (e.g. laptop slept or was restarted).
+     */
+    public synchronized Optional<EngineDowntimeGap> downtimeGap() {
+        if (downtimeGap == null && lastSampleBeforeStart != null) {
+            Sample firstNew = null;
+            for (Sample s : samples) {
+                if (s.at().isAfter(lastSampleBeforeStart)) {
+                    firstNew = s;
+                    break;
+                }
+            }
+            Instant to = firstNew != null ? firstNew.at() : Instant.now();
+            Duration gap = Duration.between(lastSampleBeforeStart, to);
+            if (gap.toMinutes() >= 30) {
+                downtimeGap = new EngineDowntimeGap(lastSampleBeforeStart, to, gap);
+            }
+        }
+        return Optional.ofNullable(downtimeGap);
     }
 
     @Override

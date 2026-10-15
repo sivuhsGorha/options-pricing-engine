@@ -10,10 +10,13 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 
 /**
  * Thin client for the Alpaca Trading API, paper endpoint only. The base URL is a constant: no configuration
@@ -236,6 +239,49 @@ public final class AlpacaPaperClient {
             throw new IllegalStateException("Alpaca returned no quote for " + sym);
         }
         return new Quote(number(q, "bp"), number(q, "ap"), java.time.Instant.parse(q.get("t").asText()));
+    }
+
+    /** Attempts to fetch the latest quote, returning empty when unavailable or on error. */
+    public Optional<Quote> findQuote(String symbol) {
+        try {
+            return Optional.of(latestQuote(symbol));
+        } catch (RuntimeException e) {
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * Converts an Alpaca option quote to a standard MarketSnapshot.
+     * Returns empty when the quote is one-sided, missing, or the symbol is not an OCC contract.
+     */
+    public static Optional<com.sbk.optionspricer.market.MarketSnapshot> toOptionSnapshot(
+            String occSymbol, Quote quote, Clock clock) {
+        if (occSymbol == null || quote == null || clock == null) {
+            return Optional.empty();
+        }
+        var parsed = com.sbk.optionspricer.instruments.OccSymbol.parse(occSymbol);
+        if (parsed.isEmpty()) {
+            return Optional.empty();
+        }
+        boolean twoSided = Double.isFinite(quote.bid()) && quote.bid() > 0.0 && Double.isFinite(quote.ask()) && quote.ask() > quote.bid();
+        if (!twoSided) {
+            return Optional.empty();
+        }
+        Instant now = clock.instant();
+        Instant sourceTime = quote.at() != null ? quote.at() : now;
+        long ageMs = Math.max(0L, now.toEpochMilli() - sourceTime.toEpochMilli());
+        var status = ageMs > com.sbk.optionspricer.market.OptionQuoteSnapshots.STALE_AFTER_MS
+                ? com.sbk.optionspricer.market.MarketDataStatus.STALE
+                : com.sbk.optionspricer.market.MarketDataStatus.LIVE;
+        var contract = parsed.get();
+        com.sbk.optionspricer.instruments.Instrument instrument = new com.sbk.optionspricer.instruments.Instrument(
+                contract.underlying(), contract.expiry(), contract.strike(), contract.type(),
+                com.sbk.optionspricer.market.OptionQuoteSnapshots.STANDARD_EQUITY_MULTIPLIER, null, 0.01, true);
+        double mid = (quote.bid() + quote.ask()) / 2.0;
+        return Optional.of(new com.sbk.optionspricer.market.MarketSnapshot(
+                occSymbol, quote.bid(), quote.ask(), mid,
+                com.sbk.optionspricer.market.MarketSnapshot.VOLUME_UNKNOWN,
+                now, sourceTime, ageMs, "Alpaca", status, instrument));
     }
 
     /** One trading day: its date (the bar's own, in New York) and its split-adjusted close. */

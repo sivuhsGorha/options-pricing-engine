@@ -33,6 +33,7 @@ public class AppCompositionRoot {
     public final com.sbk.optionspricer.core.PortfolioValuationService valuationService;
     public final com.sbk.optionspricer.execution.VolSpreadStrategy volSpreadStrategy;
     public final com.sbk.optionspricer.data.CompressedChainSnapshotRecorder chainRecorder;
+    public final com.sbk.optionspricer.alert.PushNotificationService pushNotifier;
 
     public AppCompositionRoot() throws Exception {
         this.config = new ConfigManager();
@@ -63,12 +64,16 @@ public class AppCompositionRoot {
         this.preTradeFilter = preTradeFilter(config, symbol, maxPositionAbs, maxNotional, maxConcentration);
         this.riskAdmission = new PortfolioRiskAdmission(maxNotional, maxDelta, maxGamma, maxVega, maxPositionAbs);
         com.sbk.optionspricer.execution.TradingHalt tradingHalt = new com.sbk.optionspricer.execution.TradingHalt();
+        this.pushNotifier = new com.sbk.optionspricer.alert.PushNotificationService();
+        pushNotifier.monitorTradingHalt(tradingHalt);
         // Where orders go: the in-process simulator, or an Alpaca paper account (the client can only address the
         // paper endpoint). With Alpaca, the book is reconciled with the account at start and every minute.
         String transportName = config.getString("execution.transport", "paper");
         java.util.function.Supplier<TransportStatus> transportStatus;
+        AlpacaPaperClient alpacaClient = null;
         if ("alpaca".equals(transportName)) {
-            AlpacaPaperClient alpaca = AlpacaPaperClient.fromEnv();
+            alpacaClient = AlpacaPaperClient.fromEnv();
+            AlpacaPaperClient alpaca = alpacaClient;
             long fillWaitSeconds = Math.max(1L, (long) config.getDouble("execution.fill_wait_seconds", 10.0));
             AlpacaPaperTransport alpacaTransport = new AlpacaPaperTransport(alpaca, java.time.Duration.ofSeconds(fillWaitSeconds));
             this.executionTransport = alpacaTransport;
@@ -171,19 +176,35 @@ public class AppCompositionRoot {
         // The options strategy: front-month ATM straddle against the fitted surface, hedged with shares.
         String strategyMode = config.getString("strategy.mode", "vol_spread");
         boolean useMultiLeg = config.getBoolean("strategy.use_multi_leg", false);
+        String allowedSideStr = config.getString("strategy.side", "long_only");
+        com.sbk.optionspricer.execution.VolSpreadStrategy.AllowedSide allowedSide =
+                com.sbk.optionspricer.execution.VolSpreadStrategy.AllowedSide.parse(allowedSideStr);
         com.sbk.optionspricer.execution.VolSpreadStrategy.Params strategyParams = new com.sbk.optionspricer.execution.VolSpreadStrategy.Params(
                 config.getDouble("strategy.vol_edge", 0.01), config.getDouble("strategy.hedge_band", 50.0),
                 (int) config.getDouble("strategy.max_days_to_expiry", 7.0), (int) config.getDouble("strategy.min_days_to_expiry", 14.0),
                 (int) config.getDouble("strategy.contracts", 1.0), config.getString("strategy.reference_model", "SSVI"),
-                config.getDouble("strategy.fee_per_contract", 0.65), useMultiLeg);
+                config.getDouble("strategy.fee_per_contract", 0.65), useMultiLeg, allowedSide);
         if (useMultiLeg) {
             System.out.println("[STRATEGY] multi-leg orders are ON (experimental): a buy straddle goes as one order; "
-                    + "Alpaca transport refuses a short leg, so a sell straddle will be rejected, not legged");
+                    + "allowedSide=" + allowedSide);
         }
         com.sbk.optionspricer.volatility.FairVolProvider fairVol = fairVolShadow(config, symbol);
+        com.sbk.optionspricer.execution.VolSpreadStrategy.LegQuoteSource legQuoteSource = null;
+        if (alpacaClient != null) {
+            final AlpacaPaperClient ac = alpacaClient;
+            legQuoteSource = occSymbol -> {
+                try {
+                    AlpacaPaperClient.Quote q = ac.latestQuote(occSymbol);
+                    return AlpacaPaperClient.toOptionSnapshot(occSymbol, q, java.time.Clock.systemUTC());
+                } catch (RuntimeException e) {
+                    return java.util.Optional.empty();
+                }
+            };
+            System.out.println("[STRATEGY] Leg quote source: Alpaca live option quotes enabled (fresh touch prices for straddle legs)");
+        }
         this.volSpreadStrategy = new com.sbk.optionspricer.execution.VolSpreadStrategy(orderManager, surfaceService, surfaceService, fairVol,
                 valuationService, () -> marketAdapter.getSnapshot(symbol), positionTracker, symbol, riskFreeRate, dividendYield, strategyParams,
-                java.time.Clock.systemUTC());
+                java.time.Clock.systemUTC(), legQuoteSource);
         harness.setStrategyMode(strategyMode);
         harness.setOptionStrategy(volSpreadStrategy::step, java.time.Duration.ofSeconds((long) config.getDouble("strategy.option_interval_seconds", 30.0)));
         console.describeStrategy(harness::getStrategyMode,
@@ -261,6 +282,9 @@ public class AppCompositionRoot {
         }
         if (chainRecorder != null) {
             step("chain recorder", chainRecorder::close);
+        }
+        if (pushNotifier != null) {
+            step("push notifications", pushNotifier::close);
         }
         step("engine", harness::stop);
         System.out.println("[SHUTDOWN] done");

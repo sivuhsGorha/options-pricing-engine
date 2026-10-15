@@ -41,6 +41,21 @@ import java.util.function.Supplier;
  */
 public final class VolSpreadStrategy {
 
+    public enum AllowedSide {
+        BOTH,
+        LONG_ONLY,
+        SHORT_ONLY;
+
+        public static AllowedSide parse(String text) {
+            if (text == null || text.isBlank()) return BOTH;
+            return switch (text.trim().toLowerCase(Locale.ROOT)) {
+                case "long_only", "long", "buy_only" -> LONG_ONLY;
+                case "short_only", "short", "sell_only" -> SHORT_ONLY;
+                default -> BOTH;
+            };
+        }
+    }
+
     /**
      * @param volEdge          vol points (as a fraction, 0.01 = one point) the market must deviate from the reference to open
      * @param hedgeBand        net delta (in underlying units) beyond which shares are traded to flatten it
@@ -50,15 +65,20 @@ public final class VolSpreadStrategy {
      * @param referenceModel   {@code SSVI}, {@code SVI}, {@code HAR}, {@code EWMA}, {@code REALIZED} or {@code VRP}
      * @param feePerContract   broker/exchange fee per contract in dollars (e.g. 0.65)
      * @param useMultiLeg      if true, transmits the straddle legs as a single atomic order
+     * @param allowedSide      {@code BOTH}, {@code LONG_ONLY} or {@code SHORT_ONLY}
      */
     public record Params(double volEdge, double hedgeBand, int maxDaysToExpiry, int minDaysToExpiry, int contracts,
-                         String referenceModel, double feePerContract, boolean useMultiLeg) {
+                         String referenceModel, double feePerContract, boolean useMultiLeg, AllowedSide allowedSide) {
         public Params(double volEdge, double hedgeBand, int maxDaysToExpiry, int minDaysToExpiry, int contracts, String referenceModel) {
-            this(volEdge, hedgeBand, maxDaysToExpiry, minDaysToExpiry, contracts, referenceModel, 0.65, false);
+            this(volEdge, hedgeBand, maxDaysToExpiry, minDaysToExpiry, contracts, referenceModel, 0.65, false, AllowedSide.BOTH);
         }
 
         public Params(double volEdge, double hedgeBand, int maxDaysToExpiry, int minDaysToExpiry, int contracts, String referenceModel, double feePerContract) {
-            this(volEdge, hedgeBand, maxDaysToExpiry, minDaysToExpiry, contracts, referenceModel, feePerContract, false);
+            this(volEdge, hedgeBand, maxDaysToExpiry, minDaysToExpiry, contracts, referenceModel, feePerContract, false, AllowedSide.BOTH);
+        }
+
+        public Params(double volEdge, double hedgeBand, int maxDaysToExpiry, int minDaysToExpiry, int contracts, String referenceModel, double feePerContract, boolean useMultiLeg) {
+            this(volEdge, hedgeBand, maxDaysToExpiry, minDaysToExpiry, contracts, referenceModel, feePerContract, useMultiLeg, AllowedSide.BOTH);
         }
 
         public Params {
@@ -73,6 +93,7 @@ public final class VolSpreadStrategy {
                     && !referenceModel.equals("EWMA") && !referenceModel.equals("REALIZED") && !referenceModel.equals("VRP")) {
                 throw new IllegalArgumentException("referenceModel must be SSVI, SVI, HAR, EWMA, REALIZED or VRP");
             }
+            allowedSide = allowedSide == null ? AllowedSide.BOTH : allowedSide;
         }
 
         /** True when the reference is a realized-vol forecast and not a fitted surface. */
@@ -149,6 +170,44 @@ public final class VolSpreadStrategy {
         this.dividendYield = dividendYield;
         this.params = params;
         this.clock = clock;
+    }
+
+    public VolSpreadStrategy(OrderManager orderManager, OptionMarketData chains, VolatilitySurfaceSource surfaces,
+                             com.sbk.optionspricer.volatility.FairVolProvider fairVolProvider, ValuationSource valuation,
+                             Supplier<MarketSnapshot> spotSupplier, PositionTracker tracker, String symbol,
+                             double riskFreeRate, double dividendYield, Params params, Clock clock,
+                             LegQuoteSource legQuoteSource) {
+        this(orderManager, chains, surfaces, fairVolProvider, valuation, spotSupplier, tracker, symbol, riskFreeRate, dividendYield, params, clock);
+        this.legQuoteSource = legQuoteSource;
+    }
+
+    @FunctionalInterface
+    public interface LegQuoteSource {
+        Optional<MarketSnapshot> quote(String occSymbol);
+    }
+
+    private volatile LegQuoteSource legQuoteSource;
+
+    public void setLegQuoteSource(LegQuoteSource source) {
+        this.legQuoteSource = source;
+    }
+
+    MarketSnapshot resolveQuote(String occSymbol) {
+        if (occSymbol == null) {
+            return null;
+        }
+        if (legQuoteSource != null) {
+            try {
+                Optional<MarketSnapshot> venue = legQuoteSource.quote(occSymbol);
+                if (venue != null && venue.isPresent() && venue.get().hasBook()
+                        && venue.get().status() != MarketDataStatus.UNAVAILABLE) {
+                    return venue.get();
+                }
+            } catch (RuntimeException ignored) {
+                // fall through to chains
+            }
+        }
+        return chains.optionQuote(occSymbol).orElse(null);
     }
 
     public Optional<Decision> lastDecision() {
@@ -242,11 +301,11 @@ public final class VolSpreadStrategy {
 
         // Early assignment monitor for short straddles: ITM short option with extrinsic value < $0.10
         if (sign < 0) {
-            Optional<MarketSnapshot> callQuote = chains.optionQuote(openCall);
-            Optional<MarketSnapshot> putQuote = chains.optionQuote(openPut);
-            if (callQuote.isPresent() && spot.last() > strk) {
+            MarketSnapshot callQuote = resolveQuote(openCall);
+            MarketSnapshot putQuote = resolveQuote(openPut);
+            if (callQuote != null && spot.last() > strk) {
                 double intrinsic = spot.last() - strk;
-                double extrinsic = callQuote.get().last() - intrinsic;
+                double extrinsic = callQuote.last() - intrinsic;
                 if (extrinsic < 0.10) {
                     closeStraddle(orders);
                     return record(new Decision(now, "CLOSE", String.format(Locale.ROOT,
@@ -254,9 +313,9 @@ public final class VolSpreadStrategy {
                             exp, strk, Double.NaN, Double.NaN, Double.NaN, sign, orders));
                 }
             }
-            if (putQuote.isPresent() && spot.last() < strk) {
+            if (putQuote != null && spot.last() < strk) {
                 double intrinsic = strk - spot.last();
-                double extrinsic = putQuote.get().last() - intrinsic;
+                double extrinsic = putQuote.last() - intrinsic;
                 if (extrinsic < 0.10) {
                     closeStraddle(orders);
                     return record(new Decision(now, "CLOSE", String.format(Locale.ROOT,
@@ -288,12 +347,12 @@ public final class VolSpreadStrategy {
             if (qty == 0) {
                 continue;
             }
-            Optional<MarketSnapshot> quote = chains.optionQuote(leg);
-            if (quote.isEmpty()) {
+            MarketSnapshot quote = resolveQuote(leg);
+            if (quote == null) {
                 orders.add(leg + ": no quote to close against");
                 continue;
             }
-            submit(new Order(0, qty < 0, Math.abs(qty), quote.get().last()), quote.get(), orders);
+            submit(new Order(0, qty < 0, Math.abs(qty), quote.last()), quote, orders);
         }
         if (tracker.getNetQuantity(openCall) == 0 && tracker.getNetQuantity(openPut) == 0) {
             openCall = null;
@@ -343,10 +402,24 @@ public final class VolSpreadStrategy {
                     front, strike, edge.marketIv(), edge.referenceIv(), edge.value(), 0, orders));
         }
         boolean sell = edge.value() > 0.0;
+        if (sell && params.allowedSide() == AllowedSide.LONG_ONLY) {
+            return record(new Decision(now, "HOLD",
+                    "market rich to reference by " + String.format(Locale.ROOT, "%.2f pts", 100 * edge.value())
+                            + " but short straddle not permitted (long-only configured; Level 3 forbids uncovered shorts)"
+                            + shadowReadout(front, strike, t, edge.marketIv()),
+                    front, strike, edge.marketIv(), edge.referenceIv(), edge.value(), 0, orders));
+        }
+        if (!sell && params.allowedSide() == AllowedSide.SHORT_ONLY) {
+            return record(new Decision(now, "HOLD",
+                    "market cheap to reference by " + String.format(Locale.ROOT, "%.2f pts", 100 * Math.abs(edge.value()))
+                            + " but long straddle not permitted (short-only configured)"
+                            + shadowReadout(front, strike, t, edge.marketIv()),
+                    front, strike, edge.marketIv(), edge.referenceIv(), edge.value(), 0, orders));
+        }
         String call = OccSymbol.format(symbol, front, OptionType.CALL, strike);
         String put = OccSymbol.format(symbol, front, OptionType.PUT, strike);
-        MarketSnapshot callQuote = chains.optionQuote(call).orElse(null);
-        MarketSnapshot putQuote = chains.optionQuote(put).orElse(null);
+        MarketSnapshot callQuote = resolveQuote(call);
+        MarketSnapshot putQuote = resolveQuote(put);
         if (callQuote == null || putQuote == null) {
             orders.add((callQuote == null ? call : put) + ": no quote");
             return record(new Decision(now, sell ? "SELL_STRADDLE_REJECTED" : "BUY_STRADDLE_REJECTED", String.join("; ", orders),
@@ -439,8 +512,8 @@ public final class VolSpreadStrategy {
     private Edge edgeFor(LocalDate expiry, double strike, double spot, double t) {
         String call = OccSymbol.format(symbol, expiry, OptionType.CALL, strike);
         String put = OccSymbol.format(symbol, expiry, OptionType.PUT, strike);
-        MarketSnapshot callQuote = chains.optionQuote(call).orElse(null);
-        MarketSnapshot putQuote = chains.optionQuote(put).orElse(null);
+        MarketSnapshot callQuote = resolveQuote(call);
+        MarketSnapshot putQuote = resolveQuote(put);
         double sum = 0.0;
         for (String leg : new String[]{call, put}) {
             MarketSnapshot quote = leg.equals(call) ? callQuote : putQuote;

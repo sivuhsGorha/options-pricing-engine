@@ -485,6 +485,18 @@ public class OptionsDashboardServer {
         }
         components.put("trading", trading);
         components.put("recorder", recorderBlock());
+        if (pnlHistory != null) {
+            pnlHistory.downtimeGap().ifPresent(gap -> {
+                double hours = gap.duration().toMinutes() / 60.0;
+                java.util.Map<String, Object> gapInfo = new java.util.LinkedHashMap<>();
+                gapInfo.put("hasGap", true);
+                gapInfo.put("durationHours", Math.round(hours * 10.0) / 10.0);
+                gapInfo.put("from", gap.from().toString());
+                gapInfo.put("to", gap.to().toString());
+                gapInfo.put("message", gap.summary());
+                components.put("engineGap", gapInfo);
+            });
+        }
         var transport = currentTransport();
         boolean transportDegraded = false;
         if (transport != null) {

@@ -1,0 +1,222 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  AURA-OPT options engine on one EC2 instance. No inbound ports: the dashboard is reached through an
+  SSM port-forwarding session. Secrets (.env, config.yaml) come from SSM Parameter Store at deploy time.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: options-engine
+    Description: Prefix for resource names and the SSM parameter path (/<ProjectName>/env, /<ProjectName>/config).
+    AllowedPattern: "[a-z][a-z0-9-]{2,30}"
+  InstanceType:
+    Type: String
+    Default: t3.small
+    AllowedValues: [t3.micro, t3.small, t3.medium, t3a.small, t3a.medium]
+  VolumeSizeGb:
+    Type: Number
+    Default: 20
+    MinValue: 12
+    MaxValue: 100
+  RepoUrl:
+    Type: String
+    Default: https://github.com/sivuhsGorha/options-pricing-engine.git
+  RepoRef:
+    Type: String
+    Default: main
+    Description: Branch or tag the instance checks out.
+  UbuntuAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id
+    Description: Resolved automatically to the current Ubuntu 24.04 LTS image in this region.
+
+Resources:
+  # ---------------------------------------------------------------- network
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.42.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags: [{ Key: Name, Value: !Sub "${ProjectName}-vpc" }]
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags: [{ Key: Name, Value: !Sub "${ProjectName}-igw" }]
+
+  GatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref InternetGateway
+
+  # One public subnet: the instance needs a route out for market data, Alpaca, GitHub and SSM.
+  # "Public" only means it has that route; the security group below accepts nothing inbound.
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: 10.42.0.0/24
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags: [{ Key: Name, Value: !Sub "${ProjectName}-public-a" }]
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags: [{ Key: Name, Value: !Sub "${ProjectName}-public-rt" }]
+
+  DefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: GatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetRouteAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  # No SecurityGroupIngress at all. Access is through SSM, which the instance initiates outbound.
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Options engine - outbound only
+      VpcId: !Ref Vpc
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+          Description: Market data, Alpaca, GitHub, apt, SSM
+      Tags: [{ Key: Name, Value: !Sub "${ProjectName}-sg" }]
+
+  # ---------------------------------------------------------------- transfer bucket
+  # Private bucket for moving files to the instance without SSH: the existing data/ ledger before the
+  # first start, and anything else later. Must be emptied before the stack can be deleted.
+  TransferBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${ProjectName}-${AWS::AccountId}-transfer"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      VersioningConfiguration: { Status: Suspended }
+
+  # ---------------------------------------------------------------- instance role
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: engine-deploy-access
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ReadOwnParameters
+                Effect: Allow
+                Action: [ssm:GetParameter, ssm:GetParameters, ssm:GetParametersByPath]
+                Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${ProjectName}/*"
+              - Sid: ReadTransferBucket
+                Effect: Allow
+                Action: [s3:ListBucket]
+                Resource: !GetAtt TransferBucket.Arn
+              - Sid: ReadTransferObjects
+                Effect: Allow
+                Action: [s3:GetObject]
+                Resource: !Sub "${TransferBucket.Arn}/*"
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref InstanceRole]
+
+  # ---------------------------------------------------------------- instance
+  EngineInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref UbuntuAmiId
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref InstanceProfile
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds: [!Ref InstanceSecurityGroup]
+      # IMDSv2 only: a process on the box cannot read the role's credentials with a plain GET.
+      MetadataOptions:
+        HttpTokens: required
+        HttpPutResponseHopLimit: 2   # 2 so a container (one hop further) can still reach IMDS if ever needed
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeType: gp3
+            VolumeSize: !Ref VolumeSizeGb
+            Encrypted: true
+            DeleteOnTermination: true
+      Tags:
+        - { Key: Name, Value: !Sub "${ProjectName}" }
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          # First boot only. Installs Docker, the AWS CLI and a swap file, and clones the repository.
+          # It does NOT start the engine: run /opt/engine/infra/aws/deploy.sh once the SSM parameters exist.
+          set -euxo pipefail
+          exec > >(tee /var/log/engine-bootstrap.log | logger -t engine-bootstrap) 2>&1
+
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y docker.io docker-compose-v2 git unzip curl
+          systemctl enable --now docker
+          usermod -aG docker ubuntu
+
+          # AWS CLI v2 (the instance uses it to read Parameter Store and the transfer bucket)
+          cd /tmp
+          curl -sS "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
+          unzip -q awscliv2.zip && ./aws/install && rm -rf aws awscliv2.zip
+
+          # 2 GB swap: the first `docker compose build` runs Maven and npm, which need more than 2 GB RAM
+          if [ ! -f /swapfile ]; then
+            fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+            echo '/swapfile none swap sw 0 0' >> /etc/fstab
+          fi
+
+          # Settings deploy.sh reads
+          cat > /etc/options-engine.conf <<EOF
+          PROJECT_NAME=${ProjectName}
+          AWS_REGION=${AWS::Region}
+          REPO_URL=${RepoUrl}
+          REPO_REF=${RepoRef}
+          TRANSFER_BUCKET=${TransferBucket}
+          EOF
+
+          git clone --branch "${RepoRef}" "${RepoUrl}" /opt/engine
+          chown -R ubuntu:ubuntu /opt/engine
+          chmod +x /opt/engine/infra/aws/deploy.sh
+          echo "bootstrap complete"
+
+Outputs:
+  InstanceId:
+    Description: Pass to --target for SSM sessions
+    Value: !Ref EngineInstance
+  TransferBucket:
+    Description: Private bucket for copying files to the instance (aws s3 cp ... s3://<bucket>/data-seed/)
+    Value: !Ref TransferBucket
+  ShellCommand:
+    Description: Interactive shell on the instance
+    Value: !Sub "aws ssm start-session --target ${EngineInstance} --region ${AWS::Region}"
+  TunnelCommand:
+    Description: Forward the dashboard to http://127.0.0.1:8080 on your PC
+    Value: !Sub "aws ssm start-session --target ${EngineInstance} --region ${AWS::Region} --document-name AWS-StartPortForwardingSession --parameters file://infra/aws/tunnel.json"

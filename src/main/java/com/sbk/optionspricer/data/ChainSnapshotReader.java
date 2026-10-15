@@ -3,6 +3,7 @@ package com.sbk.optionspricer.data;
 import com.sbk.optionspricer.OptionChain;
 import com.sbk.optionspricer.OptionQuote;
 import com.sbk.optionspricer.OptionType;
+import com.sbk.optionspricer.risk.VrpSignalBacktester;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -12,17 +13,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Stream;
 import java.util.zip.GZIPInputStream;
 
 /**
- * High-performance decompression reader for historical compressed chain snapshots (.csv.gz).
+ * Reads compressed option-chain snapshots recorded by {@link CompressedChainSnapshotRecorder}
+ * back into typed objects, quotes, chains, and chronological {@link VrpSignalBacktester.Snapshot}
+ * instances for backtesting and replay.
  */
 public final class ChainSnapshotReader {
 
@@ -117,7 +115,7 @@ public final class ChainSnapshotReader {
         if (baseDir == null || symbol == null || date == null) {
             return List.of();
         }
-        Path dateDir = baseDir.resolve(symbol.toUpperCase()).resolve(date.toString());
+        Path dateDir = baseDir.resolve(symbol.toUpperCase(Locale.ROOT)).resolve(date.toString());
         if (!Files.exists(dateDir) || !Files.isDirectory(dateDir)) {
             return List.of();
         }
@@ -127,4 +125,74 @@ public final class ChainSnapshotReader {
                     .toList();
         }
     }
+
+    /**
+     * Loads all chain snapshot files (.csv.gz) from a directory or single file, ordered by timestamp.
+     *
+     * @param rootOrFile path to a directory containing snapshots or a single .csv.gz file
+     * @return chronological list of snapshots ready for replay
+     * @throws IOException on I/O error
+     */
+    public static List<VrpSignalBacktester.Snapshot> loadSnapshots(Path rootOrFile) throws IOException {
+        if (rootOrFile == null || !Files.exists(rootOrFile)) {
+            return List.of();
+        }
+
+        List<Path> files;
+        if (Files.isDirectory(rootOrFile)) {
+            try (Stream<Path> stream = Files.walk(rootOrFile)) {
+                files = stream
+                        .filter(Files::isRegularFile)
+                        .filter(p -> p.getFileName().toString().endsWith(".csv.gz"))
+                        .filter(p -> !p.getFileName().toString().contains(".tmp."))
+                        .sorted()
+                        .toList();
+            }
+        } else {
+            files = List.of(rootOrFile);
+        }
+
+        List<VrpSignalBacktester.Snapshot> result = new ArrayList<>();
+        for (Path file : files) {
+            try {
+                List<CompressedChainSnapshotRecorder.RecordedQuote> quotes = readQuotes(file);
+                if (quotes.isEmpty()) continue;
+
+                Map<ExpiryKey, List<OptionQuote>> quotesByChain = new LinkedHashMap<>();
+                Map<ExpiryKey, Double> spotByChain = new HashMap<>();
+
+                for (CompressedChainSnapshotRecorder.RecordedQuote q : quotes) {
+                    OptionType type = "CALL".equalsIgnoreCase(q.type()) ? OptionType.CALL : OptionType.PUT;
+                    OptionQuote quote = new OptionQuote(
+                            q.symbol(),
+                            q.expiry(),
+                            q.strike(),
+                            type,
+                            q.bid(),
+                            q.ask(),
+                            q.impliedVol(),
+                            q.volume(),
+                            q.openInterest()
+                    );
+                    ExpiryKey key = new ExpiryKey(q.timestamp(), q.symbol(), q.expiry());
+                    quotesByChain.computeIfAbsent(key, k -> new ArrayList<>()).add(quote);
+                    spotByChain.putIfAbsent(key, q.spot());
+                }
+
+                for (Map.Entry<ExpiryKey, List<OptionQuote>> entry : quotesByChain.entrySet()) {
+                    ExpiryKey key = entry.getKey();
+                    double spot = spotByChain.getOrDefault(key, 100.0);
+                    OptionChain chain = new OptionChain(key.symbol, key.expiry, spot, entry.getValue());
+                    result.add(new VrpSignalBacktester.Snapshot(key.timestamp, chain));
+                }
+            } catch (Exception e) {
+                System.err.println("[SNAPSHOT READER] Skipping corrupted file " + file + ": " + e.getMessage());
+            }
+        }
+
+        result.sort(Comparator.comparing(VrpSignalBacktester.Snapshot::at));
+        return List.copyOf(result);
+    }
+
+    private record ExpiryKey(Instant timestamp, String symbol, LocalDate expiry) {}
 }

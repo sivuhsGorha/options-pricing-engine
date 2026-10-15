@@ -28,4 +28,26 @@ describe('DataBanner', () => {
         expect(screen.getByText(/SIMULATED DATA/)).toBeInTheDocument();
         expect(screen.queryByText(/LIVE MARKET DATA/)).not.toBeInTheDocument();
     });
+
+    it('displays downtime gap banner when engineGap hasGap is true', () => {
+        render(
+            <DataBanner
+                spotInfo={{ status: 'LIVE', source: 'POLYGON' }}
+                engineGap={{ hasGap: true, durationHours: 16.2, message: 'Engine was off 16.2 hours' }}
+            />
+        );
+        expect(screen.getByText(/⚠️ DOWNTIME GAP: Engine was off 16.2 hours/)).toBeInTheDocument();
+        expect(screen.getByText(/LIVE MARKET DATA/)).toBeInTheDocument();
+    });
+
+    it('does not display downtime gap when engineGap hasGap is false', () => {
+        render(
+            <DataBanner
+                spotInfo={{ status: 'LIVE', source: 'POLYGON' }}
+                engineGap={{ hasGap: false, durationHours: 0 }}
+            />
+        );
+        expect(screen.queryByText(/⚠️ DOWNTIME GAP/)).not.toBeInTheDocument();
+        expect(screen.getByText(/LIVE MARKET DATA/)).toBeInTheDocument();
+    });
 });

@@ -200,3 +200,42 @@ To keep it running through a session:
 
 A laptop that sleeps is a poor host for an engine that is meant to watch a market all day. The VPS route in "Hosting
 on a server" is the real fix; this section only reduces the gaps until then.
+
+## Replay and VRP Backtest Tool
+
+Replays recorded `.csv.gz` chain snapshots back into the engine's quantitative backtester to evaluate whether VRP predictability exists and whether trades survive the round-trip friction hurdle:
+
+```bash
+# Replay against recorded snapshots in data/chain_snapshots
+java --enable-preview --add-modules jdk.incubator.vector -jar target/options-pricing-engine-1.0.0-SNAPSHOT.jar --replay data/chain_snapshots
+```
+
+It evaluates:
+1. **Raw VRP (Structural Level):** Tests trading the raw implied vs realized spread (structural permanent level).
+2. **Demeaned VRP:** Demeans VRP vs its rolling 20-period baseline to test relative volatility shocks.
+3. **Cost Hurdle Filter:** Tests whether volatility edge covers the break-even vega friction: `(bid_ask_spread + 2 * fees) / straddle_vega`.
+
+## Paper Trade Verification Script
+
+To verify Alpaca multi-leg order transmission with Level 3 permissions safely:
+
+```powershell
+# Run the long straddle debit verification test
+.\scripts\test_buy_straddle.ps1
+# Or inside docker:
+.\scripts\test_buy_straddle.ps1 -Docker
+```
+
+Checks account buying power and status, queries live touch quotes for ATM call/put legs, and submits a 1-contract debit buy straddle limit order at the venue touch. Naked short straddles remain strictly prohibited under Level 3.
+
+## Push Notification Alerts
+
+Configurable via `.env`:
+- `NTFY_TOPIC`: Send push notifications directly to phone/desktop via `https://ntfy.sh/<NTFY_TOPIC>`.
+- `ALERT_WEBHOOK_URL`: Generic HTTP POST webhook for alerting systems (Discord, Slack, custom webhook).
+- `ALERT_STALE_MINUTES`: Quote age threshold before triggering alert (default: 5 minutes).
+
+Fires notifications immediately on:
+1. `TRADING HALTED`: Critical Greek limit breaches or position reconciliation mismatches.
+2. `MARKET DATA STALE`: Quotes exceeding staleness threshold.
+3. `ENGINE STOPPED`: JVM shutdown hook triggers on unexpected container/host termination.

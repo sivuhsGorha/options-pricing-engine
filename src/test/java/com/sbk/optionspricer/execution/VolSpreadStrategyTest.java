@@ -341,4 +341,49 @@ class VolSpreadStrategyTest {
         assertThrows(IllegalArgumentException.class, () -> new VolSpreadStrategy.Params(0.01, 50, 7, 14, 1, "HESTON"));
         assertEquals("SVI", new VolSpreadStrategy.Params(0.01, 50, 7, 14, 1, "svi").referenceModel());
     }
+
+    @Test
+    void allowedSideParsesAllVariantsSafely() {
+        assertEquals(VolSpreadStrategy.AllowedSide.LONG_ONLY, VolSpreadStrategy.AllowedSide.parse("long_only"));
+        assertEquals(VolSpreadStrategy.AllowedSide.LONG_ONLY, VolSpreadStrategy.AllowedSide.parse("long"));
+        assertEquals(VolSpreadStrategy.AllowedSide.LONG_ONLY, VolSpreadStrategy.AllowedSide.parse("buy_only"));
+        assertEquals(VolSpreadStrategy.AllowedSide.SHORT_ONLY, VolSpreadStrategy.AllowedSide.parse("short_only"));
+        assertEquals(VolSpreadStrategy.AllowedSide.SHORT_ONLY, VolSpreadStrategy.AllowedSide.parse("short"));
+        assertEquals(VolSpreadStrategy.AllowedSide.BOTH, VolSpreadStrategy.AllowedSide.parse("both"));
+        assertEquals(VolSpreadStrategy.AllowedSide.BOTH, VolSpreadStrategy.AllowedSide.parse(null));
+        assertEquals(VolSpreadStrategy.AllowedSide.BOTH, VolSpreadStrategy.AllowedSide.parse(""));
+        assertEquals(VolSpreadStrategy.AllowedSide.BOTH, VolSpreadStrategy.AllowedSide.parse("unknown"));
+    }
+
+    @Test
+    void longOnlyRefusesToShortRichMarketVol() {
+        PositionTracker tracker = new PositionTracker(FillRecorder.NONE);
+        // Market vol 25%, reference vol 20% -> market is rich (+5 pts edge > 1 pt threshold)
+        // With default BOTH, this would open SHORT_STRADDLE.
+        // With LONG_ONLY, it must HOLD.
+        VolSpreadStrategy.Params p = new VolSpreadStrategy.Params(0.01, 50.0, 7, 14, 1, "SSVI", 0.65, false, VolSpreadStrategy.AllowedSide.LONG_ONLY);
+        VolSpreadStrategy s = new VolSpreadStrategy(manager(tracker), new FlatChains(0.25, TODAY), referenceSurface(0.20),
+                valuationWithDelta(0.0), VolSpreadStrategyTest::spot, tracker, "SPY", R, Q, p, Clock.fixed(NOW, ZoneOffset.UTC));
+        s.allowSimulatedChains(true);
+
+        VolSpreadStrategy.Decision d = s.step();
+        assertEquals("HOLD", d.action());
+        assertTrue(d.reason().contains("short straddle not permitted"), "Decision reason: " + d.reason());
+        assertEquals(0, optionPositionsHeld(tracker));
+    }
+
+    @Test
+    void legQuoteSourceOverridesChainsOptionQuote() {
+        PositionTracker tracker = new PositionTracker(FillRecorder.NONE);
+        VolSpreadStrategy s = strategy(tracker, new FlatChains(0.20, TODAY), 0.20, valuationWithDelta(0.0), Clock.fixed(NOW, ZoneOffset.UTC));
+
+        // Inject custom leg quote source
+        MarketSnapshot freshSnapshot = new MarketSnapshot("SPY261016C00100000", 1.50, 1.55, 1.525, 100L, NOW, NOW, 0L, "ALPACA", MarketDataStatus.LIVE);
+        s.setLegQuoteSource(occ -> occ.equals("SPY261016C00100000") ? Optional.of(freshSnapshot) : Optional.empty());
+
+        MarketSnapshot resolved = s.resolveQuote("SPY261016C00100000");
+        assertNotNull(resolved);
+        assertEquals("ALPACA", resolved.source());
+        assertEquals(1.525, resolved.last(), 1e-6);
+    }
 }

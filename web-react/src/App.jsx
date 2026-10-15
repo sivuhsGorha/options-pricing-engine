@@ -262,7 +262,7 @@ function App() {
 
   return (
     <div className="app-container">
-      <DataBanner spotInfo={spotInfo} />
+      <DataBanner spotInfo={spotInfo} engineGap={healthInfo.components ? healthInfo.components.engineGap : null} />
       {/* Terminal command header */}
       <header className="sys-header">
         <form onSubmit={handleCmdSubmit} className="cmd-bar">

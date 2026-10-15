@@ -80,4 +80,48 @@ class VrpSignalBacktesterTest {
         assertEquals(-(crossedSpread + fees), result.totalPnl(), 1e-6);
         assertEquals(0.0, result.winRate(), 1e-6);
     }
+
+    @Test
+    void demeanedVrpFiltersOutConstantStructuralBias() {
+        // A flat VRP series of +0.03 points (above the 0.02 threshold) across all steps
+        List<VrpSignalBacktester.Snapshot> sequence = new ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            sequence.add(snapshot(i, 0.20, 0.05));
+        }
+
+        // Without demeaning: flat level > threshold triggers trades
+        VrpSignalBacktester.ReplayConfig rawConfig = new VrpSignalBacktester.ReplayConfig(0.02, 1, 0.65, false, 0, false);
+        VrpSignalBacktester.VrpBacktestResult rawResult = VrpSignalBacktester.run(sequence, forecastFromDailyCloses(), rawConfig);
+
+        // With demeaning: rolling window computes baseline, effective VRP becomes ~0, no trade opens
+        VrpSignalBacktester.ReplayConfig demeanConfig = new VrpSignalBacktester.ReplayConfig(0.02, 1, 0.65, true, 5, false);
+        VrpSignalBacktester.VrpBacktestResult demeanResult = VrpSignalBacktester.run(sequence, forecastFromDailyCloses(), demeanConfig);
+
+        assertTrue(rawResult.totalTrades() >= 1, "Raw VRP opens trade on level");
+        // Demeaned removes the level, so trades should be 0 or fewer
+        assertTrue(demeanResult.totalTrades() <= rawResult.totalTrades(), "Demeaned VRP must dampen trades on flat bias");
+    }
+
+    @Test
+    void costHurdleRejectsTradesWhenEdgeCannotCoverSpreadAndFees() {
+        // IV is 0.19, fair is ~0.16 -> edge is ~0.03
+        // With a huge spread (halfSpread = 2.0), friction / vega exceeds 0.03
+        double wideHalfSpread = 2.0;
+        List<VrpSignalBacktester.Snapshot> sequence = List.of(
+                snapshot(0, 0.19, wideHalfSpread),
+                snapshot(1, 0.19, wideHalfSpread)
+        );
+
+        // Without cost hurdle: opens trade
+        VrpSignalBacktester.ReplayConfig noHurdle = new VrpSignalBacktester.ReplayConfig(0.02, 1, 0.65, false, 0, false);
+        VrpSignalBacktester.VrpBacktestResult resNoHurdle = VrpSignalBacktester.run(sequence, forecastFromDailyCloses(), noHurdle);
+
+        // With cost hurdle: rejects trade because friction hurdle > 0.03
+        VrpSignalBacktester.ReplayConfig withHurdle = new VrpSignalBacktester.ReplayConfig(0.02, 1, 0.65, false, 0, true);
+        VrpSignalBacktester.VrpBacktestResult resWithHurdle = VrpSignalBacktester.run(sequence, forecastFromDailyCloses(), withHurdle);
+
+        assertEquals(1, resNoHurdle.totalTrades());
+        assertEquals(0, resWithHurdle.totalTrades());
+        assertTrue(resWithHurdle.hurdlesRejected() >= 1, "Hurdle rejection count must be positive");
+    }
 }

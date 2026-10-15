@@ -40,6 +40,19 @@ public final class VrpSignalBacktester {
             double pnl
     ) {}
 
+    public record ReplayConfig(
+            double vrpThreshold,
+            int contractQty,
+            double feePerContract,
+            boolean demeanVrp,
+            int rollingWindow,
+            boolean enforceCostHurdle
+    ) {
+        public static ReplayConfig defaults() {
+            return new ReplayConfig(0.01, 1, 0.65, false, 0, false);
+        }
+    }
+
     public record VrpBacktestResult(
             int totalSnapshots,
             int totalTrades,
@@ -48,8 +61,16 @@ public final class VrpSignalBacktester {
             double totalPnl,
             double averagePnlPerTrade,
             double maxDrawdown,
-            List<VrpTrade> trades
-    ) {}
+            List<VrpTrade> trades,
+            int hurdlesPassed,
+            int hurdlesRejected,
+            double meanVrp
+    ) {
+        public VrpBacktestResult(int totalSnapshots, int totalTrades, int winningTrades, double winRate,
+                                 double totalPnl, double averagePnlPerTrade, double maxDrawdown, List<VrpTrade> trades) {
+            this(totalSnapshots, totalTrades, winningTrades, winRate, totalPnl, averagePnlPerTrade, maxDrawdown, trades, totalTrades, 0, 0.0);
+        }
+    }
 
     private static final double CONTRACT_MULTIPLIER = 100.0;
 
@@ -69,15 +90,23 @@ public final class VrpSignalBacktester {
             int contractQty,
             double feePerContract
     ) {
-        if (snapshots == null || snapshots.isEmpty() || volForecast == null) {
-            return new VrpBacktestResult(0, 0, 0, 0.0, 0.0, 0.0, 0.0, List.of());
+        return run(snapshots, volForecast, new ReplayConfig(vrpThreshold, contractQty, feePerContract, false, 0, false));
+    }
+
+    public static VrpBacktestResult run(
+            List<Snapshot> snapshots,
+            RealizedVolForecast volForecast,
+            ReplayConfig config
+    ) {
+        if (snapshots == null || snapshots.isEmpty() || volForecast == null || config == null) {
+            return new VrpBacktestResult(0, 0, 0, 0.0, 0.0, 0.0, 0.0, List.of(), 0, 0, 0.0);
         }
 
         List<VrpTrade> executedTrades = new ArrayList<>();
         double runningPnl = 0.0;
         double peakPnl = 0.0;
         double maxDrawdown = 0.0;
-        double fees = 4.0 * feePerContract * contractQty; // two legs, in and out
+        double fees = 4.0 * config.feePerContract() * config.contractQty(); // two legs, in and out
 
         Double openPrice = null;       // what the straddle was sold for (a short) or paid for (a long), per share
         double openVrp = Double.NaN;
@@ -85,6 +114,12 @@ public final class VrpSignalBacktester {
         double openStrike = Double.NaN;
         boolean openIsShort = false;
         Snapshot last = null;
+
+        List<Double> vrpHistory = new ArrayList<>();
+        double totalVrpSum = 0.0;
+        int validVrpCount = 0;
+        int hurdlesPassed = 0;
+        int hurdlesRejected = 0;
 
         for (Snapshot snapshot : snapshots) {
             last = snapshot;
@@ -107,44 +142,75 @@ public final class VrpSignalBacktester {
             if (fair.isEmpty()) {
                 continue;
             }
-            double vrp = marketAtmIv - fair.getAsDouble();
+            double rawVrp = marketAtmIv - fair.getAsDouble();
+            vrpHistory.add(rawVrp);
+            totalVrpSum += rawVrp;
+            validVrpCount++;
+
+            double effectiveVrp = rawVrp;
+            if (config.demeanVrp() && config.rollingWindow() > 0) {
+                int start = Math.max(0, vrpHistory.size() - config.rollingWindow());
+                double winSum = 0.0;
+                int count = 0;
+                for (int i = start; i < vrpHistory.size(); i++) {
+                    winSum += vrpHistory.get(i);
+                    count++;
+                }
+                double baseline = count > 0 ? winSum / count : 0.0;
+                effectiveVrp = rawVrp - baseline;
+            }
+
+            // Cost-aware break-even hurdle: (half-spread + fees) / vega
+            double callHalf = Math.max(0.0, (call.ask() - call.bid()) / 2.0);
+            double putHalf = Math.max(0.0, (put.ask() - put.bid()) / 2.0);
+            double roundTripFriction = 2.0 * (callHalf + putHalf + (2.0 * config.feePerContract() / 100.0));
+            double callVega = com.sbk.optionspricer.BlackScholesPricer.vega(chain.spot(), strike, t, 0.05, marketAtmIv, 0.0);
+            double straddleVega = 2.0 * callVega;
+            double breakEvenHurdle = straddleVega > 1e-6 ? (roundTripFriction / straddleVega) : 0.05;
 
             if (openPrice != null) {
-                boolean exitShort = openIsShort && (vrp <= 0.0 || vrp < openVrp * 0.5);
-                boolean exitLong = !openIsShort && (vrp >= 0.0 || vrp > openVrp * 0.5);
+                boolean exitShort = openIsShort && (effectiveVrp <= 0.0 || effectiveVrp < openVrp * 0.5);
+                boolean exitLong = !openIsShort && (effectiveVrp >= 0.0 || effectiveVrp > openVrp * 0.5);
                 if (exitShort || exitLong) {
                     // closing a short buys it back at the asks; closing a long sells it at the bids
                     double exitPrice = openIsShort ? call.ask() + put.ask() : call.bid() + put.bid();
-                    double tradePnl = tradePnl(openIsShort, openPrice, exitPrice, contractQty, fees);
+                    double tradePnl = tradePnl(openIsShort, openPrice, exitPrice, config.contractQty(), fees);
                     runningPnl += tradePnl;
                     peakPnl = Math.max(peakPnl, runningPnl);
                     maxDrawdown = Math.max(maxDrawdown, peakPnl - runningPnl);
                     executedTrades.add(new VrpTrade(date, openExpiry, openStrike, openIsShort, openPrice, exitPrice, openVrp, tradePnl));
                     openPrice = null;
                 }
-            } else if (vrp > vrpThreshold) {
-                openPrice = call.bid() + put.bid(); // implied vol rich to the forecast: sell the straddle at the bids
-                openIsShort = true;
-                openVrp = vrp;
-                openExpiry = chain.expiry();
-                openStrike = strike;
-            } else if (vrp < -vrpThreshold) {
-                openPrice = call.ask() + put.ask(); // implied vol cheap to the forecast: buy it at the asks
-                openIsShort = false;
-                openVrp = vrp;
-                openExpiry = chain.expiry();
-                openStrike = strike;
+            } else {
+                double hurdle = config.enforceCostHurdle() ? Math.max(config.vrpThreshold(), breakEvenHurdle) : config.vrpThreshold();
+                if (effectiveVrp > hurdle) {
+                    hurdlesPassed++;
+                    openPrice = call.bid() + put.bid(); // implied vol rich: sell the straddle at the bids
+                    openIsShort = true;
+                    openVrp = effectiveVrp;
+                    openExpiry = chain.expiry();
+                    openStrike = strike;
+                } else if (effectiveVrp < -hurdle) {
+                    hurdlesPassed++;
+                    openPrice = call.ask() + put.ask(); // implied vol cheap: buy it at the asks
+                    openIsShort = false;
+                    openVrp = effectiveVrp;
+                    openExpiry = chain.expiry();
+                    openStrike = strike;
+                } else if (Math.abs(effectiveVrp) > config.vrpThreshold() && config.enforceCostHurdle()) {
+                    hurdlesRejected++;
+                }
             }
         }
 
         // a position still open at the end is closed at the last snapshot, at the touch like any other exit
-        if (openPrice != null) {
+        if (openPrice != null && last != null) {
             OptionQuote call = findQuote(last.chain(), openStrike, OptionType.CALL);
             OptionQuote put = findQuote(last.chain(), openStrike, OptionType.PUT);
             double exitPrice = call != null && put != null
                     ? (openIsShort ? call.ask() + put.ask() : call.bid() + put.bid())
                     : openPrice;
-            double tradePnl = tradePnl(openIsShort, openPrice, exitPrice, contractQty, fees);
+            double tradePnl = tradePnl(openIsShort, openPrice, exitPrice, config.contractQty(), fees);
             runningPnl += tradePnl;
             peakPnl = Math.max(peakPnl, runningPnl);
             maxDrawdown = Math.max(maxDrawdown, peakPnl - runningPnl);
@@ -156,8 +222,10 @@ public final class VrpSignalBacktester {
         int winners = (int) executedTrades.stream().filter(t -> t.pnl() > 0.0).count();
         double winRate = total > 0 ? (double) winners / total : 0.0;
         double avgPnl = total > 0 ? runningPnl / total : 0.0;
+        double meanVrp = validVrpCount > 0 ? totalVrpSum / validVrpCount : 0.0;
 
-        return new VrpBacktestResult(snapshots.size(), total, winners, winRate, runningPnl, avgPnl, maxDrawdown, executedTrades);
+        return new VrpBacktestResult(snapshots.size(), total, winners, winRate, runningPnl, avgPnl, maxDrawdown,
+                executedTrades, hurdlesPassed, hurdlesRejected, meanVrp);
     }
 
     private static double tradePnl(boolean isShort, double entry, double exit, int qty, double fees) {
