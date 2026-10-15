@@ -142,7 +142,7 @@ docker compose up --build -d
 
 Sign in with `OPERATOR_PASSWORD`. The paper-trading panel shows positions and every order with its fill or
 rejection reason, with HALT / RESUME and a strategy switch. `run_all.ps1` runs the same checks as CI locally:
-the Java build with 560 tests and the coverage gate, the Python tests, and the frontend lint, 90 tests and build.
+the Java build with 560 tests and the coverage gate, the Python tests, and the frontend lint, 92 tests and build.
 
 ---
 

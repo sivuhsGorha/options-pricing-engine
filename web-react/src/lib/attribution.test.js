@@ -19,7 +19,7 @@ describe('attributionRows', () => {
         expect(a.rows.map(r => r.label)).toEqual(['DELTA', 'GAMMA / THETA', 'VEGA', 'OTHER']);
         expect(a.rows.map(r => r.value)).toEqual([12.34, -3.21, 4.56, -0.78]);
         expect(a.optionsHeld).toBe(true);
-        expect(a.caption).toMatch(/since engine start/i);
+        expect(a.caption).toMatch(/since the engine last started/i);
         expect(a.rows[3].title).toMatch(/spread/i);
     });
 
@@ -28,6 +28,8 @@ describe('attributionRows', () => {
 
         expect(a.optionsHeld).toBe(false);
         expect(a.caption).toMatch(/no option positions/i);
+        // the figures restart with the engine, so they differ from "today" in the P&L block above; say so in both cases
+        expect(a.caption).toMatch(/since the engine last started/i);
     });
 
     it('does not claim an option position that has been closed, or one it cannot see', () => {

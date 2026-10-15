@@ -47,7 +47,7 @@ the badge tooltip. Each chart has EXPAND / SHRINK.
 button), the strategy row (ON/OFF switch, mode, and in vol-spread mode the strategy's latest decision in its own words,
 e.g. `HOLD 2026-11-20 775: market 18.2% vs ref 17.4% (edge +0.80 pts) - edge within the 1.00-point band`), the
 valuation line (time, spot and its source, unrealised and realised P&L), the position table (contract such as
-`SPY 20 Nov 26 780 C`, quantity, multiplier, mark with its source in the tooltip, unrealised P&L, notional) and the last 25 orders (time, id, quantity, fill price, `FILLED (<data
+`SPY 20 Nov 26 780 C`, quantity, multiplier, mark with its source in the tooltip, unrealised P&L, notional at the last fill price, not at the mark) and the last 25 orders (time, id, quantity, fill price, `FILLED (<data
 status>)` or `REJECTED: <reason>`), from `/api/positions`, `/api/control` and `/api/execution`. The buttons
 call POST endpoints that require the session cookie and the page's own Origin (see EXECUTION.md); every
 action is written to the event log with its outcome.

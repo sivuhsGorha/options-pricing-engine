@@ -84,7 +84,7 @@ export default function ExecutionPanel({ positions, orders, control, valuation, 
                             <th className="align-right">x</th>
                             <th className="align-right">MARK</th>
                             <th className="align-right">P&amp;L</th>
-                            <th className="align-right">NOTIONAL</th>
+                            <th className="align-right" title="quantity x multiplier x the last fill price, not the current mark: it does not move with the market">NOTIONAL (AT FILL)</th>
                         </tr>
                     </thead>
                     <tbody id="positions-body">
@@ -119,7 +119,7 @@ export default function ExecutionPanel({ positions, orders, control, valuation, 
                     <tbody id="orders-body">
                         {recent.length === 0 && (
                             <tr><td colSpan={4}>{control.mode === 'vol_spread'
-                                ? 'No orders yet. The strategy trades when the straddle\'s market vol is further from the reference surface than the edge band.'
+                                ? 'No orders yet. A straddle opens only when the market\'s vol is further from the reference surface than both the edge band and the round-trip cost (with strategy.side long_only, only when it is cheaper). The strategy line above shows its latest decision.'
                                 : 'No orders yet. The strategy trades when the price moves by the trigger percentage between two quotes.'}</td></tr>
                         )}
                         {recent.map(o => (

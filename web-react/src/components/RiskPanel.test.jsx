@@ -14,6 +14,12 @@ describe('RiskPanel', () => {
         expect(screen.getByText('$30,000.00')).toBeInTheDocument();
     });
 
+    it('says the book notional is at each position\'s last fill price, not at the mark', () => {
+        render(<RiskPanel metrics={{}} displayedRisk={{ trackedNotional: 15531.4 }} logs={[]} />);
+
+        expect(screen.getByTitle(/last fill price, not the current mark/i)).toHaveTextContent('$15,531.40');
+    });
+
     it('writes the recommended hedge with one sign, never "+-"', () => {
         const { rerender } = render(<RiskPanel metrics={{ recommendedHedge: -25 }} displayedRisk={{}} logs={[]} />);
         expect(screen.getByText('-25 SH')).toBeInTheDocument();
@@ -85,7 +91,7 @@ describe('RiskPanel', () => {
         rerender(<RiskPanel metrics={{}} displayedRisk={{}} logs={[]} pnl={pnl}
             valuation={{ ...shares, positions: [{ kind: 'OPTION', quantity: -1 }] }} />);
         expect(screen.queryByText(/no option positions/i)).not.toBeInTheDocument();
-        expect(screen.getByText(/since engine start/i)).toBeInTheDocument();
+        expect(screen.getByText(/since the engine last started/i)).toBeInTheDocument();
     });
 
     it('shows no attribution block when the engine does not send one', () => {

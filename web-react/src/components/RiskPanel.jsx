@@ -92,8 +92,8 @@ export default function RiskPanel({ metrics, displayedRisk, logs, valuation, pnl
                 <div className="margin-block" id="margin-block">
                     <div className="margin-label">SCENARIO MARGIN</div>
                     <div className="margin-value mono" id="val-margin">{formatCurrency(metrics.scenarioMargin)}</div>
-                    <div style={{ color: '#9EC1FF', fontSize: '11px', marginTop: '6px' }}>
-                        EXECUTION BOOK NOTIONAL: <span style={{ color: '#00E5FF', fontWeight: 'bold' }}>{formatCurrency(displayedRisk.trackedNotional)}</span>
+                    <div title="each position valued at its last fill price, not the current mark" style={{ color: '#9EC1FF', fontSize: '11px', marginTop: '6px' }}>
+                        EXECUTION BOOK NOTIONAL (AT FILL): <span style={{ color: '#00E5FF', fontWeight: 'bold' }}>{formatCurrency(displayedRisk.trackedNotional)}</span>
                     </div>
                 </div>
 

@@ -21,7 +21,7 @@ export function attributionRows(pnl, valuation) {
                 title: 'what the Greeks above do not explain: the spread paid on a fill, a position changing between two marks, higher-order terms' },
         ],
         caption: optionsHeld
-            ? 'since engine start; OTHER holds the spread paid on fills and anything the Greeks do not explain'
-            : 'no option positions held: only delta (the shares) can explain P&L',
+            ? 'since the engine last started; OTHER holds the spread paid on fills and anything the Greeks do not explain'
+            : 'since the engine last started; no option positions held: only delta (the shares) can explain P&L',
     };
 }

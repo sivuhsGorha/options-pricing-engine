@@ -118,6 +118,20 @@ describe('ExecutionPanel', () => {
     it('describes the empty order tape for the options strategy in its own terms', () => {
         render(<ExecutionPanel positions={noPositions} orders={[]} control={{ ...activeControl, mode: 'vol_spread' }} valuation={noValuation} onHalt={() => {}} onResume={() => {}} onToggleStrategy={() => {}} />);
 
-        expect(screen.getByText(/No orders yet\. The strategy trades when the straddle/)).toBeInTheDocument();
+        const hint = screen.getByText(/No orders yet\./);
+        // true for both sides: a straddle opens only past the band AND the round-trip cost, and with long_only only when cheap
+        expect(hint).toHaveTextContent(/round-trip cost/);
+        expect(hint).toHaveTextContent(/long_only/);
+        expect(hint).toHaveTextContent(/decision/i);
+        expect(hint.textContent).not.toMatch(/further from the reference surface than the edge band\.$/);
+    });
+
+    it('says the notional is valued at the last fill, not at the current mark', () => {
+        const positions = { positions: [{ symbol: 'SPY', kind: 'STOCK', quantity: -20, multiplier: 1, notional: 15531.4 }] };
+        render(<ExecutionPanel positions={positions} orders={[]} control={activeControl} valuation={noValuation} onHalt={() => {}} onResume={() => {}} onToggleStrategy={() => {}} />);
+
+        const header = screen.getByRole('columnheader', { name: /NOTIONAL/ });
+        expect(header).toHaveTextContent('NOTIONAL (AT FILL)');
+        expect(header).toHaveAttribute('title', expect.stringMatching(/last fill price, not the current mark/));
     });
 });
