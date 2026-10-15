@@ -204,11 +204,11 @@ spot is STALE (commit `182db2e`, with a test). These five orders were read from 
 the container was recreated at 12:09 on the fixed build, so they are no longer in the API or the log.
 
 **The session.** The P&L sampler shows the spot moving from 13:00 to 15:01 UTC (778.1 down to 776.95, 24 and 38
-distinct values in the 13h and 14h hours against one value all night). The engine was interrupted twice and I do
-not know why: the log goes silent from 14:25:25 to 14:29:42, when the engine starts again from the top (3 fills
-replayed, reconciliation OK, a four-minute gap in the P&L samples), and it ends at 15:01:31. The container's
-restart policy brought it back the first time, which fits Docker Desktop or the PC pausing; the log has no
-shutdown line either time. So this entry covers 13:30 to 15:01 UTC, the first 90 minutes of the session, not the
+distinct values in the 13h and 14h hours against one value all night). The engine was interrupted twice: the log
+goes silent from 14:25:25 to 14:29:42, when the engine starts again from the top (3 fills replayed, reconciliation
+OK, a four-minute gap in the P&L samples), and it ends at 15:01:31. Found on 2026-10-14 from Windows' own event log:
+the laptop entered Modern Standby at 14:24:53 (which paused Docker and restarted the engine on waking), and the
+operating system shut down at 15:01:47. So this entry covers 13:30 to 15:01 UTC, the first 90 minutes of the session, not the
 whole day. The tallies below are from `docker compose logs -t`, which timestamps each line; the engine's own
 console lines carry none.
 
@@ -246,3 +246,65 @@ The position's unrealised P&L moved with the spot, from -30.34 at 13:00 to -7.34
 
 **Not shown yet.** A vol-spread fill, a straddle fill with its hedge, and a full session on the new build. Open
 question: why the option quotes read STALE a third of the time.
+
+### 2026-10-14: 88 minutes of the session, no orders, and the laptop was the main finding
+
+**Setup.** The build from `e97957d` (the reviewed batch, the attribution block, the recorder status), started at
+12:07 UTC in Docker. SPY, `execution.transport: alpaca`, `vol_spread` with the 1.00-point band and the cost hurdle,
+the surface refitted every 5 minutes, `fair_vol_model: HAR` as a readout only. Reconciliation OK, 3 fills replayed,
+1 open position (short 20 SPY).
+
+**What the engine recorded.** Only 13:30 to 14:58:50 UTC, the first 88 minutes of a six-and-a-half-hour session. The
+rest of the day is missing, for two reasons the Windows event log shows:
+
+1. **Modern Standby, 14 times.** Between 12:00 and 15:00 UTC the laptop went into Modern Standby 14 times (about 34
+   minutes asleep in all, the longest 11 minutes before the open and 9 minutes at 14:23), and a standby pauses Docker
+   and the engine with it. Windows' Balanced plan puts this machine to sleep after 5 minutes without input on mains
+   power.
+2. **A restart at 14:58:59 UTC (16:58 local).** The PC was restarted from the Start menu. Docker Desktop does not
+   start by itself after a reboot, so the engine stayed off until Docker was started by hand at 06:51 the next
+   morning, about 16 hours later. 2026-10-13 ended the same way (an OS shutdown at 15:01).
+
+| Steps 13:30 to 14:58 UTC | Count | What they were |
+| :-- | --: | :-- |
+| `HOLD` | 113 | All inside the band: edge from -0.45 to +0.09 points, mean -0.14. The 2026-11-13 straddle at strikes 775 to 779 (776 for 70 of them) as spot fell from 778 to 772.5 |
+| `WAIT - <call>: quote STALE (feed N s old, ...)` | 41 | Feed ages from 123 to 443 s, mean 227 |
+| `WAIT - spot quote STALE` | 7 | Brief. Finnhub timed out and Alpha Vantage failed a DNS lookup at 13:28, just before the open; I did not separate the later ones from the standbys |
+
+No order was sent. No fill, rejection, halt or reconciliation mismatch. The ledger still has its 3 fills.
+
+**P&L.** The first sample of the day, -$28.54 at 06:24, to +$82.06 at 14:58:33 as SPY went from 778.01 to 772.48,
+which a short 20 SPY gains from. The attribution agrees: at 14:56 the cumulative delta P&L since the engine started
+was +$115.80, equal to the change in total P&L, with gamma/theta, vega and other all $0.00. No option is held, so only
+delta can explain anything.
+
+**The realized-vol readout.** It appeared on all 113 holds: `RV forecast 7.2%, VRP +5.3 to +5.7 pts`, against a market
+at 12.8 to 12.9 %. The premium of implied over realized vol is positive and steady, as expected, which is why the
+forecast is shown and does not trade: used as the reference, the strategy would sell every day. The forecast itself is
+unverified (the HAR weights are illustrative, and 7.2 % is at the low end for SPY).
+
+**The stale option quotes, split in two.**
+
+- *The first nine minutes (13:31 to 13:39 UTC): 12 stale waits with no standby anywhere near them.* The feed's age climbed
+  127, 231, 261 ... 381 s in 30 s steps, then reset to 226 and climbed again. No reload failure was logged. That is
+  Cboe's published timestamp lagging by two to six and a half minutes at the open, and it is the part of the 2026-10-13
+  hypothesis that holds.
+- *After 13:39, indistinguishable from the machine.* 101 of 113 holds and 29 of 41 stale waits fall within ten
+  minutes of a standby exit, so the later runs cannot be assigned to the feed or to the laptop.
+
+The 120 s limit is unchanged; whether a feed that is delayed by design should tolerate several minutes of stamp lag is
+an open decision.
+
+**The recorder.** 106 snapshot files, 3.8 MB (about 36 KB each) by 15:00, with 59 batches skipped as an unchanged
+feed by 14:56. The record has holes where the laptop slept.
+
+**What it showed.**
+
+1. Across the two sessions the strategy has held 211 times with the market open and never decided to open, which
+   fits an edge that is mostly the fit's residual. It has still never sent a vol-spread order.
+2. The laptop, not the code, is now the weakest link: two sessions in a row covered 90 minutes of 390, and standby makes
+   even those 90 minutes uneven.
+3. The attribution adds up exactly, the recorder keeps what it should, and the realized-vol readout runs on real data.
+
+**Not shown yet.** A vol-spread fill; behaviour after 15:00 UTC; a session with the machine awake the whole time.
+Not done: the Windows power setting and the Docker Desktop start-at-login option (RUNBOOK, "Running on a laptop").

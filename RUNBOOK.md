@@ -75,7 +75,7 @@ you care about the paper-trading history. The startup log reports each file:
 | `fills.csv` | one row per fill with its price; the book, average cost and realised P&L are rebuilt from it | starts the book flat |
 | `pnl_history.csv` | the valuation sampled once a minute (and when realised P&L changes); today's P&L and drawdown come from it | loses the P&L history, not the book |
 | `surface_history.csv` | one row per model per calibration: front ATM vol, skew, RMSE, quotes used, parameters | loses the surface history chart |
-| `chain_snapshots/SPY/<date>/quotes_<HHmmss>.csv.gz` | every option chain the feed changed (a batch whose feed timestamps equal the last one kept is skipped, so nights and weekends add nothing): bid, ask, the feed's IV, volume, source. Raw material for replay and backtests | loses the history a backtest would use; the engine does not read it back. Nothing prunes it and its growth per trading day has not been measured yet: check `du -sh data/chain_snapshots` after a session |
+| `chain_snapshots/SPY/<date>/quotes_<HHmmss>.csv.gz` | every option chain the feed changed (a batch whose feed timestamps equal the last one kept is skipped, so nights and weekends add nothing): bid, ask, the feed's IV, volume, source. Raw material for replay and backtests | loses the history a backtest would use; the engine does not read it back. Measured on 2026-10-14: about 36 KB a file (106 files, 3.8 MB by 15:00 UTC, with the laptop asleep for parts of it). Nothing prunes it; check `du -sh data/chain_snapshots` now and then |
 | `shm_state.dat` (`MMAP_STATE_FILE`) | the engine-to-web shared state | recreated at start |
 
 A row in any CSV that cannot be parsed stops startup naming the file and line, on purpose: a record with a
@@ -177,3 +177,26 @@ Verified on 2026-10-14 on Windows with Docker Desktop: a backup of the live volu
 volume (files owned by the engine's user, ledger SHA-256 equal to the manifest), a refusal to restore into a volume
 that already held files, and a refusal when the manifest did not match. Not tried: starting the engine on a restored
 volume on a second machine, or restoring from a cloud folder.
+## Running on a laptop
+
+Two things stopped the engine from seeing most of the US session on 2026-10-13 and 2026-10-14 (EXECUTION.md,
+section 5), and neither is a code fault:
+
+- **Sleep.** On this machine the Balanced power plan puts the laptop into Modern Standby after 5 minutes without
+  input on mains power. Docker and the engine pause with it, so the record has holes and the option quotes go stale
+  across them. The US session runs 13:30 to 20:00 UTC, which is 15:30 to 22:00 in South Africa.
+- **Reboots and shutdowns.** After a restart Docker Desktop does not start by itself, so the engine stays off until
+  someone opens Docker Desktop. Its restart policy then brings the container back.
+
+To keep it running through a session:
+
+1. Settings, System, Power: set "Screen and sleep" on mains power to **Never** for the session (or run
+   `powercfg /change standby-timeout-ac 0`; restore it with `powercfg /change standby-timeout-ac 5`). Leave the
+   charger in. On battery the same sleep rule applies, so a laptop running on battery will still stop.
+2. Docker Desktop, Settings, General: tick **Start Docker Desktop when you sign in**.
+3. Do not restart or shut the laptop down before 22:00 local, and close the lid only if the lid action is set to
+   "Do nothing".
+4. After any gap, the log's timestamps show it: `docker compose logs -t --since 2h`.
+
+A laptop that sleeps is a poor host for an engine that is meant to watch a market all day. The VPS route in "Hosting
+on a server" is the real fix; this section only reduces the gaps until then.

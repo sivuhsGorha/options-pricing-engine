@@ -60,10 +60,10 @@ Every quote carries a status: LIVE, DELAYED, STALE, UNAVAILABLE or SIMULATED. Se
 | Running as | Docker container with a restart policy; the `engine-data` volume holds the ledger |
 | Data providers | Finnhub and Alpha Vantage delayed; Polygon/Massive off (plan has no snapshot endpoint); Marketstack rate limited |
 | Live evidence | 2026-10-09: two fills, one cancel-then-fill race, one reconciliation halt. 2026-10-13: the stale-spot gate held on live data (175 waits), 98 decisions all inside the band, no orders, book matched Alpaca (see EXECUTION.md section 5) |
-| Open question | Option quotes read STALE in about a third of the steps that reached them on 2026-10-13, mostly in the first hour after the open (none in 24 steps on 2026-10-09). Hypothesis: Cboe's own timestamp lags the fetch by 60 to 120 s or more, so the quote's age straddles the 120 s limit. Unmeasured; the log now prints the age |
+| Open question | Option quotes read STALE in a third of the steps on 2026-10-13 and a quarter on 2026-10-14. At the open the feed's own timestamp lags by 2 to 6.5 minutes (12 stale waits with no standby near them, ages 127 to 381 s, no reload failure logged), so the 120 s limit is tight for it. Later stale runs cannot be told from the laptop's standbys. Whether to loosen the limit is undecided |
 | Running since 2026-10-14 11:28 UTC | The build with the recorder, cost hurdle, attribution, parity-forward fit and the HAR shadow readout. Seen so far, market closed: the recorder wrote a first snapshot and skipped the unchanged feed after it; 250 daily closes loaded from Alpaca's bars; `/api/pnl/attribution` answers (flat). Not yet seen with the market open |
 | Off by default | `use_multi_leg` (Alpaca multi-leg buy order; never sent), `fair_vol_model` (shadow only) |
-| Not yet seen live | A vol-spread fill; a straddle fill with its hedge; the unvalued-position gate under a real fill; a full session on the current build (2026-10-13 covered 13:30 to 15:01 UTC) |
+| Not yet seen live | A vol-spread fill; a straddle fill with its hedge; the unvalued-position gate under a real fill; a whole session. 2026-10-13 and 2026-10-14 each recorded only the first 90 minutes (13:30 to about 15:00 UTC) because of laptop standby and an evening restart |
 
 ## 5. Known limits
 
@@ -73,6 +73,7 @@ Every quote carries a status: LIVE, DELAYED, STALE, UNAVAILABLE or SIMULATED. Se
   down on holidays and halts, but it has no notion of session times.
 - **Round trip.** The trip to Alpaca from the development machine takes 3 to 5 s, so a 10 s fill wait leaves the
   order resting for about 5 s.
+- **The laptop is the weakest link.** It entered Modern Standby 14 times in three hours on 2026-10-14 and was restarted at 16:58 local, so two sessions in a row recorded 90 minutes of 390. See RUNBOOK, Running on a laptop.
 - **One process, one underlying.** No redundancy; state is files under `data/`. The ledger, config and keys are
   not in git: `scripts/backup.ps1` and `restore.ps1` cover the data volume and `config.yaml`; `.env` must be kept in a
   password manager (RUNBOOK, "Backup and recovery"). No backup is scheduled; one has to be run by hand.
@@ -100,6 +101,7 @@ Every quote carries a status: LIVE, DELAYED, STALE, UNAVAILABLE or SIMULATED. Se
 
 Newest first. One line per change that alters what the system does or what we know about it.
 
+- **2026-10-14** Session written up (EXECUTION.md, section 5): 113 holds and no orders in the 88 minutes the engine saw, attribution adding up exactly, the realized-vol readout on every hold (RV 7.2 %, VRP +5.3 to +5.7 points), the recorder at 106 files and 3.8 MB. The cause of the missing sessions and of the 10-13 interruptions was found in Windows' event log: Modern Standby and an evening restart, not a fault in the engine. The stale-quote question is half answered: genuine feed lag at the open, then indistinguishable from standby.
 - **2026-10-14** Added `scripts/backup.ps1` and `scripts/restore.ps1` and a RUNBOOK recovery section: what to do
   after a lost laptop, a lost ledger or a new machine. Tried on Windows: a real backup, a restore into a scratch
   volume with the ledger hash matching, a refusal to restore over existing files, and a refusal on a manifest
