@@ -3,6 +3,13 @@ import { describePosition } from '../lib/contract';
 
 const timeOf = (ms) => (ms ? new Date(ms).toLocaleTimeString() : '--');
 
+/** What a position is worth at its current mark (quantity x multiplier x mark), or null while it has no mark. */
+const markedValue = (position, valuationRow) => {
+    if (!valuationRow || typeof valuationRow.mark !== 'number') return null;
+    const value = Math.abs(position.quantity * position.multiplier * valuationRow.mark);
+    return Number.isFinite(value) ? value : null;
+};
+
 /**
  * Paper-trading state and operator controls: halt status with HALT / RESUME, the strategy switch with its
  * trigger and size, open positions, and the most recent orders with reasons for rejections.
@@ -85,11 +92,12 @@ export default function ExecutionPanel({ positions, orders, control, valuation, 
                             <th className="align-right">MARK</th>
                             <th className="align-right">P&amp;L</th>
                             <th className="align-right" title="quantity x multiplier x the last fill price, not the current mark: it does not move with the market">NOTIONAL (AT FILL)</th>
+                            <th className="align-right" title="quantity x multiplier x the current mark: it moves with the market">VALUE (AT MARK)</th>
                         </tr>
                     </thead>
                     <tbody id="positions-body">
                         {positions.positions.length === 0 && (
-                            <tr><td colSpan={6}>No positions yet.</td></tr>
+                            <tr><td colSpan={7}>No positions yet.</td></tr>
                         )}
                         {positions.positions.map(p => (
                             <tr key={p.symbol}>
@@ -103,6 +111,10 @@ export default function ExecutionPanel({ positions, orders, control, valuation, 
                                     {marks.get(p.symbol) ? formatCurrency(marks.get(p.symbol).unrealizedPnl) : '--'}
                                 </td>
                                 <td className="align-right mono">{formatCurrency(p.notional)}</td>
+                                <td className="align-right mono">{(() => {
+                                    const value = markedValue(p, marks.get(p.symbol));
+                                    return value === null ? '--' : formatCurrency(value);
+                                })()}</td>
                             </tr>
                         ))}
                     </tbody>

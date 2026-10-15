@@ -47,7 +47,7 @@ describe('ExecutionPanel', () => {
     it('lists positions with notional and orders with their fill or rejection reason, newest first', () => {
         const positions = { positions: [
             { symbol: 'SPY', kind: 'STOCK', quantity: 10, multiplier: 1, notional: 480250 },
-            { symbol: 'SPY261120C00780000', kind: 'OPTION', underlying: 'SPY', expiry: '2026-11-20', strike: 780, type: 'CALL', quantity: -2, multiplier: 100, notional: 1980 },
+            { symbol: 'SPY261120C00780000', kind: 'OPTION', underlying: 'SPY', expiry: '2026-11-20', strike: 780, type: 'CALL', quantity: -2, multiplier: 100, notional: 2010 },
         ] };
         const orders = [
             { orderId: 1, accepted: true, quantity: 10, fillPrice: 480.25, sourceStatus: 'LIVE', timestamp: 1 },
@@ -63,7 +63,8 @@ describe('ExecutionPanel', () => {
         expect(screen.getByText('9.90')).toBeInTheDocument();
         expect(screen.getByText('-$75.00')).toBeInTheDocument();
         expect(screen.getByText('SPY 20 Nov 26 780 C')).toBeInTheDocument();
-        expect(screen.getByText('$1,980.00')).toBeInTheDocument();
+        expect(screen.getByText('$2,010.00')).toBeInTheDocument(); // the notional at the fill price
+        expect(screen.getByText('$1,980.00')).toBeInTheDocument();  // 2 contracts x 100 x the mark 9.90: the value at the mark
         expect(screen.getByText('1 FILLED / 1 REJECTED')).toBeInTheDocument();
         expect(screen.getByText('FILLED (LIVE)')).toBeInTheDocument();
         expect(screen.getByText('REJECTED: market data not tradable: STALE')).toBeInTheDocument();
@@ -124,6 +125,25 @@ describe('ExecutionPanel', () => {
         expect(hint).toHaveTextContent(/long_only/);
         expect(hint).toHaveTextContent(/decision/i);
         expect(hint.textContent).not.toMatch(/further from the reference surface than the edge band\.$/);
+    });
+
+    it('shows the value at the mark beside the notional at the fill, and a dash where there is no mark yet', () => {
+        const positions = { positions: [
+            { symbol: 'SPY', kind: 'STOCK', quantity: -20, multiplier: 1, notional: 15531.4 },
+            { symbol: 'SPY261120C00780000', kind: 'OPTION', underlying: 'SPY', expiry: '2026-11-20', strike: 780, type: 'CALL', quantity: 1, multiplier: 100, notional: 1000 },
+        ] };
+        const valuation = { ready: true, asOf: 1, spot: 767.3, spotSource: 'FINNHUB/DELAYED', unrealizedPnl: 185.66, realizedPnl: 0,
+            positions: [{ symbol: 'SPY', mark: 767.3, markSource: 'SPOT', volSource: 'NONE', unrealizedPnl: 185.66 }] }; // the option has no mark yet
+        render(<ExecutionPanel positions={positions} orders={[]} control={activeControl} valuation={valuation} onHalt={() => {}} onResume={() => {}} onToggleStrategy={() => {}} />);
+
+        const header = screen.getByRole('columnheader', { name: /VALUE \(AT MARK\)/ });
+        expect(header).toHaveAttribute('title', expect.stringMatching(/current mark/));
+        expect(screen.getByText('$15,531.40')).toBeInTheDocument();  // at the fill
+        expect(screen.getByText('$15,346.00')).toBeInTheDocument();  // 20 x 767.30: at the mark
+        const optionRow = screen.getByText('SPY 20 Nov 26 780 C').closest('tr');
+        expect(optionRow).toHaveTextContent('$1,000.00');            // its notional at the fill is still shown
+        expect(optionRow.textContent).not.toMatch(/NaN/);
+        expect(optionRow.querySelectorAll('td')[6]).toHaveTextContent('--');
     });
 
     it('says the notional is valued at the last fill, not at the current mark', () => {

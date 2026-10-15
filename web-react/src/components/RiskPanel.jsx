@@ -5,6 +5,25 @@ import { attributionRows } from '../lib/attribution';
 const timeOf = (ms) => (ms ? new Date(ms).toLocaleTimeString() : '--');
 const dateOf = (ms) => (ms ? new Date(ms).toISOString().slice(0, 10) : '--');
 
+/**
+ * The whole book at the current marks, from the valuation. Null (shown as a dash) while nothing has been valued or
+ * when a held position has no mark: a sum over only some of the book would be read as the whole of it.
+ */
+function markedBookNotional(valuation) {
+    if (!valuation || !valuation.ready || !Array.isArray(valuation.positions)) return null;
+    let total = 0;
+    let held = 0;
+    for (const p of valuation.positions) {
+        if (!p || !p.quantity) continue;
+        if (typeof p.mark !== 'number') return null;
+        const value = Math.abs(p.quantity * p.multiplier * p.mark);
+        if (!Number.isFinite(value)) return null;
+        total += value;
+        held++;
+    }
+    return held > 0 ? total : null;
+}
+
 function PnlRow({ label, value, title }) {
     return (
         <tr title={title}>
@@ -19,6 +38,7 @@ export default function RiskPanel({ metrics, displayedRisk, logs, valuation, pnl
     const pnlReady = Boolean(pnl && pnl.ready);
     const day = pnlReady ? pnl.day : null;
     const attribution = attributionRows(pnl, valuation);
+    const markedBook = markedBookNotional(valuation);
     return (
         <div className="panel risk-panel">
             <div className="panel-header">
@@ -94,6 +114,7 @@ export default function RiskPanel({ metrics, displayedRisk, logs, valuation, pnl
                     <div className="margin-value mono" id="val-margin">{formatCurrency(metrics.scenarioMargin)}</div>
                     <div title="each position valued at its last fill price, not the current mark" style={{ color: '#9EC1FF', fontSize: '11px', marginTop: '6px' }}>
                         EXECUTION BOOK NOTIONAL (AT FILL): <span style={{ color: '#00E5FF', fontWeight: 'bold' }}>{formatCurrency(displayedRisk.trackedNotional)}</span>
+                        {' · AT MARK: '}<span style={{ color: '#00E5FF', fontWeight: 'bold' }}>{markedBook === null ? '--' : formatCurrency(markedBook)}</span>
                     </div>
                 </div>
 

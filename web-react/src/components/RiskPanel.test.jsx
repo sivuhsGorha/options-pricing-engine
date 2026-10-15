@@ -20,6 +20,27 @@ describe('RiskPanel', () => {
         expect(screen.getByTitle(/last fill price, not the current mark/i)).toHaveTextContent('$15,531.40');
     });
 
+    it('shows the book at the mark beside the book at the fill, built from the valuation', () => {
+        const valuation = { ready: true, asOf: 1, spot: 767.3, positions: [
+            { symbol: 'SPY', kind: 'STOCK', quantity: -20, multiplier: 1, mark: 767.3 },
+            { symbol: 'SPY261120C00780000', kind: 'OPTION', quantity: 2, multiplier: 100, mark: 9.9 },
+        ] };
+        render(<RiskPanel metrics={{}} displayedRisk={{ trackedNotional: 17541.4 }} logs={[]} valuation={valuation} />);
+
+        expect(screen.getByText('$17,541.40')).toBeInTheDocument();           // at the fill
+        expect(screen.getByText('$17,326.00')).toBeInTheDocument();           // 20 x 767.30 + 2 x 100 x 9.90, at the mark
+        expect(screen.getByTitle(/last fill price, not the current mark/i)).toHaveTextContent(/AT MARK/);
+    });
+
+    it('does not guess a marked book while nothing has been valued, and skips an unmarked position', () => {
+        const { rerender } = render(<RiskPanel metrics={{}} displayedRisk={{ trackedNotional: 1000 }} logs={[]} />);
+        expect(screen.getByTitle(/last fill price, not the current mark/i)).toHaveTextContent(/AT MARK: --/);
+
+        rerender(<RiskPanel metrics={{}} displayedRisk={{ trackedNotional: 1000 }} logs={[]}
+            valuation={{ ready: true, asOf: 1, spot: 1, positions: [{ symbol: 'X', quantity: 1, multiplier: 1, mark: null }] }} />);
+        expect(screen.getByTitle(/last fill price, not the current mark/i)).toHaveTextContent(/AT MARK: --/);
+    });
+
     it('writes the recommended hedge with one sign, never "+-"', () => {
         const { rerender } = render(<RiskPanel metrics={{ recommendedHedge: -25 }} displayedRisk={{}} logs={[]} />);
         expect(screen.getByText('-25 SH')).toBeInTheDocument();
