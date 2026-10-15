@@ -2,6 +2,7 @@ export default function LoginForm({ password, onPasswordChange, error, onSubmit 
     return (
         <main className="login-screen">
             <form className="login-form" onSubmit={onSubmit}>
+                <img className="login-logo" src="/favicon.svg" alt="AURA-OPT" width="56" height="56" />
                 <div className="login-kicker">AURA-OPT / OPERATOR ACCESS</div>
                 <h1>Sign in</h1>
                 <label htmlFor="operator-password">Operator password</label>

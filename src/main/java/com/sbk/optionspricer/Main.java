@@ -50,7 +50,7 @@ public class Main {
             return;
         }
         System.out.println("=========================================================================");
-        System.out.println("      AURA-OPT INSTITUTIONAL OPTIONS PRICING & EXECUTION PLATFORM        ");
+        System.out.println("        AURA-OPT  OPTIONS PRICING & PAPER-TRADING ENGINE                 ");
         System.out.println("=========================================================================");
 
         ConfigManager config;

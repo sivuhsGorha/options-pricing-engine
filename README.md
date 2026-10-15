@@ -1,4 +1,8 @@
-# Options Pricing & Paper-Trading Engine (AURA-OPT)
+<p align="center"><img src="docs/logo.svg" alt="AURA-OPT: options pricing, paper trading" width="480"></p>
+
+# AURA-OPT
+
+**An options pricing, volatility and paper-trading engine.**
 
 [![CI](https://github.com/sivuhsGorha/options-pricing-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/sivuhsGorha/options-pricing-engine/actions)
 [![Java Version](https://img.shields.io/badge/java-25-orange.svg)](https://openjdk.org/)
@@ -138,7 +142,7 @@ docker compose up --build -d
 
 Sign in with `OPERATOR_PASSWORD`. The paper-trading panel shows positions and every order with its fill or
 rejection reason, with HALT / RESUME and a strategy switch. `run_all.ps1` runs the same checks as CI locally:
-the Java build with 560 tests and the coverage gate, the Python tests, and the frontend lint, 83 tests and build.
+the Java build with 560 tests and the coverage gate, the Python tests, and the frontend lint, 89 tests and build.
 
 ---
 

@@ -19,6 +19,13 @@ describe('LoginForm', () => {
         expect(onSubmit).toHaveBeenCalledTimes(1);
     });
 
+    it('shows the product mark with its name for screen readers', () => {
+        render(<LoginForm password="" onPasswordChange={() => {}} error="" onSubmit={() => {}} />);
+
+        const logo = screen.getByRole('img', { name: 'AURA-OPT' });
+        expect(logo).toHaveAttribute('src', '/favicon.svg');
+    });
+
     it('shows the error as an alert so screen readers announce it', () => {
         render(<LoginForm password="" onPasswordChange={() => {}} error="Authentication failed." onSubmit={() => {}} />);
 

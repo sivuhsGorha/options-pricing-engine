@@ -51,9 +51,20 @@
   background: #080A0E;
 }
 
+.login-logo {
+  display: block;
+  margin: 0 0 10px;
+}
+
 .login-kicker {
   color: var(--text-amber);
   font-size: 12px;
+}
+
+.brand-mark {
+  display: block;
+  flex: none;
+  border-radius: 5px;
 }
 
 .login-form h1 {

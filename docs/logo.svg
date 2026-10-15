@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 140" role="img" aria-labelledby="t d">
+  <title id="t">AURA-OPT</title>
+  <desc id="d">AURA-OPT: options pricing and paper trading</desc>
+  <defs>
+    <linearGradient id="v" x1="12" y1="14" x2="52" y2="14" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FF9900"/>
+      <stop offset="1" stop-color="#00E5FF"/>
+    </linearGradient>
+  </defs>
+  <rect x="1" y="1" width="478" height="138" rx="18" fill="#0A1017" stroke="#1C2A38" stroke-width="2"/>
+  <!-- the mark, scaled 1.7x -->
+  <g transform="translate(22 16) scale(1.7)">
+    <g fill="none" stroke="url(#v)" stroke-linecap="round" stroke-width="2.2">
+      <path d="M27.90 36.72 A12 12 0 0 1 36.10 36.72" opacity="0.95"/>
+      <path d="M25.82 28.98 A20 20 0 0 1 38.18 28.98" opacity="0.62"/>
+      <path d="M24.28 21.08 A28 28 0 0 1 39.72 21.08" opacity="0.34"/>
+    </g>
+    <path d="M12 14 L32 48 L52 14" fill="none" stroke="url(#v)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="32" cy="48" r="3.4" fill="#FFFFFF"/>
+  </g>
+  <g font-family="Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
+    <text x="146" y="78" font-size="50" font-weight="700" letter-spacing="3"><tspan fill="#E8F1F8">AURA</tspan><tspan fill="#FF9900">-OPT</tspan></text>
+    <text x="148" y="106" font-size="12" font-weight="600" letter-spacing="2.4" fill="#8AA4B8">OPTIONS PRICING · PAPER TRADING</text>
+  </g>
+</svg>
