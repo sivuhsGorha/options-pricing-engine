@@ -1,6 +1,6 @@
-<p align="center"><img src="docs/logo.svg" alt="AURA-OPT: options pricing, paper trading" width="480"></p>
+<p align="center"><img src="docs/logo.svg" alt="Blackthorn Sterling: options pricing, paper trading" width="480"></p>
 
-# AURA-OPT
+# Blackthorn Sterling
 
 **An options pricing, volatility and paper-trading engine.**
 
@@ -142,7 +142,7 @@ docker compose up --build -d
 
 Sign in with `OPERATOR_PASSWORD`. The paper-trading panel shows positions and every order with its fill or
 rejection reason, with HALT / RESUME and a strategy switch. `run_all.ps1` runs the same checks as CI locally:
-the Java build with 560 tests and the coverage gate, the Python tests, and the frontend lint, 89 tests and build.
+the Java build with 560 tests and the coverage gate, the Python tests, and the frontend lint, 90 tests and build.
 
 ---
 

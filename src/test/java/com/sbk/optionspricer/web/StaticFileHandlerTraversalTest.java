@@ -24,7 +24,7 @@ public class StaticFileHandlerTraversalTest {
     @BeforeAll
     static void startServer() throws Exception {
         // Create a temp web dir to ensure server serves files
-        tempDir = Files.createTempDirectory("aura-test-web");
+        tempDir = Files.createTempDirectory("bs-test-web");
         Files.writeString(tempDir.resolve("test-index.html"), "hello");
 
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);

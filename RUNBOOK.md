@@ -137,21 +137,21 @@ What the engine needs, and where each piece lives:
 ### Back up
 
 ```powershell
-.\scripts\backup.ps1 -Destination D:\aura-backups
+.\scripts\backup.ps1 -Destination D:\blackthorn-backups
 ```
 
-It writes `D:\aura-backups\<UTC time>\` with `data.tar.gz` (the whole volume), a copy of `config.yaml` and a
+It writes `D:\blackthorn-backups\<UTC time>\` with `data.tar.gz` (the whole volume), a copy of `config.yaml` and a
 `manifest.txt` (commit, ledger row count, ledger SHA-256). It reads the volume read-only, so the engine can keep
 running, and it never deletes or overwrites anything. It does **not** copy `.env`. Run it after every session, and
 keep the backups somewhere that survives the laptop: a USB drive or a private cloud folder, not the same disk.
-The default destination is `%USERPROFILE%\aura-opt-backups`, which is the same disk, so choose another one.
+The default destination is `%USERPROFILE%\blackthorn-sterling-backups`, which is the same disk, so choose another one.
 
 ### Restore on a new machine
 
 1. Install Docker Desktop and Git. `git clone https://github.com/sivuhsGorha/options-pricing-engine` and `cd` into it.
 2. Put `.env` back from the password manager and `config.yaml` from the backup folder (or rebuild it).
 3. `docker compose build` (the restore script uses the image for `tar`).
-4. `.\scripts\restore.ps1 -BackupDir D:\aura-backups\<UTC time>`. It refuses to restore into a volume that already
+4. `.\scripts\restore.ps1 -BackupDir D:\blackthorn-backups\<UTC time>`. It refuses to restore into a volume that already
    holds files, and it compares the restored ledger with the manifest (it fails if they differ).
 5. `docker compose up -d`, then check `docker compose logs` for `N fills replayed` and `[RECONCILE] OK`.
 

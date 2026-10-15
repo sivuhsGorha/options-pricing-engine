@@ -22,8 +22,9 @@ describe('LoginForm', () => {
     it('shows the product mark with its name for screen readers', () => {
         render(<LoginForm password="" onPasswordChange={() => {}} error="" onSubmit={() => {}} />);
 
-        const logo = screen.getByRole('img', { name: 'AURA-OPT' });
+        const logo = screen.getByRole('img', { name: 'Blackthorn Sterling' });
         expect(logo).toHaveAttribute('src', '/favicon.svg');
+        expect(screen.getByText('BLACKTHORN STERLING / OPERATOR ACCESS')).toBeInTheDocument();
     });
 
     it('shows the error as an alert so screen readers announce it', () => {

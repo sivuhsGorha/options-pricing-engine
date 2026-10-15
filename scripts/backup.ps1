@@ -12,10 +12,10 @@
   password manager, not in an archive beside the laptop. Nothing is ever deleted or overwritten.
 
 .EXAMPLE
-  .\scripts\backup.ps1 -Destination D:\aura-backups
+  .\scripts\backup.ps1 -Destination D:\blackthorn-backups
 #>
 param(
-    [string]$Destination = (Join-Path $env:USERPROFILE 'aura-opt-backups'),
+    [string]$Destination = (Join-Path $env:USERPROFILE 'blackthorn-sterling-backups'),
     [string]$Volume = 'options-pricing-engine_engine-data',
     [string]$Image = 'options-pricing-engine:local'
 )

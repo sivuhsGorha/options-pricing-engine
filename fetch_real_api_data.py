@@ -56,7 +56,7 @@ def load_keys(env=None, dotenv_path=".env"):
 
 
 def default_http(url, headers, timeout):
-    request = urllib.request.Request(url, headers=dict(headers, **{"User-Agent": "AURA-OPT/1.0"}))
+    request = urllib.request.Request(url, headers=dict(headers, **{"User-Agent": "BlackthornSterling/1.0"}))
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return json.loads(response.read().decode("utf-8"))
 

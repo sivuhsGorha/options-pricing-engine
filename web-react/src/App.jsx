@@ -267,7 +267,7 @@ function App() {
       <header className="sys-header">
         <form onSubmit={handleCmdSubmit} className="cmd-bar">
           <img className="brand-mark" src="/favicon.svg" alt="" width="22" height="22" />
-          <span className="cmd-prompt">AURA-OPT &gt;</span>
+          <span className="cmd-prompt">BLACKTHORN STERLING &gt;</span>
           <input type="text" className="cmd-input" value={cmdText} onChange={(e) => setCmdText(e.target.value)} />
           <span className="cmd-go">&lt;GO&gt;</span>
         </form>

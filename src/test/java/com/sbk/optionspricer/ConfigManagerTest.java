@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.*;
 public class ConfigManagerTest {
     @Test
     void loadsDefaultConfigAndValidates() throws Exception {
-        Path tempConfig = Files.createTempFile("aura-opt-config", ".yaml");
+        Path tempConfig = Files.createTempFile("bs-config", ".yaml");
         Files.writeString(tempConfig, "market_data:\n  refresh_interval_seconds: 600\nvolatility:\n  default_volatility: 0.25\ndashboard:\n  port: 8083\n");
 
         ConfigManager config = ConfigManager.fromFile(tempConfig);
@@ -24,7 +24,7 @@ public class ConfigManagerTest {
 
     @Test
     void envOverridesSupported() throws Exception {
-        Path tempConfig = Files.createTempFile("aura-opt-config-env", ".yaml");
+        Path tempConfig = Files.createTempFile("bs-config-env", ".yaml");
         Files.writeString(tempConfig, "market_data:\n  refresh_interval_seconds: 900\n");
 
         String before = System.getProperty("MARKET_DATA_REFRESH_INTERVAL_SECONDS");

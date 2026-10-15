@@ -24,7 +24,7 @@ class PushNotificationServiceTest {
     void theStartupLineNeverPrintsTheTopicOrTheWebhookUrl() {
         // A webhook URL usually carries its own secret token and a public ntfy topic is readable by anyone who knows
         // its name; the log is the last place either belongs.
-        String topic = "aura-secret-topic-7f3a9c";
+        String topic = "bt-secret-topic-7f3a9c";
         String webhook = "https://hooks.example.com/services/T000/B000/SECRETTOKEN123";
         java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
         java.io.PrintStream out = System.out, err = System.err;

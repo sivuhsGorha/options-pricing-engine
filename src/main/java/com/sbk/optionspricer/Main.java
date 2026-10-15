@@ -12,7 +12,7 @@ import java.time.LocalDate;
 import java.util.List;
 
 /**
- * Unified Main Entry Point for the AURA-OPT Options Pricing Engine.
+ * Unified Main Entry Point for Blackthorn Sterling, the options pricing and paper-trading engine.
  * Executes core pricing models, benchmark suites, and launches the unified
  * real-time cross-functional quantitative engine.
  */
@@ -50,7 +50,7 @@ public class Main {
             return;
         }
         System.out.println("=========================================================================");
-        System.out.println("        AURA-OPT  OPTIONS PRICING & PAPER-TRADING ENGINE                 ");
+        System.out.println("       BLACKTHORN STERLING  OPTIONS PRICING & PAPER-TRADING ENGINE       ");
         System.out.println("=========================================================================");
 
         ConfigManager config;
@@ -131,7 +131,7 @@ public class Main {
     public static int runReplay(java.nio.file.Path targetDir,
                                 java.util.function.Function<java.time.LocalDate, java.util.List<com.sbk.optionspricer.volatility.DailyCloseFeed.DailyClose>> closesSource) {
         System.out.println("=========================================================================");
-        System.out.println("              AURA-OPT RECORDED CHAIN REPLAY & VRP BACKTEST              ");
+        System.out.println("        BLACKTHORN STERLING RECORDED CHAIN REPLAY & VRP BACKTEST         ");
         System.out.println("=========================================================================");
         System.out.println("[REPLAY] Scanning for recorded chain snapshots in: " + targetDir.toAbsolutePath());
 

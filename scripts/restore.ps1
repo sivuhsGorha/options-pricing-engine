@@ -9,8 +9,8 @@
   config.yaml from the backup folder yourself and put .env back from your password manager.
 
 .EXAMPLE
-  .\scripts\restore.ps1 -BackupDir D:\aura-backups\20261014-120000Z                          # a new machine
-  .\scripts\restore.ps1 -BackupDir D:\aura-backups\20261014-120000Z -Volume scratch_restore   # a rehearsal
+  .\scripts\restore.ps1 -BackupDir D:\blackthorn-backups\20261014-120000Z                    # a new machine
+  .\scripts\restore.ps1 -BackupDir D:\blackthorn-backups\20261014-120000Z -Volume scratch_restore   # a rehearsal
 #>
 param(
     [Parameter(Mandatory = $true)][string]$BackupDir,

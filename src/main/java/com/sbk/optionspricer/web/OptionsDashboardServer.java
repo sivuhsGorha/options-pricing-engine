@@ -1170,7 +1170,7 @@ public class OptionsDashboardServer {
     }
 
     /** Exchange attribute holding the request body bytes once an HMAC request has read them for verification. */
-    private static final String BODY_ATTRIBUTE = "aura.body";
+    private static final String BODY_ATTRIBUTE = "blackthorn.body";
     /** Largest request body any handler accepts; one byte more is read so an oversized body is seen, not truncated silently. */
     private static final int MAX_BODY_BYTES = 4096;
 

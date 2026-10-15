@@ -80,7 +80,7 @@ public final class AlpacaPaperTransport implements ExchangeTransport {
         Touch touch = touch(venueSymbol, bid, ask);
         double limit = limitPrice(order, touch.bid(), touch.ask());
         String limitText = String.format(Locale.ROOT, "%.2f", limit) + " (" + priceSource(order, touch) + ")";
-        String clientOrderId = "aura-" + clock.millis() + "-" + sequence.incrementAndGet();
+        String clientOrderId = "blackthorn-" + clock.millis() + "-" + sequence.incrementAndGet();
 
         AlpacaPaperClient.OrderState state;
         try {
@@ -126,7 +126,7 @@ public final class AlpacaPaperTransport implements ExchangeTransport {
             clientLegs.add(new AlpacaPaperClient.OptionLeg(symbols.get(i), 1, legs.get(i).isBuy()));
         }
         int quantity = legs.get(0).quantity();
-        String clientOrderId = "aura-mleg-" + clock.millis() + "-" + sequence.incrementAndGet();
+        String clientOrderId = "blackthorn-mleg-" + clock.millis() + "-" + sequence.incrementAndGet();
 
         AlpacaPaperClient.OrderState state;
         try {

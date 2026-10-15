@@ -613,7 +613,7 @@ public class LiveSpotProvider {
         HttpURLConnection conn = (HttpURLConnection) URI.create(url).toURL().openConnection();
         conn.setConnectTimeout(HTTP_TIMEOUT_MS);
         conn.setReadTimeout(HTTP_TIMEOUT_MS);
-        conn.setRequestProperty("User-Agent", "AURA-OPT/1.0");
+        conn.setRequestProperty("User-Agent", "BlackthornSterling/1.0");
         if (headers != null) {
             for (Map.Entry<String, String> e : headers.entrySet()) {
                 conn.setRequestProperty(e.getKey(), e.getValue());

@@ -14,7 +14,7 @@ form says so. The session is a secure, same-site cookie; SIGN OUT ends it.
 `LIVE MARKET DATA` (green), `DELAYED/EOD` (green), `STALE` (amber, last quote older than 30 s),
 `MARKET DATA FEED UNAVAILABLE` (red), or `SIMULATED DATA` (red) when no key is configured.
 
-**Header.** Command bar (`AURA-OPT > <command> <GO>`), function keys F1-F5 and SIGN OUT, the spot badge
+**Header.** Command bar (`BLACKTHORN STERLING > <command> <GO>`), function keys F1-F5 and SIGN OUT, the spot badge
 (symbol, price, source, status, time), and one badge per market-data provider with its status from
 `/api/health`.
 
@@ -100,18 +100,19 @@ Fonts: JetBrains Mono / Roboto Mono for numbers, Inter for headers.
 
 ### Identity
 
-The product is **AURA-OPT** (options pricing, volatility surface and paper trading); `web-react/` is only the folder
-the dashboard's source lives in. The mark is a **V**, the payoff of a long straddle, which is lowest at the strike, with
-arcs spreading from its apex: the aura. It uses the palette above (the V runs amber to cyan on `#0A1017`).
+The system is called **Blackthorn Sterling** (options pricing, volatility surface and paper trading). Until
+2026-10-15 the code called it AURA-OPT. The names that are technical, and were left alone, are the repository
+(`options-pricing-engine`), the jar and the Docker image and volume; `web-react/` is only the folder the dashboard's source
+lives in. The mark is a **V**, the payoff of a long straddle, which is lowest at the strike, with arcs spreading from its
+apex: the volatility smile. It uses the palette above (the V runs amber to cyan on `#0A1017`).
 
 | File | Use |
 | :--- | :--- |
 | `web-react/public/favicon.svg` | the mark: browser tab, login screen, header (`/favicon.svg`) |
-| `docs/logo.svg` | the lockup (mark, wordmark, tagline) at the top of the README |
+| `docs/logo.svg` | the lockup (mark, wordmark in two lines, tagline) at the top of the README |
 
-The package is `aura-opt-dashboard` and the tab reads `AURA-OPT · options pricing & paper trading`;
-`src/brand.test.js` fails if the template name, the template icon or either logo file comes back or goes missing.
-
+The package is `blackthorn-sterling-dashboard` and the tab reads `Blackthorn Sterling · options pricing & paper trading`;
+`src/brand.test.js` fails if the template name, the template icon, either logo file or the previous name comes back.
 ---
 
 ## 5. Code layout

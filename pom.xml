@@ -10,7 +10,7 @@
     <packaging>jar</packaging>
 
     <name>options-pricing-engine</name>
-    <description>AURA-OPT Options Pricing Engine</description>
+    <description>Blackthorn Sterling: options pricing and paper-trading engine</description>
 
     <properties>
         <maven.compiler.release>25</maven.compiler.release>

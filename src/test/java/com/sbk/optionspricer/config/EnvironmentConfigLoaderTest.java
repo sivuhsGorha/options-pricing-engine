@@ -12,7 +12,7 @@ class EnvironmentConfigLoaderTest {
 
     @Test
     void loadsDotEnvValuesAndPrefersEnvOverrides() throws IOException {
-        Path envFile = Files.createTempFile("aura-opt-env", ".env");
+        Path envFile = Files.createTempFile("bs-env", ".env");
         Files.writeString(envFile,
                 "FINNHUB_KEY=demo-finnhub-key\n" +
                 "MARKETSTACK_KEY=\"demo-marketstack-key\"\n" +

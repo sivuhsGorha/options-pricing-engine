@@ -23,7 +23,7 @@ final class FakeAlpaca implements AlpacaPaperClient.Http {
     /** The order JSON Alpaca returns, in the shape recorded from the paper API on 2026-10-08. */
     static String orderJson(String id, String status, int qty, double filledQty, Double filledAvgPrice, String symbol, String side) {
         return String.format(Locale.ROOT,
-                "{\"id\":\"%s\",\"client_order_id\":\"aura-1\",\"created_at\":\"2026-10-08T08:02:21.992576018Z\",\"filled_at\":null,"
+                "{\"id\":\"%s\",\"client_order_id\":\"bt-1\",\"created_at\":\"2026-10-08T08:02:21.992576018Z\",\"filled_at\":null,"
                         + "\"asset_id\":\"b28f4066\",\"symbol\":\"%s\",\"asset_class\":\"us_equity\",\"notional\":null,\"qty\":\"%d\","
                         + "\"filled_qty\":\"%s\",\"filled_avg_price\":%s,\"order_class\":\"\",\"order_type\":\"limit\",\"type\":\"limit\","
                         + "\"side\":\"%s\",\"position_intent\":\"buy_to_open\",\"time_in_force\":\"day\",\"limit_price\":\"500\","

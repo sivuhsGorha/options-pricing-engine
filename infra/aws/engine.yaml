@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
-  AURA-OPT options engine on one EC2 instance. No inbound ports: the dashboard is reached through an
+  Blackthorn Sterling options engine on one EC2 instance. No inbound ports: the dashboard is reached through an
   SSM port-forwarding session. Secrets (.env, config.yaml) come from SSM Parameter Store at deploy time.
 
 Parameters:

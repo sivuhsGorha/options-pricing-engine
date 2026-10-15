@@ -134,7 +134,7 @@ public final class PushNotificationService implements AutoCloseable {
                 HttpRequest.Builder builder = HttpRequest.newBuilder()
                         .uri(URI.create("https://ntfy.sh/" + ntfyTopic))
                         .timeout(Duration.ofSeconds(5))
-                        .header("Title", "[AURA-OPT] " + title)
+                        .header("Title", "[Blackthorn Sterling] " + title)
                         .header("Priority", priority != null ? priority : "default")
                         .POST(HttpRequest.BodyPublishers.ofString(message));
                 if (tags != null && !tags.isBlank()) {
@@ -150,7 +150,7 @@ public final class PushNotificationService implements AutoCloseable {
         if (webhookUrl != null) {
             try {
                 String json = String.format(Locale.ROOT,
-                        "{\"title\":\"[AURA-OPT] %s\",\"message\":\"%s\",\"priority\":\"%s\",\"timestamp\":\"%s\"}",
+                        "{\"title\":\"[Blackthorn Sterling] %s\",\"message\":\"%s\",\"priority\":\"%s\",\"timestamp\":\"%s\"}",
                         escapeJson(title), escapeJson(message), priority, Instant.now());
                 HttpRequest req = HttpRequest.newBuilder()
                         .uri(URI.create(webhookUrl))
@@ -171,7 +171,7 @@ public final class PushNotificationService implements AutoCloseable {
     private void registerShutdownHook() {
         if (registeredShutdownHook.compareAndSet(false, true)) {
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-                sendNotification("ENGINE STOPPED", "AURA-OPT options engine process stopped at " + Instant.now(), "high", "stop_sign");
+                sendNotification("ENGINE STOPPED", "Blackthorn Sterling engine process stopped at " + Instant.now(), "high", "stop_sign");
             }, "alert-shutdown-notify"));
         }
     }
