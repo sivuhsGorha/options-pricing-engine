@@ -352,7 +352,27 @@ class VolSpreadStrategyTest {
         assertEquals(VolSpreadStrategy.AllowedSide.BOTH, VolSpreadStrategy.AllowedSide.parse("both"));
         assertEquals(VolSpreadStrategy.AllowedSide.BOTH, VolSpreadStrategy.AllowedSide.parse(null));
         assertEquals(VolSpreadStrategy.AllowedSide.BOTH, VolSpreadStrategy.AllowedSide.parse(""));
-        assertEquals(VolSpreadStrategy.AllowedSide.BOTH, VolSpreadStrategy.AllowedSide.parse("unknown"));
+    }
+
+    @Test
+    void aMisspeltSideIsAnErrorNotSilentlyTheMostPermissiveChoice() {
+        // "long_onyl" used to become BOTH, which is the setting that allows short straddles
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> VolSpreadStrategy.AllowedSide.parse("long_onyl"));
+        assertTrue(e.getMessage().contains("long_onyl") && e.getMessage().contains("long_only"), e.getMessage());
+    }
+
+    @Test
+    void theHoldForARichMarketNamesTheSettingAndDoesNotAssertAnAccountRuleThatWasNeverChecked() {
+        PositionTracker tracker = new PositionTracker(FillRecorder.NONE);
+        VolSpreadStrategy.Params p = new VolSpreadStrategy.Params(0.01, 50.0, 7, 14, 1, "SSVI", 0.65, false, VolSpreadStrategy.AllowedSide.LONG_ONLY);
+        VolSpreadStrategy s = new VolSpreadStrategy(manager(tracker), new FlatChains(0.25, TODAY), referenceSurface(0.20),
+                valuationWithDelta(0.0), VolSpreadStrategyTest::spot, tracker, "SPY", R, Q, p, Clock.fixed(NOW, ZoneOffset.UTC));
+        s.allowSimulatedChains(true);
+
+        String reason = s.step().reason();
+
+        assertTrue(reason.contains("strategy.side"), reason);
+        assertFalse(reason.contains("Level 4") || reason.contains("forbids"), "no unverified claim about Alpaca's rules: " + reason);
     }
 
     @Test

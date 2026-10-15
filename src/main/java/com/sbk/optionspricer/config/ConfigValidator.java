@@ -23,7 +23,7 @@ public final class ConfigValidator {
                     "max_spread_bps", "min_volume"),
             "strategy", java.util.Set.of("mode", "trigger_pct", "base_quantity", "vol_edge", "reference_model", "hedge_band",
                     "min_days_to_expiry", "max_days_to_expiry", "contracts", "option_interval_seconds",
-                    "fee_per_contract", "use_multi_leg", "fair_vol_model"),
+                    "fee_per_contract", "use_multi_leg", "fair_vol_model", "side"),
             "execution", java.util.Set.of("symbol", "transport", "fill_wait_seconds", "slippage_bps", "contract_multiplier"));
     /** Renamed risk keys: they have their own, more helpful message below. */
     private static final java.util.Set<String> LEGACY_RISK_KEYS = java.util.Set.of("delta_limit", "gamma_limit", "vega_limit");
@@ -138,6 +138,11 @@ public final class ConfigValidator {
                 "must be a dollar fee per contract between 0 and 10");
         bool(config, errors, "strategy.use_multi_leg");
         bool(config, errors, "market_data.record_chain_snapshots");
+        try {
+            com.sbk.optionspricer.execution.VolSpreadStrategy.AllowedSide.parse(config.getString("strategy.side", "long_only"));
+        } catch (IllegalArgumentException e) {
+            errors.add(e.getMessage());
+        }
         String fairVolModel = config.getString("strategy.fair_vol_model", "NONE");
         if (!"NONE".equalsIgnoreCase(fairVolModel) && !"EWMA".equalsIgnoreCase(fairVolModel) && !"HAR".equalsIgnoreCase(fairVolModel)) {
             errors.add("strategy.fair_vol_model must be NONE, EWMA or HAR (found " + fairVolModel + ")");

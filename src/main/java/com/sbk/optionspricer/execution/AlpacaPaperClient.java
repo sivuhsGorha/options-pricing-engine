@@ -270,9 +270,12 @@ public final class AlpacaPaperClient {
         Instant now = clock.instant();
         Instant sourceTime = quote.at() != null ? quote.at() : now;
         long ageMs = Math.max(0L, now.toEpochMilli() - sourceTime.toEpochMilli());
+        // DELAYED, not LIVE: the request names no feed, and the quotes this account gets come from Alpaca's indicative
+        // options feed, which has not been shown to be the exchange's own real-time quote. Fresh enough to back an
+        // order under the data-quality policy, but not claimed to be more than it is.
         var status = ageMs > com.sbk.optionspricer.market.OptionQuoteSnapshots.STALE_AFTER_MS
                 ? com.sbk.optionspricer.market.MarketDataStatus.STALE
-                : com.sbk.optionspricer.market.MarketDataStatus.LIVE;
+                : com.sbk.optionspricer.market.MarketDataStatus.DELAYED;
         var contract = parsed.get();
         com.sbk.optionspricer.instruments.Instrument instrument = new com.sbk.optionspricer.instruments.Instrument(
                 contract.underlying(), contract.expiry(), contract.strike(), contract.type(),
@@ -281,7 +284,7 @@ public final class AlpacaPaperClient {
         return Optional.of(new com.sbk.optionspricer.market.MarketSnapshot(
                 occSymbol, quote.bid(), quote.ask(), mid,
                 com.sbk.optionspricer.market.MarketSnapshot.VOLUME_UNKNOWN,
-                now, sourceTime, ageMs, "Alpaca", status, instrument));
+                now, sourceTime, ageMs, "ALPACA_INDICATIVE", status, instrument));
     }
 
     /** One trading day: its date (the bar's own, in New York) and its split-adjusted close. */

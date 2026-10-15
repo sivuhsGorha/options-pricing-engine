@@ -159,6 +159,16 @@ class ConfigHardeningTest {
     }
 
     @Test
+    void theStrategySideIsAKnownCheckedSetting() throws Exception {
+        for (String ok : new String[]{"both", "long_only", "short_only", "LONG_ONLY"}) {
+            List<String> errors = ConfigValidator.validate(ConfigManager.fromFile(yaml(BASE + "strategy:\n  side: " + ok + "\n")));
+            assertTrue(errors.isEmpty(), ok + ": " + errors);
+        }
+        List<String> bad = ConfigValidator.validate(ConfigManager.fromFile(yaml(BASE + "strategy:\n  side: long_onyl\n")));
+        assertTrue(bad.stream().anyMatch(e -> e.contains("strategy.side") && e.contains("long_onyl")), bad.toString());
+    }
+
+    @Test
     void aFairVolModelMayForecastButNeverBeTheReferenceThatTrades() throws Exception {
         // The strategy would sell the market as rich on most days: implied vol sits above realized on average.
         List<String> errors = ConfigValidator.validate(ConfigManager.fromFile(yaml(BASE + "strategy:\n  reference_model: HAR\n")));

@@ -58,6 +58,41 @@ class AlpacaPaperTransportTest {
         assertEquals(0, sleeps);
     }
 
+    private static final String OCC = "SPY261120C00780000";
+
+    @Test
+    void anOptionQuoteFromAlpacaIsLabelledForWhatItIsAndAgedFromItsOwnTimestamp() {
+        Instant now = Instant.parse("2026-10-15T14:00:10Z");
+        Clock clock = Clock.fixed(now, ZoneOffset.UTC);
+        AlpacaPaperClient.Quote fresh = new AlpacaPaperClient.Quote(9.80, 9.90, Instant.parse("2026-10-15T14:00:08Z"));
+
+        var snapshot = AlpacaPaperClient.toOptionSnapshot(OCC, fresh, clock).orElseThrow();
+
+        // The request names no feed, and the quotes this account gets were recorded from the indicative feed
+        // (FakeAlpaca): not shown to be the exchange's own real-time quote, so not LIVE.
+        assertEquals(com.sbk.optionspricer.market.MarketDataStatus.DELAYED, snapshot.status());
+        assertEquals("ALPACA_INDICATIVE", snapshot.source());
+        assertEquals(2_000L, snapshot.derivedQuoteAgeMs());
+        assertEquals(9.80, snapshot.bid(), 1e-9);
+        assertEquals(9.90, snapshot.ask(), 1e-9);
+        assertEquals(9.85, snapshot.last(), 1e-9);
+        assertEquals(100, snapshot.multiplierOr(1));
+        assertEquals(com.sbk.optionspricer.market.MarketSnapshot.VOLUME_UNKNOWN, snapshot.volume());
+    }
+
+    @Test
+    void anOldOneOneSidedOrNonOptionQuoteIsStaleOrAbsentNeverAFreshOne() {
+        Instant now = Instant.parse("2026-10-15T14:00:10Z");
+        Clock clock = Clock.fixed(now, ZoneOffset.UTC);
+
+        var old = AlpacaPaperClient.toOptionSnapshot(OCC, new AlpacaPaperClient.Quote(9.80, 9.90, Instant.parse("2026-10-15T13:50:00Z")), clock).orElseThrow();
+        assertEquals(com.sbk.optionspricer.market.MarketDataStatus.STALE, old.status());
+
+        assertTrue(AlpacaPaperClient.toOptionSnapshot(OCC, new AlpacaPaperClient.Quote(0.0, 9.90, now), clock).isEmpty(), "no bid");
+        assertTrue(AlpacaPaperClient.toOptionSnapshot(OCC, new AlpacaPaperClient.Quote(9.90, 9.90, now), clock).isEmpty(), "locked or crossed");
+        assertTrue(AlpacaPaperClient.toOptionSnapshot("SPY", new AlpacaPaperClient.Quote(9.80, 9.90, now), clock).isEmpty(), "not a contract");
+    }
+
     @Test
     void dailyBarsComeBackOldestFirstWithTheirDatesAndCloses() {
         // out of order on purpose: the caller is promised an ascending series

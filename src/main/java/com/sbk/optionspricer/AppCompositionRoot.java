@@ -184,6 +184,8 @@ public class AppCompositionRoot {
                 (int) config.getDouble("strategy.max_days_to_expiry", 7.0), (int) config.getDouble("strategy.min_days_to_expiry", 14.0),
                 (int) config.getDouble("strategy.contracts", 1.0), config.getString("strategy.reference_model", "SSVI"),
                 config.getDouble("strategy.fee_per_contract", 0.65), useMultiLeg, allowedSide);
+        System.out.println("[STRATEGY] side=" + allowedSide + (allowedSide == com.sbk.optionspricer.execution.VolSpreadStrategy.AllowedSide.LONG_ONLY
+                ? " (only buys straddles; set strategy.side: both to let it sell them)" : ""));
         if (useMultiLeg) {
             System.out.println("[STRATEGY] multi-leg orders are ON (experimental): a buy straddle goes as one order; "
                     + "allowedSide=" + allowedSide);
@@ -200,7 +202,7 @@ public class AppCompositionRoot {
                     return java.util.Optional.empty();
                 }
             };
-            System.out.println("[STRATEGY] Leg quote source: Alpaca live option quotes enabled (fresh touch prices for straddle legs)");
+            System.out.println("[STRATEGY] Leg quote source: Alpaca's own latest option quote (indicative feed, labelled DELAYED) for the straddle legs; Cboe still feeds the surface");
         }
         this.volSpreadStrategy = new com.sbk.optionspricer.execution.VolSpreadStrategy(orderManager, surfaceService, surfaceService, fairVol,
                 valuationService, () -> marketAdapter.getSnapshot(symbol), positionTracker, symbol, riskFreeRate, dividendYield, strategyParams,

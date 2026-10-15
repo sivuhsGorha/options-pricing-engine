@@ -51,7 +51,9 @@ public final class VolSpreadStrategy {
             return switch (text.trim().toLowerCase(Locale.ROOT)) {
                 case "long_only", "long", "buy_only" -> LONG_ONLY;
                 case "short_only", "short", "sell_only" -> SHORT_ONLY;
-                default -> BOTH;
+                case "both" -> BOTH;
+                // a typo must not quietly become the setting that allows short straddles
+                default -> throw new IllegalArgumentException("strategy.side must be both, long_only or short_only (found " + text.trim() + ")");
             };
         }
     }
@@ -405,7 +407,8 @@ public final class VolSpreadStrategy {
         if (sell && params.allowedSide() == AllowedSide.LONG_ONLY) {
             return record(new Decision(now, "HOLD",
                     "market rich to reference by " + String.format(Locale.ROOT, "%.2f pts", 100 * edge.value())
-                            + " but short straddle not permitted (long-only configured; Level 3 forbids uncovered shorts)"
+                            + " but short straddle not permitted (strategy.side is long_only: a short straddle is two uncovered short"
+                            + " options, and whether this account may place them has not been checked)"
                             + shadowReadout(front, strike, t, edge.marketIv()),
                     front, strike, edge.marketIv(), edge.referenceIv(), edge.value(), 0, orders));
         }

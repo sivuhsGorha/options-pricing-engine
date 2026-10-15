@@ -36,6 +36,7 @@ strategy:
   contracts: 1                       # straddle size per leg
   fee_per_contract: 0.65             # dollars per contract per leg; the edge must also beat (half-spread + fee) / vega, in and out
   fair_vol_model: NONE               # NONE | EWMA | HAR: a realized-vol forecast shown beside each hold (needs ALPACA keys for daily closes); never trades
+  side: long_only                    # long_only (default): only buy straddles | both: also sell them | short_only. A short straddle is two uncovered short options; whether the account may place them is unchecked
   use_multi_leg: false               # EXPERIMENTAL: send a buy straddle as one Alpaca order; a short leg is refused by the transport
   option_interval_seconds: 30        # how often the straddle is evaluated (the quotes it reads are reloaded every quote_refresh_seconds)
   # momentum parameters
