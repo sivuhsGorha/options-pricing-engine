@@ -56,7 +56,7 @@ Every quote carries a status: LIVE, DELAYED, STALE, UNAVAILABLE or SIMULATED. Se
 | Item | State |
 | :--- | :--- |
 | Position | Short 20 SPY (paper); reconciled with Alpaca |
-| Strategy mode | `vol_spread`; trigger band 1.00 vol point; one contract per leg |
+| Strategy mode | `vol_spread`; trigger band 1.00 vol point plus the cost hurdle; one contract per leg; `strategy.side` is `long_only` (it buys straddles and holds instead of selling) |
 | Running as | Docker container with a restart policy; the `engine-data` volume holds the ledger |
 | Data providers | Finnhub and Alpha Vantage delayed; Polygon/Massive off (plan has no snapshot endpoint); Marketstack rate limited |
 | Live evidence | 2026-10-09: two fills, one cancel-then-fill race, one reconciliation halt. 2026-10-13: the stale-spot gate held on live data (175 waits), 98 decisions all inside the band, no orders, book matched Alpaca (see EXECUTION.md section 5) |
@@ -101,6 +101,7 @@ Every quote carries a status: LIVE, DELAYED, STALE, UNAVAILABLE or SIMULATED. Se
 
 Newest first. One line per change that alters what the system does or what we know about it.
 
+- **2026-10-15** A second batch of code from Gemini was checked against the repository, the machine and a fresh build, and part of it was corrected (EXECUTION.md, section 5). The replay was invalid (it walked a recorded file's several expiries as consecutive moments, priced positions at the wrong strike, and seeded the forecaster with a sine wave) and now groups by moment, marks at the position's own strike, uses real daily closes and refuses to run without them. `strategy.side` is validated and a typo is an error. Alpaca leg quotes are labelled DELAYED / ALPACA_INDICATIVE, not LIVE. The alert service no longer logs its webhook URL or topic, and the docs say it alerts on a trading halt and a graceful shutdown only (the stale-data alert is not called by anything). `--test-buy-straddle` is a dry run unless `--confirm` is given, because the order it sends bypasses the engine's ledger and would make the reconciler halt trading. The unverified Level 4 claim was removed; the infra, opra and tag decisions remain yours. None of it has run in a live session.
 - **2026-10-14** Session written up (EXECUTION.md, section 5): 113 holds and no orders in the 88 minutes the engine saw, attribution adding up exactly, the realized-vol readout on every hold (RV 7.2 %, VRP +5.3 to +5.7 points), the recorder at 106 files and 3.8 MB. The cause of the missing sessions and of the 10-13 interruptions was found in Windows' event log: Modern Standby and an evening restart, not a fault in the engine. The stale-quote question is half answered: genuine feed lag at the open, then indistinguishable from standby.
 - **2026-10-14** Added `scripts/backup.ps1` and `scripts/restore.ps1` and a RUNBOOK recovery section: what to do
   after a lost laptop, a lost ledger or a new machine. Tried on Windows: a real backup, a restore into a scratch

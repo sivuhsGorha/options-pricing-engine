@@ -46,6 +46,15 @@ them for features. `strategy.mode` selects which one runs; the operator switch s
   on average, so a forecast used as the reference would call the market rich on most days; the readout is there to
   collect evidence. The HAR weights are illustrative, not fitted. `VrpSignalBacktester` can replay recorded chains
   against it at the touch with fees, but there is no replay command yet and little recorded data.
+- **Side (`strategy.side`, default `long_only`)**: `long_only` only buys straddles; when the market is rich to the
+  reference it holds and says so (`... but short straddle not permitted (strategy.side is long_only ...)`). `both` also
+  sells them, and `short_only` only sells. A short straddle is two uncovered short options, and whether the Alpaca
+  account may place them has not been checked, which is why the default is long-only. A misspelt value is a configuration
+  error, not a quiet fallback to `both`.
+- **Leg quotes**: the two straddle legs are priced from Alpaca's own latest option quote when it has a two-sided one,
+  and from the Cboe chain otherwise. Alpaca's quote is labelled `DELAYED` with source `ALPACA_INDICATIVE` (the feed
+  recorded for this account is the indicative one, not shown to be the exchange's real-time quote) and aged from its own
+  timestamp; the surface and the spot are still delayed, so the edge mixes time bases. It has not run in a live session.
 - **Multi-leg (experimental, `use_multi_leg`, off)**: a buy straddle goes as one Alpaca order with `buy_to_open` on
   each leg, and the ledger books the legs so their cost adds up to the venue's net price. A multi-leg order with a
   short leg is refused by the Alpaca transport: Alpaca documents no sign for a credit price and requires short legs
@@ -54,7 +63,7 @@ them for features. `strategy.mode` selects which one runs; the operator switch s
 
 Configuration (defaults): `vol_edge 0.01`, `reference_model SSVI`, `hedge_band 50`, `min_days_to_expiry 14`,
 `max_days_to_expiry 7`, `contracts 1`, `option_interval_seconds 30`, `fee_per_contract 0.65`,
-`fair_vol_model NONE`, `use_multi_leg false`.
+`fair_vol_model NONE`, `use_multi_leg false`, `side long_only`.
 
 ## 2. Momentum (`strategy.mode: momentum`): shares on a price move
 

@@ -44,12 +44,12 @@ background and the panel badge shows `LOADING` until it does.
 | `POLYGON unavailable: credentials rejected (HTTP 403)` | key invalid or plan does not cover the endpoint | fix the key on polygon.io; the app retries after 15 minutes |
 | `rate limited (HTTP 429)` | free-tier quota | nothing; the app backs off (60 s) and stays inside each plan's budget |
 | Banner `STALE` | last price older than its window: 30 s for a LIVE source, 120 s for a DELAYED one (outside US hours this is normal) | orders are correctly blocked; wait for market hours or a live source |
-| Surface badge `DEMO · SYNTHETIC` | the Cboe chain fetch failed (network, or `cdn.cboe.com` unreachable), so the chain is generated | hover the badge: the tooltip says why; the surface refreshes every `refresh_interval_seconds` |
-| Surface badge `FIT · CBOE_DELAYED` | normal: the surface is fitted to Cboe's 15-minute-delayed quotes | nothing |
+| Surface badge `DEMO Â· SYNTHETIC` | the Cboe chain fetch failed (network, or `cdn.cboe.com` unreachable), so the chain is generated | hover the badge: the tooltip says why; the surface refreshes every `refresh_interval_seconds` |
+| Surface badge `FIT Â· CBOE_DELAYED` | normal: the surface is fitted to Cboe's 15-minute-delayed quotes | nothing |
 | Surface badge `FAILED: ...` | fewer than three usable quotes per expiry, or a provider error | the message names the cause |
-| `TRADING HALTED — ...` | an operator pressed HALT, a CRITICAL Greek alert fired, or a fill could not be booked | read the reason; RESUME only after you understand it |
-| `TRADING HALTED — book does not match the Alpaca account: SPY: local 10, alpaca 0` | the local book and the Alpaca paper account disagree (a position opened in Alpaca's own UI, a fill that arrived after a failed cancel, or a deleted `fills.csv`) | flatten the position on one side (Alpaca's UI, or trade it locally) until the reconciliation reads OK, then RESUME; resuming before that halts again within a minute |
-| TRANSPORT badge `ALPACA · UNREACHABLE` | Alpaca did not answer or rejected the keys (the message says which) | check connectivity and the keys in `.env`; orders are rejected until it answers, nothing is halted |
+| `TRADING HALTED â€” ...` | an operator pressed HALT, a CRITICAL Greek alert fired, or a fill could not be booked | read the reason; RESUME only after you understand it |
+| `TRADING HALTED â€” book does not match the Alpaca account: SPY: local 10, alpaca 0` | the local book and the Alpaca paper account disagree (a position opened in Alpaca's own UI, a fill that arrived after a failed cancel, or a deleted `fills.csv`) | flatten the position on one side (Alpaca's UI, or trade it locally) until the reconciliation reads OK, then RESUME; resuming before that halts again within a minute |
+| TRANSPORT badge `ALPACA Â· UNREACHABLE` | Alpaca did not answer or rejected the keys (the message says which) | check connectivity and the keys in `.env`; orders are rejected until it answers, nothing is halted |
 | `REJECTED: Alpaca rejected the order: HTTP 403: ...` | Alpaca refused on its rules: options level, buying power, a symbol it does not trade | read Alpaca's message; a paper account's options level is set on app.alpaca.markets |
 | `REJECTED: ... no fill within 10 s at limit 776.30 (the feed's ask)` | the limit order did not fill in time; the remainder was cancelled at Alpaca. The bracket says where the price came from: `the venue's ask/bid` is Alpaca's own quote; `the feed's` means Alpaca's quote was unavailable or stale and a lagging feed priced the order, which rarely fills in a moving market; `the order's price` means no book at all | normal in a fast or thin market; the strategy retries on its next step. Many `the feed's` rejections in a row: check that `data.alpaca.markets` is reachable |
 | No orders for a long time | vol-spread mode trades only when the straddle edge exceeds `strategy.vol_edge` (the strategy row shows the edge); momentum mode only on a move of `strategy.trigger_pct` between two quotes | expected with delayed data; narrow the band or the trigger in `config.yaml` to exercise the path |
@@ -201,41 +201,52 @@ To keep it running through a session:
 A laptop that sleeps is a poor host for an engine that is meant to watch a market all day. The VPS route in "Hosting
 on a server" is the real fix; this section only reduces the gaps until then.
 
-## Replay and VRP Backtest Tool
+## Replay a recording against a realized-vol forecast
 
-Replays recorded `.csv.gz` chain snapshots back into the engine's quantitative backtester to evaluate whether VRP predictability exists and whether trades survive the round-trip friction hurdle:
-
-```bash
-# Replay against recorded snapshots in data/chain_snapshots
-java --enable-preview --add-modules jdk.incubator.vector -jar target/options-pricing-engine-1.0.0-SNAPSHOT.jar --replay data/chain_snapshots
-```
-
-It evaluates:
-1. **Raw VRP (Structural Level):** Tests trading the raw implied vs realized spread (structural permanent level).
-2. **Demeaned VRP:** Demeans VRP vs its rolling 20-period baseline to test relative volatility shocks.
-3. **Cost Hurdle Filter:** Tests whether volatility edge covers the break-even vega friction: `(bid_ask_spread + 2 * fees) / straddle_vega`.
-
-## Paper Trade Verification Script
-
-To verify Alpaca multi-leg order transmission with Level 3 permissions safely:
+Replays the chains recorded under `data/chain_snapshots` through `VrpSignalBacktester`: trade the strategy's front
+expiry (the nearest at least 14 days out) when implied vol is rich or cheap to an EWMA forecast of realized vol, with
+fills at the touch and a fee per contract. Run it from the project folder, so that `.env` supplies the Alpaca keys:
 
 ```powershell
-# Run the long straddle debit verification test
-.\scripts\test_buy_straddle.ps1
-# Or inside docker:
-.\scripts\test_buy_straddle.ps1 -Docker
+java --add-modules jdk.incubator.vector -jar target\options-pricing-engine-1.0.0-SNAPSHOT.jar --replay data\chain_snapshots
 ```
 
-Checks account buying power and status, queries live touch quotes for ATM call/put legs, and submits a 1-contract debit buy straddle limit order at the venue touch. Naked short straddles remain strictly prohibited under Level 3.
+The recordings live in the Docker volume; copy them out first with
+`docker cp <container>:/app/data/chain_snapshots <some folder>` and pass that folder.
 
-## Push Notification Alerts
+- **It needs real daily closes.** They come from Alpaca's bars with `ALPACA_KEY_ID` and `ALPACA_SECRET`; each day's
+  forecast uses only earlier days. Without them it stops and says so; it never makes a series up.
+- **It reports what it covers:** chains, moments (a recorded file holds every expiry, so one moment is several chains),
+  and trading days. With fewer than 20 days it prints "TOO FEW DAYS": read the numbers as a check of the mechanics.
+- **Three rows:** the raw VRP level, VRP demeaned against its 20-moment average, and the same with the cost hurdle
+  (round-trip half-spread and fees over vega). Not modelled: slippage beyond the touch, partial fills, assignment, a
+  hedge; the forward and the rate are assumed.
 
-Configurable via `.env`:
-- `NTFY_TOPIC`: Send push notifications directly to phone/desktop via `https://ntfy.sh/<NTFY_TOPIC>`.
-- `ALERT_WEBHOOK_URL`: Generic HTTP POST webhook for alerting systems (Discord, Slack, custom webhook).
-- `ALERT_STALE_MINUTES`: Quote age threshold before triggering alert (default: 5 minutes).
+## The paper buy-straddle test (not yet run for real)
 
-Fires notifications immediately on:
-1. `TRADING HALTED`: Critical Greek limit breaches or position reconciliation mismatches.
-2. `MARKET DATA STALE`: Quotes exceeding staleness threshold.
-3. `ENGINE STOPPED`: JVM shutdown hook triggers on unexpected container/host termination.
+`.\scripts\test_buy_straddle.ps1` (or `java ... --test-buy-straddle`) checks the Alpaca multi-leg path with a one-contract
+buy straddle at the venue's touch. **By default it is a dry run**: it prints the account, the quotes and the order it
+would send, and sends nothing.
+
+With `-Place` (`--confirm`) it sends **one real order to the Alpaca paper account**. That order goes straight through the
+Alpaca client, not through the engine, so the engine's ledger never records the fill and its reconciliation halts trading
+at the next check until the position is flattened on Alpaca's paper dashboard. So: `docker compose stop` first, run it
+only with the market open, and flatten afterwards. Whether the account may place a short straddle is a separate,
+still unchecked question; nothing here tries one.
+## Push alerts
+
+Optional, set in `.env` (see `.env.example`): `NTFY_TOPIC` (a long random name: anyone who knows a public ntfy.sh topic
+can read it) and `ALERT_WEBHOOK_URL` (it usually contains a secret token); `ALERT_STALE_MINUTES` is read but nothing uses it
+yet. Neither value is printed in the log. Alerts go out on:
+
+1. a **trading halt** (a limit breach, a reconciliation mismatch, or the operator's HALT);
+2. a **graceful shutdown** of the engine (`docker compose stop` or Ctrl+C). A crash, a power loss or a sleeping laptop
+   sends nothing.
+
+There is no market-data-stale alert: the code for one exists, but nothing calls it, because with no market calendar it
+would fire every night, weekend and close.
+
+## Downtime banner
+
+When the engine starts at least 30 minutes after its last recorded P&L sample, the dashboard shows
+`DOWNTIME GAP: engine was off ...` above the data banner. It is computed once at start-up.
