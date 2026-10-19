@@ -179,11 +179,15 @@ public class AppCompositionRoot {
         String allowedSideStr = config.getString("strategy.side", "long_only");
         com.sbk.optionspricer.execution.VolSpreadStrategy.AllowedSide allowedSide =
                 com.sbk.optionspricer.execution.VolSpreadStrategy.AllowedSide.parse(allowedSideStr);
+        double rmseMultiplier = config.getDouble("strategy.rmse_multiplier", 0.0);
         com.sbk.optionspricer.execution.VolSpreadStrategy.Params strategyParams = new com.sbk.optionspricer.execution.VolSpreadStrategy.Params(
                 config.getDouble("strategy.vol_edge", 0.01), config.getDouble("strategy.hedge_band", 50.0),
                 (int) config.getDouble("strategy.max_days_to_expiry", 7.0), (int) config.getDouble("strategy.min_days_to_expiry", 14.0),
                 (int) config.getDouble("strategy.contracts", 1.0), config.getString("strategy.reference_model", "SSVI"),
-                config.getDouble("strategy.fee_per_contract", 0.65), useMultiLeg, allowedSide);
+                config.getDouble("strategy.fee_per_contract", 0.65), useMultiLeg, allowedSide, rmseMultiplier);
+        if (rmseMultiplier > 0.0) {
+            System.out.printf(java.util.Locale.ROOT, "[STRATEGY] Dynamic surface RMSE hurdle is ON: requiring %.1fx surface RMSE before opening%n", rmseMultiplier);
+        }
         System.out.println("[STRATEGY] side=" + allowedSide + (allowedSide == com.sbk.optionspricer.execution.VolSpreadStrategy.AllowedSide.LONG_ONLY
                 ? " (only buys straddles; set strategy.side: both to let it sell them)" : ""));
         if (useMultiLeg) {

@@ -569,4 +569,54 @@ class VolSpreadStrategyTest {
         assertEquals("HOLD", d.action(), d.summary());
         assertEquals(2, asked.size(), "one request per leg per step, not one for the age and another for the edge: " + asked);
     }
+
+    private static VolatilitySurfaceSource referenceSurfaceWithRmse(double vol, double rmse) {
+        FlatChains source = new FlatChains(vol, TODAY);
+        List<OptionChain> chains = new ArrayList<>();
+        for (LocalDate e : source.loadedExpiries()) chains.add(source.chain(e).orElseThrow());
+        SurfaceFitter.Fit base = SurfaceFitter.fitSsvi(SurfaceFitter.extractPoints(chains, R, Q, TODAY).points());
+        SurfaceFitter.Fit ssvi = new SurfaceFitter.Fit(base.model(), base.strikes(), base.expiries(), base.vols(),
+                base.points(), rmse, base.quotesUsed(), base.parameters(), base.noArbitrageConditionsHold(), base.warnings(), base.fittedExpiries());
+        var snapshot = new VolatilitySurfaceSource.Snapshot(NOW, "SPY", "SYNTHETIC", false, 100.0, ssvi, null, null, 0, List.of());
+        return new VolatilitySurfaceSource() {
+            @Override public Optional<Snapshot> latest() { return Optional.of(snapshot); }
+            @Override public Status status() { return new Status(State.READY, "ok", NOW); }
+        };
+    }
+
+    @Test
+    void dynamicRmseHurdleBlocksOpeningWhenEdgeIsInsideSurfaceFitUncertainty() {
+        PositionTracker tracker = new PositionTracker(FillRecorder.NONE);
+        // market at 21.5% vol, reference at 20%: edge is 1.5 vol points
+        // With static volEdge = 0.01 (1.0 pt), this would normally trigger SELL_STRADDLE.
+        // But with rmse = 0.01 (1.0 pt) and rmseMultiplier = 2.0 (2.0 pt hurdle), the edge is within fitting error.
+        VolSpreadStrategy.Params dynamicParams = new VolSpreadStrategy.Params(0.01, 50.0, 7, 14, 1, "SSVI", 0.65, false,
+                VolSpreadStrategy.AllowedSide.BOTH, 2.0);
+        VolSpreadStrategy s = new VolSpreadStrategy(manager(tracker), new FlatChains(0.215, TODAY),
+                referenceSurfaceWithRmse(0.20, 0.01), null, VolSpreadStrategyTest::spot, tracker, "SPY", R, Q, dynamicParams, Clock.fixed(NOW, ZoneOffset.UTC));
+        s.allowSimulatedChains(true);
+
+        VolSpreadStrategy.Decision d = s.step();
+
+        assertEquals("HOLD", d.action(), d.summary());
+        assertTrue(d.reason().contains("surface residual uncertainty hurdle"), "Reason must mention surface residual uncertainty: " + d.reason());
+        assertTrue(tracker.getPositions().isEmpty());
+    }
+
+    @Test
+    void dynamicRmseHurdleAllowsOpeningWhenEdgeExceedsSurfaceFitUncertainty() {
+        PositionTracker tracker = new PositionTracker(FillRecorder.NONE);
+        // market at 23.5% vol, reference at 20%: edge is 3.5 vol points
+        // With rmse = 0.01 (1.0 pt) and rmseMultiplier = 2.0 (2.0 pt hurdle), edge 3.5 > 2.0 hurdle -> trades!
+        VolSpreadStrategy.Params dynamicParams = new VolSpreadStrategy.Params(0.01, 50.0, 7, 14, 1, "SSVI", 0.65, false,
+                VolSpreadStrategy.AllowedSide.BOTH, 2.0);
+        VolSpreadStrategy s = new VolSpreadStrategy(manager(tracker), new FlatChains(0.235, TODAY),
+                referenceSurfaceWithRmse(0.20, 0.01), null, VolSpreadStrategyTest::spot, tracker, "SPY", R, Q, dynamicParams, Clock.fixed(NOW, ZoneOffset.UTC));
+        s.allowSimulatedChains(true);
+
+        VolSpreadStrategy.Decision d = s.step();
+
+        assertEquals("SELL_STRADDLE", d.action(), d.summary());
+        assertEquals(-1, d.straddleSign());
+    }
 }

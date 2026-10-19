@@ -68,24 +68,30 @@ public final class VolSpreadStrategy {
      * @param feePerContract   broker/exchange fee per contract in dollars (e.g. 0.65)
      * @param useMultiLeg      if true, transmits the straddle legs as a single atomic order
      * @param allowedSide      {@code BOTH}, {@code LONG_ONLY} or {@code SHORT_ONLY}
+     * @param rmseMultiplier   multiple of reference surface RMSE required before trading (0.0 to disable)
      */
     public record Params(double volEdge, double hedgeBand, int maxDaysToExpiry, int minDaysToExpiry, int contracts,
-                         String referenceModel, double feePerContract, boolean useMultiLeg, AllowedSide allowedSide) {
+                         String referenceModel, double feePerContract, boolean useMultiLeg, AllowedSide allowedSide,
+                         double rmseMultiplier) {
         public Params(double volEdge, double hedgeBand, int maxDaysToExpiry, int minDaysToExpiry, int contracts, String referenceModel) {
-            this(volEdge, hedgeBand, maxDaysToExpiry, minDaysToExpiry, contracts, referenceModel, 0.65, false, AllowedSide.BOTH);
+            this(volEdge, hedgeBand, maxDaysToExpiry, minDaysToExpiry, contracts, referenceModel, 0.65, false, AllowedSide.BOTH, 0.0);
         }
 
         public Params(double volEdge, double hedgeBand, int maxDaysToExpiry, int minDaysToExpiry, int contracts, String referenceModel, double feePerContract) {
-            this(volEdge, hedgeBand, maxDaysToExpiry, minDaysToExpiry, contracts, referenceModel, feePerContract, false, AllowedSide.BOTH);
+            this(volEdge, hedgeBand, maxDaysToExpiry, minDaysToExpiry, contracts, referenceModel, feePerContract, false, AllowedSide.BOTH, 0.0);
         }
 
         public Params(double volEdge, double hedgeBand, int maxDaysToExpiry, int minDaysToExpiry, int contracts, String referenceModel, double feePerContract, boolean useMultiLeg) {
-            this(volEdge, hedgeBand, maxDaysToExpiry, minDaysToExpiry, contracts, referenceModel, feePerContract, useMultiLeg, AllowedSide.BOTH);
+            this(volEdge, hedgeBand, maxDaysToExpiry, minDaysToExpiry, contracts, referenceModel, feePerContract, useMultiLeg, AllowedSide.BOTH, 0.0);
+        }
+
+        public Params(double volEdge, double hedgeBand, int maxDaysToExpiry, int minDaysToExpiry, int contracts, String referenceModel, double feePerContract, boolean useMultiLeg, AllowedSide allowedSide) {
+            this(volEdge, hedgeBand, maxDaysToExpiry, minDaysToExpiry, contracts, referenceModel, feePerContract, useMultiLeg, allowedSide, 0.0);
         }
 
         public Params {
-            if (!(volEdge > 0.0) || !(hedgeBand >= 0.0) || maxDaysToExpiry < 0 || minDaysToExpiry < 0 || contracts < 1 || feePerContract < 0.0) {
-                throw new IllegalArgumentException("volEdge > 0, hedgeBand >= 0, day limits >= 0, contracts >= 1, feePerContract >= 0");
+            if (!(volEdge > 0.0) || !(hedgeBand >= 0.0) || maxDaysToExpiry < 0 || minDaysToExpiry < 0 || contracts < 1 || feePerContract < 0.0 || rmseMultiplier < 0.0) {
+                throw new IllegalArgumentException("volEdge > 0, hedgeBand >= 0, day limits >= 0, contracts >= 1, feePerContract >= 0, rmseMultiplier >= 0");
             }
             if (minDaysToExpiry <= maxDaysToExpiry) {
                 throw new IllegalArgumentException("minDaysToExpiry must exceed maxDaysToExpiry, or a straddle would be opened and closed at once");
@@ -531,11 +537,20 @@ public final class VolSpreadStrategy {
             return record(new Decision(now, "WAIT", lastEdgeProblem, front, strike, Double.NaN, Double.NaN, Double.NaN, 0, orders,
                     spotAge, cAge, optAge));
         }
-        double hurdle = Math.max(params.volEdge(), edge.breakEvenEdge());
+        double modelHurdle = (params.rmseMultiplier() > 0.0 && Double.isFinite(edge.referenceRmse()))
+                ? Math.max(params.volEdge(), params.rmseMultiplier() * edge.referenceRmse())
+                : params.volEdge();
+        double hurdle = Math.max(modelHurdle, edge.breakEvenEdge());
         if (Math.abs(edge.value()) <= hurdle) {
-            String reason = edge.breakEvenEdge() > params.volEdge()
-                    ? String.format(Locale.ROOT, "edge %.2f pts does not exceed break-even hurdle %.2f pts (round-trip half-spread+fees)/vega", 100 * Math.abs(edge.value()), 100 * hurdle)
-                    : String.format(Locale.ROOT, "edge within the %.2f-point band", 100 * params.volEdge());
+            String reason;
+            if (edge.breakEvenEdge() > modelHurdle) {
+                reason = String.format(Locale.ROOT, "edge %.2f pts does not exceed break-even hurdle %.2f pts (round-trip half-spread+fees)/vega", 100 * Math.abs(edge.value()), 100 * hurdle);
+            } else if (modelHurdle > params.volEdge()) {
+                reason = String.format(Locale.ROOT, "edge %.2f pts within surface residual uncertainty hurdle %.2f pts (%.1fx RMSE %.2f pts)",
+                        100 * Math.abs(edge.value()), 100 * hurdle, params.rmseMultiplier(), 100 * edge.referenceRmse());
+            } else {
+                reason = String.format(Locale.ROOT, "edge within the %.2f-point band", 100 * params.volEdge());
+            }
             return record(new Decision(now, "HOLD", reason + shadowReadout(front, strike, t, edge.marketIv()),
                     front, strike, edge.marketIv(), edge.referenceIv(), edge.value(), 0, orders,
                     spotAge, cAge, optAge));
@@ -665,7 +680,11 @@ public final class VolSpreadStrategy {
 
     // ------------------------------------------------------------------ edge
 
-    public record Edge(double marketIv, double referenceIv, double value, double breakEvenEdge) {}
+    public record Edge(double marketIv, double referenceIv, double value, double breakEvenEdge, double referenceRmse) {
+        public Edge(double marketIv, double referenceIv, double value, double breakEvenEdge) {
+            this(marketIv, referenceIv, value, breakEvenEdge, Double.NaN);
+        }
+    }
 
     private String lastEdgeProblem = "";
 
@@ -714,6 +733,7 @@ public final class VolSpreadStrategy {
         double breakEvenEdge = straddleVega > 1e-6 ? (totalFrictionPerShare / straddleVega) : Double.POSITIVE_INFINITY;
 
         OptionalDouble reference;
+        double rmse = Double.NaN;
         if (params.usesFairVolReference()) {
             reference = fairVolProvider.fairVol(symbol, expiry, strike, t);
             if (reference.isEmpty()) {
@@ -723,13 +743,16 @@ public final class VolSpreadStrategy {
         } else {
             SurfaceFitter.Fit fit = surfaces.latest()
                     .map(s -> "SVI".equals(params.referenceModel()) ? s.svi() : s.ssvi()).orElse(null);
+            if (fit != null) {
+                rmse = fit.rmse();
+            }
             reference = SurfaceFitter.volAt(fit, t, strike, 3.0);
             if (reference.isEmpty()) {
                 lastEdgeProblem = "no " + params.referenceModel() + " reference surface for " + expiry;
                 return null;
             }
         }
-        return new Edge(marketIv, reference.getAsDouble(), marketIv - reference.getAsDouble(), breakEvenEdge);
+        return new Edge(marketIv, reference.getAsDouble(), marketIv - reference.getAsDouble(), breakEvenEdge, rmse);
     }
 
     // ------------------------------------------------------------------ hedge and orders

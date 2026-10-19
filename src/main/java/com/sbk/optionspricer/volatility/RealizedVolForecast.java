@@ -34,6 +34,20 @@ public final class RealizedVolForecast implements FairVolProvider {
     public static final double HAR_BETA_WEEKLY = 0.33;
     public static final double HAR_BETA_MONTHLY = 0.22;
 
+    /**
+     * Calibrated or baseline coefficients for Corsi (2009) HAR-RV linear model:
+     * RV_{t+1} = beta_0 + beta_d * RV_d + beta_w * RV_w + beta_m * RV_m
+     */
+    public record HarCoefficients(double beta0, double betaDaily, double betaWeekly, double betaMonthly, double rSquared) {
+        public static final HarCoefficients DEFAULT = new HarCoefficients(HAR_BETA_0, HAR_BETA_DAILY, HAR_BETA_WEEKLY, HAR_BETA_MONTHLY, Double.NaN);
+
+        public HarCoefficients {
+            if (!Double.isFinite(beta0) || !Double.isFinite(betaDaily) || !Double.isFinite(betaWeekly) || !Double.isFinite(betaMonthly)) {
+                throw new IllegalArgumentException("HAR beta coefficients must be finite");
+            }
+        }
+    }
+
     public enum Model {
         EWMA,
         HAR,
@@ -44,16 +58,21 @@ public final class RealizedVolForecast implements FairVolProvider {
     private final double lambda;
     private final List<Double> priceHistory = new ArrayList<>();
     private final int maxHistory;
+    private final HarCoefficients harCoefficients;
 
     public RealizedVolForecast() {
-        this(Model.HAR, DEFAULT_EWMA_LAMBDA, 500);
+        this(Model.HAR, DEFAULT_EWMA_LAMBDA, 500, HarCoefficients.DEFAULT);
     }
 
     public RealizedVolForecast(Model model) {
-        this(model, DEFAULT_EWMA_LAMBDA, 500);
+        this(model, DEFAULT_EWMA_LAMBDA, 500, HarCoefficients.DEFAULT);
     }
 
     public RealizedVolForecast(Model model, double lambda, int maxHistory) {
+        this(model, lambda, maxHistory, HarCoefficients.DEFAULT);
+    }
+
+    public RealizedVolForecast(Model model, double lambda, int maxHistory, HarCoefficients harCoefficients) {
         if (model == null) {
             throw new IllegalArgumentException("model must not be null");
         }
@@ -63,9 +82,17 @@ public final class RealizedVolForecast implements FairVolProvider {
         if (maxHistory < 10) {
             throw new IllegalArgumentException("maxHistory must be at least 10");
         }
+        if (harCoefficients == null) {
+            throw new IllegalArgumentException("harCoefficients must not be null");
+        }
         this.model = model;
         this.lambda = lambda;
         this.maxHistory = maxHistory;
+        this.harCoefficients = harCoefficients;
+    }
+
+    public HarCoefficients harCoefficients() {
+        return harCoefficients;
     }
 
     public synchronized void observeSpot(double spot) {
@@ -116,9 +143,17 @@ public final class RealizedVolForecast implements FairVolProvider {
      * RV_{t+1} = beta_0 + beta_d * RV_d + beta_w * RV_w + beta_m * RV_m
      */
     public static double harForecast(double[] dailyLogReturns) {
+        return harForecast(dailyLogReturns, HarCoefficients.DEFAULT);
+    }
+
+    /**
+     * Corsi HAR-RV 1-step ahead forecast with custom/calibrated coefficients.
+     */
+    public static double harForecast(double[] dailyLogReturns, HarCoefficients coeffs) {
         if (dailyLogReturns == null || dailyLogReturns.length < 22) {
             throw new IllegalArgumentException("HAR-RV requires at least 22 daily returns (1 month)");
         }
+        HarCoefficients c = coeffs == null ? HarCoefficients.DEFAULT : coeffs;
         int n = dailyLogReturns.length;
 
         // Daily RV
@@ -139,8 +174,132 @@ public final class RealizedVolForecast implements FairVolProvider {
         }
         double rvMonthly = Math.sqrt((sumSqMonthly / 22.0) * TRADING_DAYS_PER_YEAR);
 
-        double forecast = HAR_BETA_0 + (HAR_BETA_DAILY * rvDaily) + (HAR_BETA_WEEKLY * rvWeekly) + (HAR_BETA_MONTHLY * rvMonthly);
+        double forecast = c.beta0() + (c.betaDaily() * rvDaily) + (c.betaWeekly() * rvWeekly) + (c.betaMonthly() * rvMonthly);
         return Math.max(0.01, Math.min(forecast, 2.0));
+    }
+
+    /**
+     * Fits Corsi (2009) HAR-RV model parameters via Ordinary Least Squares (OLS) regression on historical daily log returns:
+     * RV_{t+1} = beta_0 + beta_d * RV_d + beta_w * RV_w + beta_m * RV_m + epsilon
+     *
+     * @param dailyLogReturns chronological daily log returns (at least 44 days needed for 22-day predictor window + 22 observations)
+     * @return fitted HarCoefficients including empirical R^2, or HarCoefficients.DEFAULT if sample size is insufficient or singular
+     */
+    public static HarCoefficients calibrateHar(double[] dailyLogReturns) {
+        if (dailyLogReturns == null || dailyLogReturns.length < 44) {
+            return HarCoefficients.DEFAULT;
+        }
+        int n = dailyLogReturns.length;
+        double[][] a = new double[4][4];
+        double[] b = new double[4];
+        double sumY = 0.0;
+        double sumY2 = 0.0;
+        int count = 0;
+
+        for (int t = 21; t < n - 1; t++) {
+            double rNext = dailyLogReturns[t + 1];
+            double y = Math.abs(rNext) * Math.sqrt(TRADING_DAYS_PER_YEAR);
+
+            double x0 = 1.0;
+            double rDaily = dailyLogReturns[t];
+            double x1 = Math.abs(rDaily) * Math.sqrt(TRADING_DAYS_PER_YEAR);
+
+            double sumSqWeekly = 0.0;
+            for (int k = t - 4; k <= t; k++) {
+                sumSqWeekly += dailyLogReturns[k] * dailyLogReturns[k];
+            }
+            double x2 = Math.sqrt((sumSqWeekly / 5.0) * TRADING_DAYS_PER_YEAR);
+
+            double sumSqMonthly = 0.0;
+            for (int k = t - 21; k <= t; k++) {
+                sumSqMonthly += dailyLogReturns[k] * dailyLogReturns[k];
+            }
+            double x3 = Math.sqrt((sumSqMonthly / 22.0) * TRADING_DAYS_PER_YEAR);
+
+            double[] x = new double[]{x0, x1, x2, x3};
+            for (int i = 0; i < 4; i++) {
+                b[i] += x[i] * y;
+                for (int j = 0; j < 4; j++) {
+                    a[i][j] += x[i] * x[j];
+                }
+            }
+            sumY += y;
+            sumY2 += y * y;
+            count++;
+        }
+
+        if (count < 22) {
+            return HarCoefficients.DEFAULT;
+        }
+
+        double[][] aug = new double[4][5];
+        for (int i = 0; i < 4; i++) {
+            System.arraycopy(a[i], 0, aug[i], 0, 4);
+            aug[i][4] = b[i];
+        }
+
+        for (int i = 0; i < 4; i++) {
+            int maxRow = i;
+            double maxVal = Math.abs(aug[i][i]);
+            for (int k = i + 1; k < 4; k++) {
+                if (Math.abs(aug[k][i]) > maxVal) {
+                    maxVal = Math.abs(aug[k][i]);
+                    maxRow = k;
+                }
+            }
+            if (maxVal < 1e-12) {
+                return HarCoefficients.DEFAULT;
+            }
+            double[] tmp = aug[i];
+            aug[i] = aug[maxRow];
+            aug[maxRow] = tmp;
+
+            for (int k = i + 1; k < 4; k++) {
+                double factor = aug[k][i] / aug[i][i];
+                for (int j = i; j <= 4; j++) {
+                    aug[k][j] -= factor * aug[i][j];
+                }
+            }
+        }
+
+        double[] beta = new double[4];
+        for (int i = 3; i >= 0; i--) {
+            double sum = aug[i][4];
+            for (int j = i + 1; j < 4; j++) {
+                sum -= aug[i][j] * beta[j];
+            }
+            beta[i] = sum / aug[i][i];
+        }
+
+        for (int i = 0; i < 4; i++) {
+            if (!Double.isFinite(beta[i]) || Math.abs(beta[i]) > 10.0) {
+                return HarCoefficients.DEFAULT;
+            }
+        }
+
+        double ssRes = sumY2;
+        for (int i = 0; i < 4; i++) {
+            ssRes -= beta[i] * b[i];
+        }
+        ssRes = Math.max(0.0, ssRes);
+        double ssTot = Math.max(1e-12, sumY2 - (sumY * sumY / count));
+        double rSquared = Math.max(0.0, Math.min(1.0, 1.0 - (ssRes / ssTot)));
+
+        return new HarCoefficients(beta[0], beta[1], beta[2], beta[3], rSquared);
+    }
+
+    public static HarCoefficients calibrateHarFromPrices(double[] prices) {
+        if (prices == null || prices.length < 45) {
+            return HarCoefficients.DEFAULT;
+        }
+        double[] logReturns = new double[prices.length - 1];
+        for (int i = 1; i < prices.length; i++) {
+            if (prices[i] <= 0.0 || prices[i - 1] <= 0.0) {
+                return HarCoefficients.DEFAULT;
+            }
+            logReturns[i - 1] = Math.log(prices[i] / prices[i - 1]);
+        }
+        return calibrateHar(logReturns);
     }
 
     /**
@@ -181,9 +340,9 @@ public final class RealizedVolForecast implements FairVolProvider {
 
         double baseForecast;
         if (model == Model.HAR) {
-            baseForecast = harForecast(returns);
+            baseForecast = harForecast(returns, harCoefficients);
         } else if (model == Model.HYBRID) {
-            double har = harForecast(returns);
+            double har = harForecast(returns, harCoefficients);
             double ewma = ewmaVol(returns, lambda, TRADING_DAYS_PER_YEAR);
             baseForecast = 0.6 * har + 0.4 * ewma;
         } else {

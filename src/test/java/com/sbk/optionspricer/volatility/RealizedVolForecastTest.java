@@ -109,4 +109,65 @@ class RealizedVolForecastTest {
         assertTrue(fair.isPresent(), "Must have fair vol after history is accumulated");
         assertTrue(fair.getAsDouble() > 0.02 && fair.getAsDouble() < 0.50);
     }
+
+    @Test
+    void calibrateHarFallsBackToDefaultWhenInsufficientData() {
+        double[] tooFew = new double[20];
+        RealizedVolForecast.HarCoefficients coeffs = RealizedVolForecast.calibrateHar(tooFew);
+        assertEquals(RealizedVolForecast.HAR_BETA_0, coeffs.beta0(), 1e-9);
+        assertEquals(RealizedVolForecast.HAR_BETA_DAILY, coeffs.betaDaily(), 1e-9);
+        assertEquals(RealizedVolForecast.HAR_BETA_WEEKLY, coeffs.betaWeekly(), 1e-9);
+        assertEquals(RealizedVolForecast.HAR_BETA_MONTHLY, coeffs.betaMonthly(), 1e-9);
+        assertTrue(Double.isNaN(coeffs.rSquared()));
+    }
+
+    @Test
+    void calibrateHarRecoversSyntheticCoefficientsFromSimulatedProcess() {
+        // Generate a 200-day series where RV follows exact HAR linear model
+        int n = 200;
+        double[] returns = new double[n];
+        double trueBeta0 = 0.02;
+        double trueDaily = 0.35;
+        double trueWeekly = 0.30;
+        double trueMonthly = 0.20;
+
+        // Initialize with baseline 16% annualized daily vol
+        double baseVol = 0.16 / Math.sqrt(252.0);
+        for (int i = 0; i < 22; i++) {
+            returns[i] = (i % 2 == 0 ? 1.0 : -1.0) * baseVol;
+        }
+        for (int i = 22; i < n; i++) {
+            double rvD = Math.abs(returns[i - 1]) * Math.sqrt(252.0);
+            double sumW = 0.0;
+            for (int k = i - 5; k < i; k++) sumW += returns[k] * returns[k];
+            double rvW = Math.sqrt((sumW / 5.0) * 252.0);
+            double sumM = 0.0;
+            for (int k = i - 22; k < i; k++) sumM += returns[k] * returns[k];
+            double rvM = Math.sqrt((sumM / 22.0) * 252.0);
+
+            double targetVol = trueBeta0 + trueDaily * rvD + trueWeekly * rvW + trueMonthly * rvM;
+            double dailySigma = Math.max(0.01, targetVol) / Math.sqrt(252.0);
+            returns[i] = (i % 2 == 0 ? 1.0 : -1.0) * dailySigma;
+        }
+
+        RealizedVolForecast.HarCoefficients fitted = RealizedVolForecast.calibrateHar(returns);
+        assertNotNull(fitted);
+        assertEquals(trueBeta0, fitted.beta0(), 0.05, "Recovered beta0: " + fitted.beta0());
+        assertEquals(trueDaily, fitted.betaDaily(), 0.08, "Recovered betaDaily: " + fitted.betaDaily());
+        assertEquals(trueWeekly, fitted.betaWeekly(), 0.08, "Recovered betaWeekly: " + fitted.betaWeekly());
+        assertEquals(trueMonthly, fitted.betaMonthly(), 0.08, "Recovered betaMonthly: " + fitted.betaMonthly());
+        assertTrue(fitted.rSquared() > 0.80, "R-squared must be high on clean process: " + fitted.rSquared());
+    }
+
+    @Test
+    void calibratedHarCoefficientsCanBeInjectedIntoForecastEngine() {
+        RealizedVolForecast.HarCoefficients custom = new RealizedVolForecast.HarCoefficients(0.01, 0.40, 0.30, 0.20, 0.45);
+        RealizedVolForecast forecast = new RealizedVolForecast(RealizedVolForecast.Model.HAR, RealizedVolForecast.DEFAULT_EWMA_LAMBDA, 500, custom);
+        feedDailyCloses(forecast, 30);
+        LocalDate expiry = LocalDate.now().plusDays(30);
+
+        OptionalDouble fair = forecast.fairVol("SPY", expiry, 500.0, 30.0 / 365.25);
+        assertTrue(fair.isPresent());
+        assertTrue(fair.getAsDouble() > 0.01 && fair.getAsDouble() < 1.0);
+    }
 }
