@@ -192,7 +192,8 @@ public class OrderManager {
 
         ExecutionResult result = transport.transmit(order, snapshot.symbol(), snapshot.bid(), snapshot.ask());
         if (!result.executed()) {
-            return reject(orderId, mds, result.message(), "execution transport rejected the order");
+            String why = result.message() == null || result.message().isBlank() ? "" : ": " + result.message();
+            return reject(orderId, mds, result.message(), "execution transport rejected the order" + why);
         }
 
         int filled = result.filledQuantity();
