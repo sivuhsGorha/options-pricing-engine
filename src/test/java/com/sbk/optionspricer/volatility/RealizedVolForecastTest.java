@@ -170,4 +170,62 @@ class RealizedVolForecastTest {
         assertTrue(fair.isPresent());
         assertTrue(fair.getAsDouble() > 0.01 && fair.getAsDouble() < 1.0);
     }
+
+    // ------------------------------------------------------------------ HAR fitted on variance
+
+    private static double[] gaussianReturns(int n, double dailySigma, long seed) {
+        java.util.Random random = new java.util.Random(seed);
+        double[] r = new double[n];
+        for (int i = 0; i < n; i++) r[i] = dailySigma * random.nextGaussian();
+        return r;
+    }
+
+    @Test
+    void aHarFittedOnVarianceForecastsTheRightLevelWhereTheAbsoluteReturnFitRunsLow() {
+        double sigma = 0.01;
+        double trueVol = sigma * Math.sqrt(252.0);
+        double[] returns = gaussianReturns(6000, sigma, 5);
+
+        RealizedVolForecast.HarCoefficients onVariance = RealizedVolForecast.calibrateHarVariance(returns);
+        RealizedVolForecast.HarCoefficients onAbsolute = RealizedVolForecast.calibrateHar(returns);
+
+        assertTrue(onVariance.varianceSpace());
+        double fitted = RealizedVolForecast.harForecast(returns, onVariance);
+        assertEquals(trueVol, fitted, 0.06 * trueVol, "variance-space fit should recover the volatility level, got " + fitted);
+        // why it was replaced: absolute daily returns average about 0.8 of the volatility, and the fit inherits that
+        assertTrue(RealizedVolForecast.harForecast(returns, onAbsolute) < 0.90 * trueVol,
+                "the absolute-return fit runs low: " + RealizedVolForecast.harForecast(returns, onAbsolute));
+    }
+
+    @Test
+    void theVarianceFitFallsBackToTheDefaultWeightsWhenItHasNothingToFit() {
+        assertEquals(RealizedVolForecast.HarCoefficients.DEFAULT, RealizedVolForecast.calibrateHarVariance(gaussianReturns(30, 0.01, 1)));
+        assertEquals(RealizedVolForecast.HarCoefficients.DEFAULT, RealizedVolForecast.calibrateHarVariance(null));
+        double[] constant = new double[200];
+        for (int i = 0; i < constant.length; i++) constant[i] = (i % 2 == 0 ? 1 : -1) * 0.01;
+        assertEquals(RealizedVolForecast.HarCoefficients.DEFAULT, RealizedVolForecast.calibrateHarVariance(constant),
+                "identical days make the regressors collinear: no fit, not a made-up one");
+    }
+
+    @Test
+    void theVarianceFitReportsAnRSquaredInRangeAndANeverNonsenseForecast() {
+        // volatility clusters: calm, turbulent, calm
+        java.util.Random random = new java.util.Random(9);
+        double[] returns = new double[600];
+        for (int i = 0; i < returns.length; i++) {
+            double sigma = (i / 100) % 2 == 0 ? 0.005 : 0.02;
+            returns[i] = sigma * random.nextGaussian();
+        }
+
+        RealizedVolForecast.HarCoefficients fit = RealizedVolForecast.calibrateHarVariance(returns);
+
+        assertTrue(fit.varianceSpace());
+        assertTrue(fit.rSquared() >= 0.0 && fit.rSquared() <= 1.0, "R^2 " + fit.rSquared());
+        double forecast = RealizedVolForecast.harForecast(returns, fit);
+        assertTrue(forecast >= 0.01 && forecast <= 2.0, "forecast " + forecast);
+
+        // weights that would send the variance negative are floored, not square-rooted into NaN
+        RealizedVolForecast.HarCoefficients negative = new RealizedVolForecast.HarCoefficients(-5.0, 0.0, 0.0, 0.0, 0.5, true);
+        assertEquals(0.01, RealizedVolForecast.harForecast(returns, negative), 1e-12);
+    }
 }

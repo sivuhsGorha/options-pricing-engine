@@ -37,9 +37,18 @@ public final class RealizedVolForecast implements FairVolProvider {
     /**
      * Calibrated or baseline coefficients for Corsi (2009) HAR-RV linear model:
      * RV_{t+1} = beta_0 + beta_d * RV_d + beta_w * RV_w + beta_m * RV_m
+     *
+     * <p>{@code varianceSpace} says the weights apply to annualised variances (daily squared return, 5-day and 22-day mean
+     * squared return) and the forecast is the square root of the result; false means they apply to volatility levels.
      */
-    public record HarCoefficients(double beta0, double betaDaily, double betaWeekly, double betaMonthly, double rSquared) {
+    public record HarCoefficients(double beta0, double betaDaily, double betaWeekly, double betaMonthly, double rSquared,
+                                  boolean varianceSpace) {
         public static final HarCoefficients DEFAULT = new HarCoefficients(HAR_BETA_0, HAR_BETA_DAILY, HAR_BETA_WEEKLY, HAR_BETA_MONTHLY, Double.NaN);
+
+        /** Weights on volatility levels (the textbook form, and what {@link #DEFAULT} is). */
+        public HarCoefficients(double beta0, double betaDaily, double betaWeekly, double betaMonthly, double rSquared) {
+            this(beta0, betaDaily, betaWeekly, betaMonthly, rSquared, false);
+        }
 
         public HarCoefficients {
             if (!Double.isFinite(beta0) || !Double.isFinite(betaDaily) || !Double.isFinite(betaWeekly) || !Double.isFinite(betaMonthly)) {
@@ -155,6 +164,11 @@ public final class RealizedVolForecast implements FairVolProvider {
         }
         HarCoefficients c = coeffs == null ? HarCoefficients.DEFAULT : coeffs;
         int n = dailyLogReturns.length;
+        if (c.varianceSpace()) {
+            double[] v = harVariancePredictors(dailyLogReturns, n - 1);
+            double variance = c.beta0() + c.betaDaily() * v[0] + c.betaWeekly() * v[1] + c.betaMonthly() * v[2];
+            return Math.max(0.01, Math.min(Math.sqrt(Math.max(0.0, variance)), 2.0));
+        }
 
         // Daily RV
         double rDaily = dailyLogReturns[n - 1];
@@ -179,7 +193,10 @@ public final class RealizedVolForecast implements FairVolProvider {
     }
 
     /**
-     * Fits Corsi (2009) HAR-RV model parameters via Ordinary Least Squares (OLS) regression on historical daily log returns:
+     * Fits Corsi (2009) HAR-RV model parameters via Ordinary Least Squares (OLS) regression on historical daily log returns.
+     * <b>Biased low:</b> it regresses on absolute returns, which average about 0.8 of the volatility; prefer
+     * {@link #calibrateHarVariance}. Kept so the comparison in {@code --forecast-eval} history stays reproducible.
+     *
      * RV_{t+1} = beta_0 + beta_d * RV_d + beta_w * RV_w + beta_m * RV_m + epsilon
      *
      * @param dailyLogReturns chronological daily log returns (at least 44 days needed for 22-day predictor window + 22 observations)
@@ -286,6 +303,99 @@ public final class RealizedVolForecast implements FairVolProvider {
         double rSquared = Math.max(0.0, Math.min(1.0, 1.0 - (ssRes / ssTot)));
 
         return new HarCoefficients(beta[0], beta[1], beta[2], beta[3], rSquared);
+    }
+
+    /** Annualised daily, 5-day and 22-day mean squared return ending at index {@code t}. */
+    private static double[] harVariancePredictors(double[] r, int t) {
+        double daily = r[t] * r[t] * TRADING_DAYS_PER_YEAR;
+        double week = 0.0;
+        for (int k = t - 4; k <= t; k++) week += r[k] * r[k];
+        double month = 0.0;
+        for (int k = t - 21; k <= t; k++) month += r[k] * r[k];
+        return new double[]{daily, week / 5.0 * TRADING_DAYS_PER_YEAR, month / 22.0 * TRADING_DAYS_PER_YEAR};
+    }
+
+    /**
+     * Fits the HAR weights by least squares on annualised variance: the next day's squared return on the daily, weekly and
+     * monthly mean squared returns. Squared returns are an unbiased proxy for the day's variance; absolute returns, which
+     * {@link #calibrateHar} uses, average about 0.8 of the volatility, so a fit on them forecasts low. Use with
+     * {@link #harForecast(double[], HarCoefficients)}, which reads the weights as variance weights.
+     *
+     * @return the fit with its R^2, or {@link HarCoefficients#DEFAULT} when there are fewer than 44 returns or the
+     *         regressors are collinear (identical days) or the weights come out absurd
+     */
+    public static HarCoefficients calibrateHarVariance(double[] dailyLogReturns) {
+        if (dailyLogReturns == null || dailyLogReturns.length < 44) {
+            return HarCoefficients.DEFAULT;
+        }
+        int n = dailyLogReturns.length;
+        double[][] a = new double[4][4];
+        double[] b = new double[4];
+        double sumY = 0.0, sumY2 = 0.0;
+        int count = 0;
+        for (int t = 21; t < n - 1; t++) {
+            double y = dailyLogReturns[t + 1] * dailyLogReturns[t + 1] * TRADING_DAYS_PER_YEAR;
+            double[] v = harVariancePredictors(dailyLogReturns, t);
+            double[] x = {1.0, v[0], v[1], v[2]};
+            for (int i = 0; i < 4; i++) {
+                b[i] += x[i] * y;
+                for (int j = 0; j < 4; j++) a[i][j] += x[i] * x[j];
+            }
+            sumY += y;
+            sumY2 += y * y;
+            count++;
+        }
+        if (count < 22) {
+            return HarCoefficients.DEFAULT;
+        }
+        double[] beta = solve4(a, b);
+        if (beta == null) {
+            return HarCoefficients.DEFAULT;
+        }
+        for (double coefficient : beta) {
+            if (!Double.isFinite(coefficient) || Math.abs(coefficient) > 10.0) {
+                return HarCoefficients.DEFAULT;
+            }
+        }
+        double ssRes = sumY2;
+        for (int i = 0; i < 4; i++) ssRes -= beta[i] * b[i];
+        ssRes = Math.max(0.0, ssRes);
+        double ssTot = Math.max(1e-18, sumY2 - (sumY * sumY / count));
+        double rSquared = Math.max(0.0, Math.min(1.0, 1.0 - (ssRes / ssTot)));
+        return new HarCoefficients(beta[0], beta[1], beta[2], beta[3], rSquared, true);
+    }
+
+    /** Solves the 4x4 normal equations by Gaussian elimination with partial pivoting; null when they are singular. */
+    private static double[] solve4(double[][] a, double[] b) {
+        double scale = 0.0;
+        for (int i = 0; i < 4; i++) scale = Math.max(scale, Math.abs(a[i][i]));
+        double tolerance = Math.max(1e-300, scale * 1e-10);
+        double[][] aug = new double[4][5];
+        for (int i = 0; i < 4; i++) {
+            System.arraycopy(a[i], 0, aug[i], 0, 4);
+            aug[i][4] = b[i];
+        }
+        for (int i = 0; i < 4; i++) {
+            int maxRow = i;
+            for (int k = i + 1; k < 4; k++) {
+                if (Math.abs(aug[k][i]) > Math.abs(aug[maxRow][i])) maxRow = k;
+            }
+            if (Math.abs(aug[maxRow][i]) < tolerance) return null;
+            double[] tmp = aug[i];
+            aug[i] = aug[maxRow];
+            aug[maxRow] = tmp;
+            for (int k = i + 1; k < 4; k++) {
+                double factor = aug[k][i] / aug[i][i];
+                for (int j = i; j <= 4; j++) aug[k][j] -= factor * aug[i][j];
+            }
+        }
+        double[] beta = new double[4];
+        for (int i = 3; i >= 0; i--) {
+            double sum = aug[i][4];
+            for (int j = i + 1; j < 4; j++) sum -= aug[i][j] * beta[j];
+            beta[i] = sum / aug[i][i];
+        }
+        return beta;
     }
 
     public static HarCoefficients calibrateHarFromPrices(double[] prices) {

@@ -70,7 +70,7 @@ public final class ForecastEvaluator {
             if (!(realized * realized > 1e-12)) {
                 continue; // a window with no movement at all has no variance to score against
             }
-            RealizedVolForecast.HarCoefficients fit = RealizedVolForecast.calibrateHar(known);
+            RealizedVolForecast.HarCoefficients fit = RealizedVolForecast.calibrateHarVariance(known);
             if (Double.isFinite(fit.rSquared())) fitted++;
             double[] forecasts = {
                     trailing(known),
