@@ -423,4 +423,83 @@ class VolSpreadStrategyTest {
         assertEquals("ALPACA", resolved.source());
         assertEquals(1.525, resolved.last(), 1e-6);
     }
+
+    // ------------------------------------------------------------------ supervised test straddle
+
+    private static final Instant AFTER_HOURS = Instant.parse("2026-10-08T22:00:00Z"); // 18:00 in New York
+    private static final Instant SATURDAY = Instant.parse("2026-10-10T15:00:00Z");
+
+    @Test
+    void aSupervisedDryRunNamesTheLegsAndTheDebitAndSendsNothing() {
+        PositionTracker tracker = new PositionTracker(FillRecorder.NONE);
+        VolSpreadStrategy s = strategy(tracker, new FlatChains(0.20, TODAY), 0.20, null, Clock.fixed(NOW, ZoneOffset.UTC));
+
+        VolSpreadStrategy.Decision d = s.supervisedBuyStraddle(false);
+
+        assertEquals("SUPERVISED_DRY_RUN", d.action(), d.summary());
+        assertTrue(d.orders().isEmpty(), "a dry run places nothing: " + d.orders());
+        assertTrue(d.reason().contains("SPY") && d.reason().contains("debit"), d.reason());
+        assertTrue(tracker.getPositions().isEmpty());
+        assertTrue(s.lastDecision().isEmpty(), "a dry run is not a strategy decision and is not journaled");
+    }
+
+    @Test
+    void aSupervisedStraddleIsRefusedOutsideRegularHoursAndAtTheWeekend() {
+        for (Instant closed : List.of(AFTER_HOURS, SATURDAY, Instant.parse("2026-10-08T13:00:00Z") /* 09:00 New York */)) {
+            PositionTracker tracker = new PositionTracker(FillRecorder.NONE);
+            VolSpreadStrategy s = strategy(tracker, new FlatChains(0.20, TODAY), 0.20, null, Clock.fixed(closed, ZoneOffset.UTC));
+
+            VolSpreadStrategy.Decision d = s.supervisedBuyStraddle(true);
+
+            assertEquals("SUPERVISED_REFUSED", d.action(), closed + ": " + d.summary());
+            assertTrue(d.reason().contains("regular trading hours"), d.reason());
+            assertTrue(d.orders().isEmpty() && tracker.getPositions().isEmpty(), "nothing may be sent at " + closed);
+        }
+    }
+
+    @Test
+    void aConfirmedSupervisedStraddleBuysOneCallAndOnePutThroughTheOrderManagerAndTheTracker() {
+        PositionTracker tracker = new PositionTracker(FillRecorder.NONE);
+        VolSpreadStrategy s = strategy(tracker, new FlatChains(0.20, TODAY), 0.20, null, Clock.fixed(NOW, ZoneOffset.UTC));
+
+        VolSpreadStrategy.Decision d = s.supervisedBuyStraddle(true);
+
+        assertEquals("SUPERVISED_BUY_STRADDLE", d.action(), d.summary());
+        assertEquals(1, d.straddleSign());
+        assertEquals(2, d.orders().size(), d.orders().toString());
+        assertTrue(d.orders().stream().allMatch(o -> o.startsWith("BUY 1 ") && o.endsWith("filled")), d.orders().toString());
+        assertEquals(2, tracker.getPositions().size());
+        assertTrue(tracker.getPositions().keySet().stream().allMatch(sym -> tracker.getNetQuantity(sym) == 1), tracker.getPositions().toString());
+        assertEquals(d, s.lastDecision().orElseThrow(), "a placed straddle is a decision and is journaled");
+
+        VolSpreadStrategy.Decision again = s.supervisedBuyStraddle(true);
+        assertEquals("SUPERVISED_REFUSED", again.action(), again.summary());
+        assertTrue(again.reason().contains("already open"), again.reason());
+        assertEquals(2, tracker.getPositions().size(), "no second straddle");
+
+        // and from here the ordinary step manages it: it is the strategy's open straddle now
+        VolSpreadStrategy.Decision next = s.step();
+        assertEquals(1, next.straddleSign(), next.summary());
+    }
+
+    @Test
+    void aSupervisedStraddleIsRefusedForAShortOnlyStrategyAndWhileTheSpotIsStale() {
+        PositionTracker tracker = new PositionTracker(FillRecorder.NONE);
+        VolSpreadStrategy.Params shortOnly = new VolSpreadStrategy.Params(0.01, 50.0, 7, 14, 1, "SSVI", 0.65, false, VolSpreadStrategy.AllowedSide.SHORT_ONLY);
+        VolSpreadStrategy s = new VolSpreadStrategy(manager(tracker), new FlatChains(0.20, TODAY), referenceSurface(0.20), null,
+                VolSpreadStrategyTest::spot, tracker, "SPY", R, Q, shortOnly, Clock.fixed(NOW, ZoneOffset.UTC));
+        s.allowSimulatedChains(true);
+        VolSpreadStrategy.Decision d = s.supervisedBuyStraddle(true);
+        assertEquals("SUPERVISED_REFUSED", d.action(), d.summary());
+        assertTrue(d.reason().contains("short"), d.reason());
+
+        MarketSnapshot staleSpot = new MarketSnapshot("SPY", 99.99, 100.01, 100.0, 5000L, NOW, NOW, 0L, "TEST", MarketDataStatus.STALE);
+        VolSpreadStrategy stale = new VolSpreadStrategy(manager(tracker), new FlatChains(0.20, TODAY), referenceSurface(0.20), null,
+                () -> staleSpot, tracker, "SPY", R, Q, params(), Clock.fixed(NOW, ZoneOffset.UTC));
+        stale.allowSimulatedChains(true);
+        VolSpreadStrategy.Decision st = stale.supervisedBuyStraddle(true);
+        assertEquals("SUPERVISED_REFUSED", st.action(), st.summary());
+        assertTrue(st.reason().contains("spot"), st.reason());
+        assertTrue(tracker.getPositions().isEmpty());
+    }
 }

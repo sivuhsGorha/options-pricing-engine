@@ -23,4 +23,12 @@ public interface OperatorControls {
     ControlState resume();
 
     ControlState setStrategyEnabled(boolean enabled);
+
+    /**
+     * Runs the operator-supervised test straddle (see {@link VolSpreadStrategy#supervisedBuyStraddle}); a dry run unless
+     * {@code confirm}. Engines without the options strategy refuse.
+     */
+    default VolSpreadStrategy.Decision supervisedStraddle(boolean confirm) {
+        throw new UnsupportedOperationException("the supervised test straddle is not available in this engine");
+    }
 }

@@ -258,6 +258,84 @@ public final class VolSpreadStrategy {
         return considerOpening(now, today, spot, orders);
     }
 
+    private LocalDate frontExpiry(LocalDate today) {
+        for (LocalDate expiry : chains.loadedExpiries()) {
+            if (TimeConventions.yearFraction(today, expiry) * TimeConventions.DAYS_PER_YEAR >= params.minDaysToExpiry()) {
+                return expiry;
+            }
+        }
+        return null;
+    }
+
+    private static final java.time.ZoneId NEW_YORK = java.time.ZoneId.of("America/New_York");
+
+    /**
+     * An operator-supervised test of the whole live path: buys one straddle (the front-month at-the-money call and put, long
+     * only) with no edge required, through the same gates, venue quotes, transport, tracker and ledger as a signal trade.
+     * From then on the ordinary {@link #step()} manages it (hedge, hold, close), so the position is booked where the
+     * reconciliation against the venue can see it. Without {@code confirm} it only reports the legs and the debit.
+     *
+     * <p>Refused outside US regular hours (09:30 to 16:00 New York, Monday to Friday; exchange holidays and early closes are
+     * left to the stale-quote gate and the venue), when the strategy is short-only, with a stale spot, or while a straddle is
+     * already open. A refusal sends nothing.
+     */
+    public synchronized Decision supervisedBuyStraddle(boolean confirm) {
+        Instant now = clock.instant();
+        LocalDate today = LocalDate.ofInstant(now, ZoneOffset.UTC);
+        List<String> orders = new ArrayList<>();
+        java.time.ZonedDateTime ny = java.time.ZonedDateTime.ofInstant(now, NEW_YORK);
+        java.time.LocalTime open = java.time.LocalTime.of(9, 30), close = java.time.LocalTime.of(16, 0);
+        boolean weekend = ny.getDayOfWeek() == java.time.DayOfWeek.SATURDAY || ny.getDayOfWeek() == java.time.DayOfWeek.SUNDAY;
+        if (weekend || ny.toLocalTime().isBefore(open) || !ny.toLocalTime().isBefore(close)) {
+            return supervisedRefusal(now, "outside US regular trading hours (09:30-16:00 New York, Monday to Friday): it is "
+                    + ny.toLocalDate() + " " + ny.toLocalTime().withNano(0) + " there");
+        }
+        if (params.allowedSide() == AllowedSide.SHORT_ONLY) {
+            return supervisedRefusal(now, "strategy.side is short_only, and this test buys");
+        }
+        if (hasOpenStraddle()) {
+            return supervisedRefusal(now, "a straddle is already open (" + openCall + " / " + openPut + ")");
+        }
+        MarketSnapshot spot = spotSupplier.get();
+        if (spot == null || spot.status() == MarketDataStatus.UNAVAILABLE || spot.status() == MarketDataStatus.STALE || !(spot.last() > 0.0)) {
+            return supervisedRefusal(now, "no fresh spot price for " + symbol);
+        }
+        LocalDate front = frontExpiry(today);
+        Optional<OptionChain> chain = front == null ? Optional.empty() : chains.chain(front);
+        if (chain.isEmpty()) {
+            return supervisedRefusal(now, "no loaded expiry at least " + params.minDaysToExpiry() + " days out");
+        }
+        double t = TimeConventions.yearFraction(today, front);
+        double forward = spot.last() * Math.exp((riskFreeRate - dividendYield) * t);
+        OptionalDouble atm = nearestStrike(chain.get(), forward);
+        if (atm.isEmpty()) {
+            return supervisedRefusal(now, "no strikes in the " + front + " chain");
+        }
+        double strike = atm.getAsDouble();
+        String call = OccSymbol.format(symbol, front, OptionType.CALL, strike);
+        String put = OccSymbol.format(symbol, front, OptionType.PUT, strike);
+        MarketSnapshot callQuote = resolveQuote(call);
+        MarketSnapshot putQuote = resolveQuote(put);
+        if (callQuote == null || putQuote == null) {
+            return supervisedRefusal(now, "no quote for " + (callQuote == null ? call : put));
+        }
+        if (!confirm) {
+            String plan = String.format(Locale.ROOT, "dry run: would buy %d %s and %d %s; debit about $%.2f at the ask (%.2f + %.2f, x100 per contract), nothing sent",
+                    params.contracts(), call, params.contracts(), put,
+                    params.contracts() * 100.0 * (callQuote.ask() + putQuote.ask()), callQuote.ask(), putQuote.ask());
+            System.out.println("[SUPERVISED] " + plan);
+            return new Decision(now, "SUPERVISED_DRY_RUN", plan, front, strike, Double.NaN, Double.NaN, Double.NaN, 0, orders);
+        }
+        System.out.println("[SUPERVISED] operator confirmed: buying 1 straddle " + front + " " + strike);
+        return placeStraddle(now, front, strike, null, false, orders, "SUPERVISED_",
+                multiLeg -> "operator-supervised test straddle, no edge required");
+    }
+
+    private Decision supervisedRefusal(Instant now, String why) {
+        System.out.println("[SUPERVISED] refused: " + why);
+        return new Decision(now, "SUPERVISED_REFUSED", why, null, Double.NaN, Double.NaN, Double.NaN, Double.NaN, 0, List.of());
+    }
+
     // ------------------------------------------------------------------ open position
 
     private boolean hasOpenStraddle() {
@@ -367,13 +445,7 @@ public final class VolSpreadStrategy {
     // ------------------------------------------------------------------ opening
 
     private Decision considerOpening(Instant now, LocalDate today, MarketSnapshot spot, List<String> orders) {
-        LocalDate front = null;
-        for (LocalDate expiry : chains.loadedExpiries()) {
-            if (TimeConventions.yearFraction(today, expiry) * TimeConventions.DAYS_PER_YEAR >= params.minDaysToExpiry()) {
-                front = expiry;
-                break;
-            }
-        }
+        LocalDate front = frontExpiry(today);
         if (front == null) {
             return record(new Decision(now, "WAIT", "no loaded expiry at least " + params.minDaysToExpiry() + " days out", null, Double.NaN, Double.NaN, Double.NaN, Double.NaN, 0, orders));
         }
@@ -419,14 +491,30 @@ public final class VolSpreadStrategy {
                             + shadowReadout(front, strike, t, edge.marketIv()),
                     front, strike, edge.marketIv(), edge.referenceIv(), edge.value(), 0, orders));
         }
+        String side = sell ? "rich" : "cheap";
+        return placeStraddle(now, front, strike, edge, sell, orders, "",
+                multiLeg -> "market " + side + " to the " + params.referenceModel() + (multiLeg
+                        ? " reference by more than the break-even hurdle" : " reference by more than the band"));
+    }
+
+    /**
+     * Sends both legs and, when they fill, makes the straddle the one this strategy manages. Shared by the signal path and the
+     * supervised test, so a test straddle goes through exactly the gates, quotes, transport and bookkeeping a real one does.
+     * {@code edge} may be null (the supervised test needs none); {@code prefix} marks the decision's action.
+     */
+    private Decision placeStraddle(Instant now, LocalDate front, double strike, Edge edge, boolean sell, List<String> orders,
+                                   String prefix, java.util.function.Function<Boolean, String> openedReason) {
+        double mIv = edge == null ? Double.NaN : edge.marketIv();
+        double rIv = edge == null ? Double.NaN : edge.referenceIv();
+        double eVal = edge == null ? Double.NaN : edge.value();
         String call = OccSymbol.format(symbol, front, OptionType.CALL, strike);
         String put = OccSymbol.format(symbol, front, OptionType.PUT, strike);
         MarketSnapshot callQuote = resolveQuote(call);
         MarketSnapshot putQuote = resolveQuote(put);
         if (callQuote == null || putQuote == null) {
             orders.add((callQuote == null ? call : put) + ": no quote");
-            return record(new Decision(now, sell ? "SELL_STRADDLE_REJECTED" : "BUY_STRADDLE_REJECTED", String.join("; ", orders),
-                    front, strike, edge.marketIv(), edge.referenceIv(), edge.value(), 0, orders));
+            return record(new Decision(now, prefix + (sell ? "SELL_STRADDLE_REJECTED" : "BUY_STRADDLE_REJECTED"), String.join("; ", orders),
+                    front, strike, mIv, rIv, eVal, 0, orders));
         }
 
         if (params.useMultiLeg()) {
@@ -435,16 +523,16 @@ public final class VolSpreadStrategy {
             OrderManager.OrderDecision dec = orderManager.submitMultiLeg(List.of(legCall, legPut), List.of(callQuote, putQuote), callQuote.last() + putQuote.last());
             orders.add((!sell ? "BUY " : "SELL ") + params.contracts() + " " + call + "/" + put + " MLEG " + (dec.accepted() ? "filled" : "rejected: " + dec.message()));
             if (!dec.accepted()) {
-                return record(new Decision(now, sell ? "SELL_STRADDLE_REJECTED" : "BUY_STRADDLE_REJECTED", dec.message(),
-                        front, strike, edge.marketIv(), edge.referenceIv(), edge.value(), 0, orders));
+                return record(new Decision(now, prefix + (sell ? "SELL_STRADDLE_REJECTED" : "BUY_STRADDLE_REJECTED"), dec.message(),
+                        front, strike, mIv, rIv, eVal, 0, orders));
             }
             openCall = call;
             openPut = put;
             openExpiry = front;
             openStrike = strike;
-            String action = sell ? "SELL_STRADDLE" : "BUY_STRADDLE";
-            String reason = "market " + (sell ? "rich" : "cheap") + " to the " + params.referenceModel() + " reference by more than the break-even hurdle";
-            return record(new Decision(now, action, reason, front, strike, edge.marketIv(), edge.referenceIv(), edge.value(), sell ? -1 : 1, orders));
+            String action = prefix + (sell ? "SELL_STRADDLE" : "BUY_STRADDLE");
+            String reason = openedReason.apply(true);
+            return record(new Decision(now, action, reason, front, strike, mIv, rIv, eVal, sell ? -1 : 1, orders));
         }
 
         // Sequential submission with fallback flattening for non-mleg transports
@@ -457,8 +545,8 @@ public final class VolSpreadStrategy {
             filledLegs++;
         }
         if (filledLegs == 0) {
-            return record(new Decision(now, sell ? "SELL_STRADDLE_REJECTED" : "BUY_STRADDLE_REJECTED", String.join("; ", orders),
-                    front, strike, edge.marketIv(), edge.referenceIv(), edge.value(), 0, orders));
+            return record(new Decision(now, prefix + (sell ? "SELL_STRADDLE_REJECTED" : "BUY_STRADDLE_REJECTED"), String.join("; ", orders),
+                    front, strike, mIv, rIv, eVal, 0, orders));
         }
         openCall = call;
         openPut = put;
@@ -469,13 +557,14 @@ public final class VolSpreadStrategy {
             // next step flattens it first (see manageOpenStraddle).
             closeStraddle(orders);
             String left = hasOpenStraddle() ? "; the close was refused, the next step retries" : "";
-            return record(new Decision(now, sell ? "SELL_STRADDLE_REJECTED" : "BUY_STRADDLE_REJECTED",
-                    "second leg refused; the first leg was flattened" + left, front, strike, edge.marketIv(), edge.referenceIv(), edge.value(),
+            return record(new Decision(now, prefix + (sell ? "SELL_STRADDLE_REJECTED" : "BUY_STRADDLE_REJECTED"),
+                    "second leg refused; the first leg was flattened" + left, front, strike, mIv, rIv, eVal,
                     hasOpenStraddle() ? (sell ? -1 : 1) : 0, orders));
         }
-        String action = sell ? "SELL_STRADDLE" : "BUY_STRADDLE";
-        String reason = "market " + (sell ? "rich" : "cheap") + " to the " + params.referenceModel() + " reference by more than the band";
-        return record(new Decision(now, action, reason, front, strike, edge.marketIv(), edge.referenceIv(), edge.value(), sell ? -1 : 1, orders));
+        String action = prefix + (sell ? "SELL_STRADDLE" : "BUY_STRADDLE");
+        String reason = openedReason.apply(false);
+        return record(new Decision(now, action, reason, front, strike, mIv, rIv, eVal, sell ? -1 : 1, orders));
+    
     }
 
     /**

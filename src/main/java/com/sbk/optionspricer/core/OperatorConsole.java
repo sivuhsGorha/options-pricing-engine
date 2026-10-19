@@ -22,6 +22,13 @@ public final class OperatorConsole implements OperatorControls {
         this.noteSupplier = note == null ? () -> null : note;
     }
 
+    private volatile java.util.function.Function<Boolean, com.sbk.optionspricer.execution.VolSpreadStrategy.Decision> supervisedStraddle;
+
+    /** Where the supervised test straddle runs (the options strategy); unset, the control refuses. */
+    public void setSupervisedStraddle(java.util.function.Function<Boolean, com.sbk.optionspricer.execution.VolSpreadStrategy.Decision> runner) {
+        this.supervisedStraddle = runner;
+    }
+
     public OperatorConsole(TradingHalt tradingHalt, StrategySwitch strategySwitch, StrategyExecutionLoop strategyLoop) {
         if (tradingHalt == null || strategySwitch == null) {
             throw new IllegalArgumentException("tradingHalt and strategySwitch must not be null");
@@ -63,5 +70,14 @@ public final class OperatorConsole implements OperatorControls {
         strategySwitch.setStrategyEnabled(enabled);
         System.out.println("[OPERATOR] strategy " + (enabled ? "enabled" : "disabled"));
         return state();
+    }
+
+    @Override
+    public com.sbk.optionspricer.execution.VolSpreadStrategy.Decision supervisedStraddle(boolean confirm) {
+        var runner = supervisedStraddle;
+        if (runner == null) {
+            return OperatorControls.super.supervisedStraddle(confirm);
+        }
+        return runner.apply(confirm);
     }
 }

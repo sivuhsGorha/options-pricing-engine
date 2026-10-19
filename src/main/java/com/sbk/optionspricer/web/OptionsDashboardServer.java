@@ -932,6 +932,29 @@ public class OptionsDashboardServer {
                     }
                     sendJson(exchange, 200, controlWithTransport(controls.setStrategyEnabled(enabled.asBoolean())));
                 }
+                case "/api/control/test-straddle" -> {
+                    com.fasterxml.jackson.databind.JsonNode confirm = body.get("confirm");
+                    if (confirm == null || !confirm.isBoolean()) {
+                        // no default: an omitted flag must never become an order
+                        sendJsonError(exchange, 400, "body must be {\"confirm\": true|false}; false is a dry run");
+                        return;
+                    }
+                    com.sbk.optionspricer.execution.VolSpreadStrategy.Decision d;
+                    try {
+                        d = controls.supervisedStraddle(confirm.asBoolean());
+                    } catch (UnsupportedOperationException e) {
+                        sendJsonError(exchange, 501, "the supervised test straddle needs the vol_spread strategy");
+                        return;
+                    }
+                    java.util.Map<String, Object> out = new java.util.LinkedHashMap<>();
+                    out.put("action", d.action());
+                    out.put("reason", d.reason());
+                    out.put("expiry", d.expiry() == null ? null : d.expiry().toString());
+                    out.put("strike", Double.isFinite(d.strike()) ? d.strike() : null);
+                    out.put("orders", d.orders());
+                    out.put("at", d.at().toEpochMilli());
+                    sendJson(exchange, 200, out);
+                }
                 default -> sendJsonError(exchange, 404, "not found");
             }
         }));

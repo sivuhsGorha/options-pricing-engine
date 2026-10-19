@@ -38,6 +38,8 @@ class OperatorControlsApiTest {
     private Path webRoot;
     private OrderManager manager;
     private boolean strategyEnabled = true;
+    private OperatorConsole console;
+    private final java.util.List<Boolean> supervisedCalls = new java.util.ArrayList<>();
 
     @BeforeEach
     void start() throws Exception {
@@ -70,7 +72,8 @@ class OperatorControlsApiTest {
         webRoot = Files.createTempDirectory("control-api-web");
         server = new OptionsDashboardServer(OptionsDashboardServerTest.TEST_SECRET, OptionsDashboardServerTest.OPERATOR_PASSWORD,
                 OptionsDashboardServerTest.ALLOWED_ORIGIN, "127.0.0.1", 0, 0, reader, webRoot.toString(), manager, tracker, null);
-        server.setOperatorControls(new OperatorConsole(halt, sw, loop));
+        console = new OperatorConsole(halt, sw, loop);
+        server.setOperatorControls(console);
         server.start();
         OptionsDashboardServerTest.waitForWebSocketPort(server);
     }
@@ -148,5 +151,36 @@ class OperatorControlsApiTest {
 
         JsonNode state = MAPPER.readTree(call("GET", "/api/control", null, cookie, origin).body());
         assertFalse(state.get("halted").asBoolean(), "none of the refused calls may have tripped the halt");
+    }
+
+    @Test
+    void theSupervisedStraddleNeedsAnExplicitConfirmFlagAndReportsWhatTheStrategyDid() throws Exception {
+        String cookie = cookie();
+        String origin = OptionsDashboardServerTest.ALLOWED_ORIGIN;
+
+        assertEquals(501, call("POST", "/api/control/test-straddle", "{\"confirm\":false}", cookie, origin).statusCode(),
+                "not wired (a momentum-only engine): say so, do not pretend");
+
+        console.setSupervisedStraddle(confirm -> {
+            supervisedCalls.add(confirm);
+            return new com.sbk.optionspricer.execution.VolSpreadStrategy.Decision(Instant.parse("2026-10-20T15:00:00Z"),
+                    confirm ? "SUPERVISED_BUY_STRADDLE" : "SUPERVISED_DRY_RUN", "why", java.time.LocalDate.of(2026, 11, 20), 770.0,
+                    Double.NaN, Double.NaN, Double.NaN, confirm ? 1 : 0, java.util.List.of("BUY 1 X filled"));
+        });
+
+        assertEquals(400, call("POST", "/api/control/test-straddle", "{}", cookie, origin).statusCode(), "no flag: never a trade by default");
+        assertEquals(400, call("POST", "/api/control/test-straddle", "{\"confirm\":\"yes\"}", cookie, origin).statusCode());
+        assertTrue(supervisedCalls.isEmpty(), "a bad body must not reach the strategy");
+
+        JsonNode dry = MAPPER.readTree(call("POST", "/api/control/test-straddle", "{\"confirm\":false}", cookie, origin).body());
+        assertEquals("SUPERVISED_DRY_RUN", dry.get("action").asText());
+        JsonNode done = MAPPER.readTree(call("POST", "/api/control/test-straddle", "{\"confirm\":true}", cookie, origin).body());
+        assertEquals("SUPERVISED_BUY_STRADDLE", done.get("action").asText());
+        assertEquals("BUY 1 X filled", done.get("orders").get(0).asText());
+        assertEquals(java.util.List.of(false, true), supervisedCalls);
+
+        assertEquals(405, call("GET", "/api/control/test-straddle", null, cookie, origin).statusCode());
+        assertEquals(401, call("POST", "/api/control/test-straddle", "{\"confirm\":true}", null, null).statusCode());
+        assertEquals(2, supervisedCalls.size(), "an unauthenticated call must not reach the strategy");
     }
 }

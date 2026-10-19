@@ -213,6 +213,7 @@ public class AppCompositionRoot {
         System.out.println("[JOURNAL] strategy decisions are appended to " + decisionJournal.path());
         harness.setStrategyMode(strategyMode);
         harness.setOptionStrategy(volSpreadStrategy::step, java.time.Duration.ofSeconds((long) config.getDouble("strategy.option_interval_seconds", 30.0)));
+        console.setSupervisedStraddle(volSpreadStrategy::supervisedBuyStraddle);
         console.describeStrategy(harness::getStrategyMode,
                 () -> volSpreadStrategy.lastDecision().map(com.sbk.optionspricer.execution.VolSpreadStrategy.Decision::summary).orElse(null));
 

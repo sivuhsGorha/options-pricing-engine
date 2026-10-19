@@ -237,6 +237,26 @@ Alpaca client, not through the engine, so the engine's ledger never records the 
 at the next check until the position is flattened on Alpaca's paper dashboard. So: `docker compose stop` first, run it
 only with the market open, and flatten afterwards. Whether the account may place a short straddle is a separate,
 still unchecked question; nothing here tries one.
+## The supervised test straddle (inside the engine)
+
+Unlike the script above, this runs in the live engine, so the order goes through the order manager and the Alpaca
+transport, the fill is booked in the ledger and tracker, and the reconciliation then agrees with Alpaca instead of
+halting. It buys **one** long straddle (front-month ATM call and put), needs no edge, and is refused outside 09:30-16:00
+New York on weekdays, with a stale spot, when `strategy.side` is `short_only`, and while a straddle is already open.
+
+```powershell
+# sign in once (the password is OPERATOR_PASSWORD), then call the control; Origin must be an allowed origin
+$origin = 'http://127.0.0.1:8080'
+Invoke-WebRequest "$origin/login" -Method Post -Body $env:OPERATOR_PASSWORD -Headers @{ Origin = $origin } -SessionVariable s | Out-Null
+Invoke-RestMethod "$origin/api/control/test-straddle" -Method Post -WebSession $s -Headers @{ Origin = $origin } -ContentType 'application/json' -Body '{"confirm":false}'   # dry run
+Invoke-RestMethod "$origin/api/control/test-straddle" -Method Post -WebSession $s -Headers @{ Origin = $origin } -ContentType 'application/json' -Body '{"confirm":true}'    # one real paper order
+```
+
+After a confirm: the order appears in the dashboard's order tape and on Alpaca's Orders page, the book still reconciles
+(`[RECONCILE] OK`), and the valuation marks the option legs. The next ordinary step manages the straddle like any other and,
+with no edge to hold it, will usually close it about 30 seconds later: the test exercises open, mark and close, and costs
+the spread. Not yet run against the real paper account.
+
 ## Push alerts
 
 Optional, set in `.env` (see `.env.example`): `NTFY_TOPIC` (a long random name: anyone who knows a public ntfy.sh topic
