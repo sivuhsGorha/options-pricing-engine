@@ -320,6 +320,15 @@ public final class VolatilitySurfaceService implements VolatilitySurfaceSource, 
         return latestChains.stream().map(OptionChainProvider.SourcedChain::chain).filter(c -> c.expiry().equals(expiry)).findFirst();
     }
 
+    @Override
+    public Optional<Instant> chainAsOf(LocalDate expiry) {
+        return latestChains.stream()
+                .filter(c -> c.chain().expiry().equals(expiry))
+                .map(OptionChainProvider.SourcedChain::asOf)
+                .filter(java.util.Objects::nonNull)
+                .findFirst();
+    }
+
     /**
      * The contract's quote as a tradable snapshot: its own bid/ask, the standard 100 multiplier, the chain's
      * provenance (SIMULATED for a generated chain) and the feed's as-of time for freshness.

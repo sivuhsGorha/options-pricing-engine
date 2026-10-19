@@ -97,4 +97,21 @@ class SessionReportTest {
         assertTrue(report.contains("no decisions recorded"), report);
         assertFalse(report.contains("HOLD"), report);
     }
+
+    @Test
+    void reportsDataFreshnessAndAgeDistributionsAcrossDecisions() {
+        List<DecisionJournal.Row> rows = List.of(
+                new DecisionJournal.Row(T0, "WAIT", "", Double.NaN, Double.NaN, Double.NaN, Double.NaN, 0, "", "spot quote STALE", 15.0, Double.NaN, Double.NaN),
+                new DecisionJournal.Row(T0.plusSeconds(30), "WAIT", "2026-11-13", 769.0, Double.NaN, Double.NaN, Double.NaN, 0, "", "quote STALE (feed 140 s old)", 0.8, 140.0, 140.0),
+                new DecisionJournal.Row(T0.plusSeconds(60), "HOLD", "2026-11-13", 769.0, 0.14, 0.142, -0.002, 0, "", "within band", 0.5, 45.0, 2.5),
+                new DecisionJournal.Row(T0.plusSeconds(90), "HOLD", "2026-11-13", 769.0, 0.14, 0.141, -0.001, 0, "", "within band", 0.6, 55.0, 3.1)
+        );
+
+        String report = SessionReport.build(rows, List.of(), DAY);
+        assertTrue(report.contains("quote & chain age (s):"), report);
+        assertTrue(report.contains("spot mean"), report);
+        assertTrue(report.contains("chain mean"), report);
+        assertTrue(report.contains("option quote mean"), report);
+        assertTrue(report.contains("stale gate blocked: 2 decisions (50.0% of steps)"), report);
+    }
 }

@@ -89,4 +89,37 @@ class DecisionJournalTest {
     void readingAFileThatIsNotThereGivesNoRows(@TempDir Path dir) throws IOException {
         assertEquals(List.of(), DecisionJournal.read(dir.resolve("nope.csv")));
     }
+
+    @Test
+    void recordsAgeTelemetryFieldsAndRoundTripsThem(@TempDir Path dir) throws IOException {
+        Path file = dir.resolve("decisions.csv");
+        VolSpreadStrategy.Decision d = new VolSpreadStrategy.Decision(T0, "HOLD", "within band", LocalDate.of(2026, 11, 13),
+                769.0, 0.140, 0.143, -0.003, 0, List.of(), 1.2, 45.0, 3.5);
+        new DecisionJournal(file).record(d);
+
+        List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
+        assertTrue(lines.get(0).endsWith(",spotAgeSeconds,chainAgeSeconds,optionQuoteAgeSeconds"), "header has age fields: " + lines.get(0));
+        assertTrue(lines.get(1).endsWith(",1.2,45.0,3.5"), "row ends with formatted ages: " + lines.get(1));
+
+        DecisionJournal.Row row = DecisionJournal.read(file).get(0);
+        assertEquals(1.2, row.spotAgeSeconds(), 1e-6);
+        assertEquals(45.0, row.chainAgeSeconds(), 1e-6);
+        assertEquals(3.5, row.optionQuoteAgeSeconds(), 1e-6);
+    }
+
+    @Test
+    void readsLegacyTenColumnRowsWithNaNForAges(@TempDir Path dir) throws IOException {
+        Path file = dir.resolve("legacy_decisions.csv");
+        String legacyCsv = "at,action,expiry,strike,marketIv,referenceIv,edge,straddleSign,orders,reason\n"
+                + "2026-10-15T14:00:00Z,HOLD,2026-11-13,769.00,0.140000,0.143000,-0.003000,0,,within band\n";
+        Files.writeString(file, legacyCsv, StandardCharsets.UTF_8);
+
+        List<DecisionJournal.Row> rows = DecisionJournal.read(file);
+        assertEquals(1, rows.size());
+        DecisionJournal.Row r = rows.get(0);
+        assertEquals("HOLD", r.action());
+        assertTrue(Double.isNaN(r.spotAgeSeconds()), "legacy spotAge is NaN");
+        assertTrue(Double.isNaN(r.chainAgeSeconds()), "legacy chainAge is NaN");
+        assertTrue(Double.isNaN(r.optionQuoteAgeSeconds()), "legacy optionQuoteAge is NaN");
+    }
 }

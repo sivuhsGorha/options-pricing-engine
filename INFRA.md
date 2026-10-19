@@ -8,7 +8,7 @@ of the shipped deployment and have not been measured.
 ## 1. Build and run
 
 ```bash
-mvn clean verify                 # compile, 579 tests, JaCoCo gate (75%), package jar + target/lib
+mvn clean verify                 # compile, 585 tests, JaCoCo gate (75%), package jar + target/lib
 java --add-modules jdk.incubator.vector -jar target/options-pricing-engine-1.0.0-SNAPSHOT.jar
 ```
 

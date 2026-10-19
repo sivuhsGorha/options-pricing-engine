@@ -106,7 +106,14 @@ public final class VolSpreadStrategy {
 
     /** What one step saw and did. {@code edge} is market minus reference, as a vol fraction. */
     public record Decision(Instant at, String action, String reason, LocalDate expiry, double strike,
-                           double marketIv, double referenceIv, double edge, int straddleSign, List<String> orders) {
+                           double marketIv, double referenceIv, double edge, int straddleSign, List<String> orders,
+                           double spotAgeSeconds, double chainAgeSeconds, double optionQuoteAgeSeconds) {
+        public Decision(Instant at, String action, String reason, LocalDate expiry, double strike,
+                        double marketIv, double referenceIv, double edge, int straddleSign, List<String> orders) {
+            this(at, action, reason, expiry, strike, marketIv, referenceIv, edge, straddleSign, orders,
+                    Double.NaN, Double.NaN, Double.NaN);
+        }
+
         public String summary() {
             String level = Double.isFinite(marketIv)
                     ? String.format(Locale.ROOT, " %s %.0f: market %.1f%% vs ref %.1f%% (edge %+.2f pts)", expiry, strike, 100 * marketIv, 100 * referenceIv, 100 * edge)
@@ -235,6 +242,28 @@ public final class VolSpreadStrategy {
         return step();
     }
 
+    /** Seconds since the feed stamped the quote; NaN when there is no quote or the feed gave no time (an epoch stamp). */
+    static double quoteAge(MarketSnapshot s) {
+        if (s == null || s.sourceTimestamp() == null || s.sourceTimestamp().equals(Instant.EPOCH)) return Double.NaN;
+        return s.derivedQuoteAgeMs() >= 0 ? s.derivedQuoteAgeMs() / 1000.0 : Double.NaN;
+    }
+
+    /** Seconds since the feed stamped the chain for {@code exp}; NaN when the feed gave no time. */
+    double chainAge(LocalDate exp, Instant now) {
+        if (exp == null) return Double.NaN;
+        return chains.chainAsOf(exp)
+                .map(asOf -> Math.max(0.0, (now.toEpochMilli() - asOf.toEpochMilli()) / 1000.0))
+                .orElse(Double.NaN);
+    }
+
+    static double maxQuoteAge(MarketSnapshot a, MarketSnapshot b) {
+        double ageA = quoteAge(a);
+        double ageB = quoteAge(b);
+        if (Double.isNaN(ageA)) return ageB;
+        if (Double.isNaN(ageB)) return ageA;
+        return Math.max(ageA, ageB);
+    }
+
     /** One evaluation: hedge if needed, then open, hold or close the straddle. Never throws for market conditions. */
     public synchronized Decision step() {
         Instant now = clock.instant();
@@ -243,12 +272,14 @@ public final class VolSpreadStrategy {
 
         MarketSnapshot spot = spotSupplier.get();
         if (spot == null || spot.status() == MarketDataStatus.UNAVAILABLE || !(spot.last() > 0.0)) {
-            return record(new Decision(now, "WAIT", "no spot price", null, Double.NaN, Double.NaN, Double.NaN, Double.NaN, 0, orders));
+            return record(new Decision(now, "WAIT", "no spot price", null, Double.NaN, Double.NaN, Double.NaN, Double.NaN, 0, orders,
+                    Double.NaN, Double.NaN, Double.NaN));
         }
         if (spot.status() == MarketDataStatus.STALE) {
             // The option chain is reloaded every minute and so reads as fresh even when the market is shut, but the
             // spot's age shows it: a stale spot means nothing here can be priced, hedged or traded.
-            return record(new Decision(now, "WAIT", "spot quote STALE", null, Double.NaN, Double.NaN, Double.NaN, Double.NaN, 0, orders));
+            return record(new Decision(now, "WAIT", "spot quote STALE", null, Double.NaN, Double.NaN, Double.NaN, Double.NaN, 0, orders,
+                    quoteAge(spot), Double.NaN, Double.NaN));
         }
         hedgeIfNeeded(spot, orders);
 
@@ -297,34 +328,39 @@ public final class VolSpreadStrategy {
             return supervisedRefusal(now, "a straddle is already open (" + openCall + " / " + openPut + ")");
         }
         MarketSnapshot spot = spotSupplier.get();
+        double spotAge = quoteAge(spot);
         if (spot == null || spot.status() == MarketDataStatus.UNAVAILABLE || spot.status() == MarketDataStatus.STALE || !(spot.last() > 0.0)) {
-            return supervisedRefusal(now, "no fresh spot price for " + symbol);
+            return supervisedRefusal(now, "no fresh spot price for " + symbol, spotAge);
         }
         LocalDate front = frontExpiry(today);
         Optional<OptionChain> chain = front == null ? Optional.empty() : chains.chain(front);
+        double cAgeInitial = chainAge(front, now);
         if (chain.isEmpty()) {
-            return supervisedRefusal(now, "no loaded expiry at least " + params.minDaysToExpiry() + " days out");
+            return supervisedRefusal(now, "no loaded expiry at least " + params.minDaysToExpiry() + " days out", spotAge, cAgeInitial, Double.NaN);
         }
         double t = TimeConventions.yearFraction(today, front);
         double forward = spot.last() * Math.exp((riskFreeRate - dividendYield) * t);
         OptionalDouble atm = nearestStrike(chain.get(), forward);
         if (atm.isEmpty()) {
-            return supervisedRefusal(now, "no strikes in the " + front + " chain");
+            return supervisedRefusal(now, "no strikes in the " + front + " chain", spotAge, cAgeInitial, Double.NaN);
         }
         double strike = atm.getAsDouble();
         String call = OccSymbol.format(symbol, front, OptionType.CALL, strike);
         String put = OccSymbol.format(symbol, front, OptionType.PUT, strike);
+        double cAge = chainAge(front, now);
         MarketSnapshot callQuote = resolveQuote(call);
         MarketSnapshot putQuote = resolveQuote(put);
+        double optAge = maxQuoteAge(callQuote, putQuote);
         if (callQuote == null || putQuote == null) {
-            return supervisedRefusal(now, "no quote for " + (callQuote == null ? call : put));
+            return supervisedRefusal(now, "no quote for " + (callQuote == null ? call : put), spotAge, cAge, optAge);
         }
         if (!confirm) {
             String plan = String.format(Locale.ROOT, "dry run: would buy %d %s and %d %s; debit about $%.2f at the ask (%.2f + %.2f, x100 per contract), nothing sent",
                     params.contracts(), call, params.contracts(), put,
                     params.contracts() * 100.0 * (callQuote.ask() + putQuote.ask()), callQuote.ask(), putQuote.ask());
             System.out.println("[SUPERVISED] " + plan);
-            return new Decision(now, "SUPERVISED_DRY_RUN", plan, front, strike, Double.NaN, Double.NaN, Double.NaN, 0, orders);
+            return new Decision(now, "SUPERVISED_DRY_RUN", plan, front, strike, Double.NaN, Double.NaN, Double.NaN, 0, orders,
+                    spotAge, cAge, optAge);
         }
         System.out.println("[SUPERVISED] operator confirmed: buying 1 straddle " + front + " " + strike);
         return placeStraddle(now, front, strike, null, false, orders, "SUPERVISED_",
@@ -332,8 +368,17 @@ public final class VolSpreadStrategy {
     }
 
     private Decision supervisedRefusal(Instant now, String why) {
+        return supervisedRefusal(now, why, Double.NaN, Double.NaN, Double.NaN);
+    }
+
+    private Decision supervisedRefusal(Instant now, String why, double spotAge) {
+        return supervisedRefusal(now, why, spotAge, Double.NaN, Double.NaN);
+    }
+
+    private Decision supervisedRefusal(Instant now, String why, double spotAge, double chainAge, double optionQuoteAge) {
         System.out.println("[SUPERVISED] refused: " + why);
-        return new Decision(now, "SUPERVISED_REFUSED", why, null, Double.NaN, Double.NaN, Double.NaN, Double.NaN, 0, List.of());
+        return new Decision(now, "SUPERVISED_REFUSED", why, null, Double.NaN, Double.NaN, Double.NaN, Double.NaN, 0, List.of(),
+                spotAge, chainAge, optionQuoteAge);
     }
 
     // ------------------------------------------------------------------ open position
@@ -353,13 +398,19 @@ public final class VolSpreadStrategy {
     }
 
     private Decision manageOpenStraddle(Instant now, LocalDate today, MarketSnapshot spot, List<String> orders) {
+        double spotAge = quoteAge(spot);
+        double cAge = chainAge(openExpiry, now);
+        MarketSnapshot openCallQuote = resolveQuote(openCall);
+        MarketSnapshot openPutQuote = resolveQuote(openPut);
+        double optAge = maxQuoteAge(openCallQuote, openPutQuote);
+
         int sign = Integer.signum(tracker.getNetQuantity(openCall) != 0 ? tracker.getNetQuantity(openCall) : tracker.getNetQuantity(openPut));
         if ((tracker.getNetQuantity(openCall) == 0) != (tracker.getNetQuantity(openPut) == 0)) {
             // One leg only: a refused second leg, or a flatten that was refused earlier. A lone short option is a
             // naked position the strategy never intends to hold, whatever the edge says, so it is closed first.
             closeStraddle(orders);
             return record(new Decision(now, "CLOSE", "only one leg is held; flattening it", openExpiry, openStrike,
-                    Double.NaN, Double.NaN, Double.NaN, sign, orders));
+                    Double.NaN, Double.NaN, Double.NaN, sign, orders, spotAge, cAge, optAge));
         }
         LocalDate exp = openExpiry;
         double strk = openStrike;
@@ -368,7 +419,7 @@ public final class VolSpreadStrategy {
         if (daysLeft <= params.maxDaysToExpiry()) {
             closeStraddle(orders);
             return record(new Decision(now, "CLOSE", "expiry within " + params.maxDaysToExpiry() + " days (" + daysLeft + " left)",
-                    exp, strk, Double.NaN, Double.NaN, Double.NaN, sign, orders));
+                    exp, strk, Double.NaN, Double.NaN, Double.NaN, sign, orders, spotAge, cAge, optAge));
         }
 
         // Pin risk monitor: DTE <= 1 and spot within 0.5% of strike
@@ -376,13 +427,13 @@ public final class VolSpreadStrategy {
             closeStraddle(orders);
             return record(new Decision(now, "CLOSE", String.format(Locale.ROOT,
                     "pin risk: DTE <= 1 (%d days) and spot %.2f within 0.5%% of strike %.2f", daysLeft, spot.last(), strk),
-                    exp, strk, Double.NaN, Double.NaN, Double.NaN, sign, orders));
+                    exp, strk, Double.NaN, Double.NaN, Double.NaN, sign, orders, spotAge, cAge, optAge));
         }
 
         // Early assignment monitor for short straddles: ITM short option with extrinsic value < $0.10
         if (sign < 0) {
-            MarketSnapshot callQuote = resolveQuote(openCall);
-            MarketSnapshot putQuote = resolveQuote(openPut);
+            MarketSnapshot callQuote = openCallQuote;
+            MarketSnapshot putQuote = openPutQuote;
             if (callQuote != null && spot.last() > strk) {
                 double intrinsic = spot.last() - strk;
                 double extrinsic = callQuote.last() - intrinsic;
@@ -390,7 +441,7 @@ public final class VolSpreadStrategy {
                     closeStraddle(orders);
                     return record(new Decision(now, "CLOSE", String.format(Locale.ROOT,
                             "early assignment risk: short ITM call extrinsic value $%.2f < $0.10", extrinsic),
-                            exp, strk, Double.NaN, Double.NaN, Double.NaN, sign, orders));
+                            exp, strk, Double.NaN, Double.NaN, Double.NaN, sign, orders, spotAge, cAge, optAge));
                 }
             }
             if (putQuote != null && spot.last() < strk) {
@@ -400,25 +451,25 @@ public final class VolSpreadStrategy {
                     closeStraddle(orders);
                     return record(new Decision(now, "CLOSE", String.format(Locale.ROOT,
                             "early assignment risk: short ITM put extrinsic value $%.2f < $0.10", extrinsic),
-                            exp, strk, Double.NaN, Double.NaN, Double.NaN, sign, orders));
+                            exp, strk, Double.NaN, Double.NaN, Double.NaN, sign, orders, spotAge, cAge, optAge));
                 }
             }
         }
 
-        Edge edge = edgeFor(exp, strk, spot.last(), t);
+        Edge edge = edgeFor(exp, strk, spot.last(), t, openCallQuote, openPutQuote);
         if (edge == null) {
             return record(new Decision(now, "HOLD", "cannot evaluate the open straddle (no quotes or surface); holding",
-                    exp, strk, Double.NaN, Double.NaN, Double.NaN, sign, orders));
+                    exp, strk, Double.NaN, Double.NaN, Double.NaN, sign, orders, spotAge, cAge, optAge));
         }
         // A short straddle (sign -1) was opened on a positive edge, a long one on a negative edge: the trade has done
         // its work once the edge has crossed back to zero (sign * edge >= 0) or come inside half the band.
         if (sign * edge.value() >= 0.0 || Math.abs(edge.value()) < params.volEdge() / 2.0) {
             closeStraddle(orders);
             return record(new Decision(now, "CLOSE", String.format(Locale.ROOT, "edge reverted inside half the band (%.2f pts)", 100 * params.volEdge() / 2.0),
-                    exp, strk, edge.marketIv(), edge.referenceIv(), edge.value(), sign, orders));
+                    exp, strk, edge.marketIv(), edge.referenceIv(), edge.value(), sign, orders, spotAge, cAge, optAge));
         }
         return record(new Decision(now, "HOLD", sign < 0 ? "short straddle; market still rich to the reference" : "long straddle; market still cheap to the reference",
-                exp, strk, edge.marketIv(), edge.referenceIv(), edge.value(), sign, orders));
+                exp, strk, edge.marketIv(), edge.referenceIv(), edge.value(), sign, orders, spotAge, cAge, optAge));
     }
 
     private void closeStraddle(List<String> orders) {
@@ -445,27 +496,40 @@ public final class VolSpreadStrategy {
     // ------------------------------------------------------------------ opening
 
     private Decision considerOpening(Instant now, LocalDate today, MarketSnapshot spot, List<String> orders) {
+        double spotAge = quoteAge(spot);
         LocalDate front = frontExpiry(today);
         if (front == null) {
-            return record(new Decision(now, "WAIT", "no loaded expiry at least " + params.minDaysToExpiry() + " days out", null, Double.NaN, Double.NaN, Double.NaN, Double.NaN, 0, orders));
+            return record(new Decision(now, "WAIT", "no loaded expiry at least " + params.minDaysToExpiry() + " days out", null, Double.NaN, Double.NaN, Double.NaN, Double.NaN, 0, orders,
+                    spotAge, Double.NaN, Double.NaN));
         }
         double t = TimeConventions.yearFraction(today, front);
         double forward = spot.last() * Math.exp((riskFreeRate - dividendYield) * t);
         Optional<OptionChain> chain = chains.chain(front);
+        double cAgeInitial = chainAge(front, now);
         if (chain.isPresent() && Math.abs(chain.get().spot() - spot.last()) > MAX_SPOT_DISAGREEMENT * spot.last()) {
             // A generated fallback chain is built around a nominal price; its strikes mean nothing against the live spot.
             return record(new Decision(now, "WAIT", String.format(Locale.ROOT,
                     "chain underlying price %.2f disagrees with the live spot %.2f; not a usable chain", chain.get().spot(), spot.last()),
-                    front, Double.NaN, Double.NaN, Double.NaN, Double.NaN, 0, orders));
+                    front, Double.NaN, Double.NaN, Double.NaN, Double.NaN, 0, orders,
+                    spotAge, cAgeInitial, Double.NaN));
         }
         OptionalDouble atm = chain.map(c -> nearestStrike(c, forward)).orElse(OptionalDouble.empty());
         if (atm.isEmpty()) {
-            return record(new Decision(now, "WAIT", "no strikes in the " + front + " chain", front, Double.NaN, Double.NaN, Double.NaN, Double.NaN, 0, orders));
+            return record(new Decision(now, "WAIT", "no strikes in the " + front + " chain", front, Double.NaN, Double.NaN, Double.NaN, Double.NaN, 0, orders,
+                    spotAge, cAgeInitial, Double.NaN));
         }
         double strike = atm.getAsDouble();
-        Edge edge = edgeFor(front, strike, spot.last(), t);
+        String call = OccSymbol.format(symbol, front, OptionType.CALL, strike);
+        String put = OccSymbol.format(symbol, front, OptionType.PUT, strike);
+        double cAge = chainAge(front, now);
+        MarketSnapshot callQuote = resolveQuote(call);
+        MarketSnapshot putQuote = resolveQuote(put);
+        double optAge = maxQuoteAge(callQuote, putQuote);
+
+        Edge edge = edgeFor(front, strike, spot.last(), t, callQuote, putQuote);
         if (edge == null) {
-            return record(new Decision(now, "WAIT", lastEdgeProblem, front, strike, Double.NaN, Double.NaN, Double.NaN, 0, orders));
+            return record(new Decision(now, "WAIT", lastEdgeProblem, front, strike, Double.NaN, Double.NaN, Double.NaN, 0, orders,
+                    spotAge, cAge, optAge));
         }
         double hurdle = Math.max(params.volEdge(), edge.breakEvenEdge());
         if (Math.abs(edge.value()) <= hurdle) {
@@ -473,7 +537,8 @@ public final class VolSpreadStrategy {
                     ? String.format(Locale.ROOT, "edge %.2f pts does not exceed break-even hurdle %.2f pts (round-trip half-spread+fees)/vega", 100 * Math.abs(edge.value()), 100 * hurdle)
                     : String.format(Locale.ROOT, "edge within the %.2f-point band", 100 * params.volEdge());
             return record(new Decision(now, "HOLD", reason + shadowReadout(front, strike, t, edge.marketIv()),
-                    front, strike, edge.marketIv(), edge.referenceIv(), edge.value(), 0, orders));
+                    front, strike, edge.marketIv(), edge.referenceIv(), edge.value(), 0, orders,
+                    spotAge, cAge, optAge));
         }
         boolean sell = edge.value() > 0.0;
         if (sell && params.allowedSide() == AllowedSide.LONG_ONLY) {
@@ -482,14 +547,16 @@ public final class VolSpreadStrategy {
                             + " but short straddle not permitted (strategy.side is long_only: a short straddle is two uncovered short"
                             + " options, and whether this account may place them has not been checked)"
                             + shadowReadout(front, strike, t, edge.marketIv()),
-                    front, strike, edge.marketIv(), edge.referenceIv(), edge.value(), 0, orders));
+                    front, strike, edge.marketIv(), edge.referenceIv(), edge.value(), 0, orders,
+                    spotAge, cAge, optAge));
         }
         if (!sell && params.allowedSide() == AllowedSide.SHORT_ONLY) {
             return record(new Decision(now, "HOLD",
                     "market cheap to reference by " + String.format(Locale.ROOT, "%.2f pts", 100 * Math.abs(edge.value()))
                             + " but long straddle not permitted (short-only configured)"
                             + shadowReadout(front, strike, t, edge.marketIv()),
-                    front, strike, edge.marketIv(), edge.referenceIv(), edge.value(), 0, orders));
+                    front, strike, edge.marketIv(), edge.referenceIv(), edge.value(), 0, orders,
+                    spotAge, cAge, optAge));
         }
         String side = sell ? "rich" : "cheap";
         return placeStraddle(now, front, strike, edge, sell, orders, "",
@@ -511,10 +578,13 @@ public final class VolSpreadStrategy {
         String put = OccSymbol.format(symbol, front, OptionType.PUT, strike);
         MarketSnapshot callQuote = resolveQuote(call);
         MarketSnapshot putQuote = resolveQuote(put);
+        double spotAge = quoteAge(spotSupplier.get());
+        double cAge = chainAge(front, now);
+        double optAge = maxQuoteAge(callQuote, putQuote);
         if (callQuote == null || putQuote == null) {
             orders.add((callQuote == null ? call : put) + ": no quote");
             return record(new Decision(now, prefix + (sell ? "SELL_STRADDLE_REJECTED" : "BUY_STRADDLE_REJECTED"), String.join("; ", orders),
-                    front, strike, mIv, rIv, eVal, 0, orders));
+                    front, strike, mIv, rIv, eVal, 0, orders, spotAge, cAge, optAge));
         }
 
         if (params.useMultiLeg()) {
@@ -524,7 +594,7 @@ public final class VolSpreadStrategy {
             orders.add((!sell ? "BUY " : "SELL ") + params.contracts() + " " + call + "/" + put + " MLEG " + (dec.accepted() ? "filled" : "rejected: " + dec.message()));
             if (!dec.accepted()) {
                 return record(new Decision(now, prefix + (sell ? "SELL_STRADDLE_REJECTED" : "BUY_STRADDLE_REJECTED"), dec.message(),
-                        front, strike, mIv, rIv, eVal, 0, orders));
+                        front, strike, mIv, rIv, eVal, 0, orders, spotAge, cAge, optAge));
             }
             openCall = call;
             openPut = put;
@@ -532,7 +602,7 @@ public final class VolSpreadStrategy {
             openStrike = strike;
             String action = prefix + (sell ? "SELL_STRADDLE" : "BUY_STRADDLE");
             String reason = openedReason.apply(true);
-            return record(new Decision(now, action, reason, front, strike, mIv, rIv, eVal, sell ? -1 : 1, orders));
+            return record(new Decision(now, action, reason, front, strike, mIv, rIv, eVal, sell ? -1 : 1, orders, spotAge, cAge, optAge));
         }
 
         // Sequential submission with fallback flattening for non-mleg transports
@@ -546,7 +616,7 @@ public final class VolSpreadStrategy {
         }
         if (filledLegs == 0) {
             return record(new Decision(now, prefix + (sell ? "SELL_STRADDLE_REJECTED" : "BUY_STRADDLE_REJECTED"), String.join("; ", orders),
-                    front, strike, mIv, rIv, eVal, 0, orders));
+                    front, strike, mIv, rIv, eVal, 0, orders, spotAge, cAge, optAge));
         }
         openCall = call;
         openPut = put;
@@ -559,12 +629,11 @@ public final class VolSpreadStrategy {
             String left = hasOpenStraddle() ? "; the close was refused, the next step retries" : "";
             return record(new Decision(now, prefix + (sell ? "SELL_STRADDLE_REJECTED" : "BUY_STRADDLE_REJECTED"),
                     "second leg refused; the first leg was flattened" + left, front, strike, mIv, rIv, eVal,
-                    hasOpenStraddle() ? (sell ? -1 : 1) : 0, orders));
+                    hasOpenStraddle() ? (sell ? -1 : 1) : 0, orders, spotAge, cAge, optAge));
         }
         String action = prefix + (sell ? "SELL_STRADDLE" : "BUY_STRADDLE");
         String reason = openedReason.apply(false);
-        return record(new Decision(now, action, reason, front, strike, mIv, rIv, eVal, sell ? -1 : 1, orders));
-    
+        return record(new Decision(now, action, reason, front, strike, mIv, rIv, eVal, sell ? -1 : 1, orders, spotAge, cAge, optAge));
     }
 
     /**
@@ -600,12 +669,13 @@ public final class VolSpreadStrategy {
 
     private String lastEdgeProblem = "";
 
-    /** Market straddle IV (mean of the call and put mids inverted) minus the reference surface; null with the reason in {@link #lastEdgeProblem}. */
-    private Edge edgeFor(LocalDate expiry, double strike, double spot, double t) {
+    /**
+     * Market straddle IV (mean of the call and put mids inverted) minus the reference surface; null with the reason in
+     * {@link #lastEdgeProblem}. The leg quotes are the ones the caller already asked the venue for this step.
+     */
+    private Edge edgeFor(LocalDate expiry, double strike, double spot, double t, MarketSnapshot callQuote, MarketSnapshot putQuote) {
         String call = OccSymbol.format(symbol, expiry, OptionType.CALL, strike);
         String put = OccSymbol.format(symbol, expiry, OptionType.PUT, strike);
-        MarketSnapshot callQuote = resolveQuote(call);
-        MarketSnapshot putQuote = resolveQuote(put);
         double sum = 0.0;
         for (String leg : new String[]{call, put}) {
             MarketSnapshot quote = leg.equals(call) ? callQuote : putQuote;

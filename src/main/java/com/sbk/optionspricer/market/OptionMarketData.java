@@ -16,4 +16,9 @@ public interface OptionMarketData {
 
     /** Snapshot for an OCC contract symbol, or empty when the contract is not in a loaded chain or has no price. */
     Optional<MarketSnapshot> optionQuote(String contractSymbol);
+
+    /** The feed's as-of timestamp for a loaded chain, or empty when unknown. */
+    default Optional<java.time.Instant> chainAsOf(LocalDate expiry) {
+        return Optional.empty();
+    }
 }

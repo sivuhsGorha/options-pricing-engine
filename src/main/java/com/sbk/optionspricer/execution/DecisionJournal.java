@@ -23,9 +23,16 @@ public final class DecisionJournal {
 
     /** One recorded decision. Numbers are NaN where the decision had none (a wait has no volatility, for instance). */
     public record Row(Instant at, String action, String expiry, double strike, double marketIv, double referenceIv,
-                      double edge, int straddleSign, String orders, String reason) {}
+                      double edge, int straddleSign, String orders, String reason,
+                      double spotAgeSeconds, double chainAgeSeconds, double optionQuoteAgeSeconds) {
+        public Row(Instant at, String action, String expiry, double strike, double marketIv, double referenceIv,
+                   double edge, int straddleSign, String orders, String reason) {
+            this(at, action, expiry, strike, marketIv, referenceIv, edge, straddleSign, orders, reason,
+                    Double.NaN, Double.NaN, Double.NaN);
+        }
+    }
 
-    static final String HEADER = "at,action,expiry,strike,marketIv,referenceIv,edge,straddleSign,orders,reason";
+    static final String HEADER = "at,action,expiry,strike,marketIv,referenceIv,edge,straddleSign,orders,reason,spotAgeSeconds,chainAgeSeconds,optionQuoteAgeSeconds";
 
     private final Path file;
     private int failures;
@@ -69,7 +76,10 @@ public final class DecisionJournal {
                         number(d.edge(), "%.6f"),
                         Integer.toString(d.straddleSign()),
                         csv(String.join("; ", d.orders())),
-                        csv(d.reason() == null ? "" : d.reason())));
+                        csv(d.reason() == null ? "" : d.reason()),
+                        number(d.spotAgeSeconds(), "%.1f"),
+                        number(d.chainAgeSeconds(), "%.1f"),
+                        number(d.optionQuoteAgeSeconds(), "%.1f")));
                 out.write('\n');
             }
         } catch (IOException | RuntimeException e) {
@@ -104,8 +114,12 @@ public final class DecisionJournal {
                 continue;
             }
             try {
+                double spotAge = f.size() > 10 ? parse(f.get(10)) : Double.NaN;
+                double chainAge = f.size() > 11 ? parse(f.get(11)) : Double.NaN;
+                double optionAge = f.size() > 12 ? parse(f.get(12)) : Double.NaN;
                 rows.add(new Row(Instant.parse(f.get(0)), f.get(1), f.get(2), parse(f.get(3)), parse(f.get(4)), parse(f.get(5)),
-                        parse(f.get(6)), f.get(7).isBlank() ? 0 : Integer.parseInt(f.get(7).trim()), f.get(8), f.get(9)));
+                        parse(f.get(6)), f.get(7).isBlank() ? 0 : Integer.parseInt(f.get(7).trim()), f.get(8), f.get(9),
+                        spotAge, chainAge, optionAge));
             } catch (RuntimeException unreadable) {
                 // a damaged row must not hide the others
             }

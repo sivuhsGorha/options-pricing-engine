@@ -502,4 +502,71 @@ class VolSpreadStrategyTest {
         assertTrue(st.reason().contains("spot"), st.reason());
         assertTrue(tracker.getPositions().isEmpty());
     }
+
+    // ------------------------------------------------------------------ feed-age telemetry
+
+    /** Generated chains that report a feed time and can serve their quotes with an unknown source time. */
+    private static final class AgedChains implements OptionMarketData {
+        private final FlatChains inner = new FlatChains(0.20, TODAY);
+        private final Instant chainAsOf;
+        private final boolean unknownQuoteTime;
+
+        AgedChains(Instant chainAsOf, boolean unknownQuoteTime) {
+            this.chainAsOf = chainAsOf;
+            this.unknownQuoteTime = unknownQuoteTime;
+        }
+
+        @Override public List<LocalDate> loadedExpiries() { return inner.loadedExpiries(); }
+        @Override public Optional<OptionChain> chain(LocalDate expiry) { return inner.chain(expiry); }
+        @Override public Optional<Instant> chainAsOf(LocalDate expiry) { return Optional.ofNullable(chainAsOf); }
+        @Override public Optional<MarketSnapshot> optionQuote(String contractSymbol) {
+            return inner.optionQuote(contractSymbol).map(q -> unknownQuoteTime
+                    // what OptionQuoteSnapshots produces when the feed gave no time: an age equal to the epoch milliseconds
+                    ? new MarketSnapshot(q.symbol(), q.bid(), q.ask(), q.last(), q.volume(), NOW, Instant.EPOCH, NOW.toEpochMilli(),
+                            q.source(), q.status(), q.instrument())
+                    : q);
+        }
+    }
+
+    @Test
+    void aDecisionRecordsTheAgeOfTheSpotTheChainAndTheOptionQuotesFromTheirOwnFeedTimes() {
+        PositionTracker tracker = new PositionTracker(FillRecorder.NONE);
+        MarketSnapshot spot7s = new MarketSnapshot("SPY", 99.99, 100.01, 100.0, 5000L, NOW, NOW.minusSeconds(7), 7_000L, "TEST", MarketDataStatus.LIVE);
+        VolSpreadStrategy s = new VolSpreadStrategy(manager(tracker), new AgedChains(NOW.minusSeconds(100), false), referenceSurface(0.20), null,
+                () -> spot7s, tracker, "SPY", R, Q, params(), Clock.fixed(NOW, ZoneOffset.UTC));
+        s.allowSimulatedChains(true);
+
+        VolSpreadStrategy.Decision d = s.step();
+
+        assertEquals("HOLD", d.action(), d.summary());
+        assertEquals(7.0, d.spotAgeSeconds(), 1e-9);
+        assertEquals(100.0, d.chainAgeSeconds(), 1e-9, "the chain's age is the feed's as-of time against now");
+        assertEquals(0.0, d.optionQuoteAgeSeconds(), 1e-9);
+    }
+
+    @Test
+    void anUnknownFeedTimeIsRecordedAsUnknownNotAsAnAgeOfFiftySixYears() {
+        PositionTracker tracker = new PositionTracker(FillRecorder.NONE);
+        VolSpreadStrategy s = new VolSpreadStrategy(manager(tracker), new AgedChains(null, true), referenceSurface(0.20), null,
+                VolSpreadStrategyTest::spot, tracker, "SPY", R, Q, params(), Clock.fixed(NOW, ZoneOffset.UTC));
+        s.allowSimulatedChains(true);
+
+        VolSpreadStrategy.Decision d = s.step();
+
+        assertTrue(Double.isNaN(d.chainAgeSeconds()), "no chain time: unknown, and not borrowed from a quote: " + d.chainAgeSeconds());
+        assertTrue(Double.isNaN(d.optionQuoteAgeSeconds()), "an epoch source time is 'unknown': " + d.optionQuoteAgeSeconds());
+    }
+
+    @Test
+    void aStepAsksForEachLegQuoteOnceEvenThoughTheAgesAreRecorded() {
+        PositionTracker tracker = new PositionTracker(FillRecorder.NONE);
+        VolSpreadStrategy s = strategy(tracker, new FlatChains(0.20, TODAY), 0.20, null, Clock.fixed(NOW, ZoneOffset.UTC));
+        java.util.List<String> asked = new java.util.ArrayList<>();
+        s.setLegQuoteSource(sym -> { asked.add(sym); return Optional.empty(); }); // the venue; falls back to the chains
+
+        VolSpreadStrategy.Decision d = s.step();
+
+        assertEquals("HOLD", d.action(), d.summary());
+        assertEquals(2, asked.size(), "one request per leg per step, not one for the age and another for the edge: " + asked);
+    }
 }

@@ -279,7 +279,7 @@ When the engine starts at least 30 minutes after its last recorded P&L sample, t
 
 `--session-report [YYYY-MM-DD]` prints one UTC day of the strategy's decisions from `data/decisions.csv` (and the day's P&L
 from `pnl_history.csv`): how many decisions, how many holds, how often stale data stopped it, how old the stale option
-quotes were, the edge it saw on its holds, the realized-vol readout, any gap where the engine recorded nothing, and the
+quotes were, the edge it saw on its holds, the realized-vol readout, the age of the spot, the chain and the option quotes at each decision, any gap where the engine recorded nothing, and the
 coverage of the 30-second steps the day should have had. With no date it reports the latest day in the journal.
 
 ```powershell

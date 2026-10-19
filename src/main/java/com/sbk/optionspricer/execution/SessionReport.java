@@ -53,8 +53,20 @@ public final class SessionReport {
         List<Double> ages = new ArrayList<>();
         List<Double> edges = new ArrayList<>();
         List<Double> vrps = new ArrayList<>();
+        List<Double> spotAges = new ArrayList<>();
+        List<Double> chainAges = new ArrayList<>();
+        List<Double> optionAges = new ArrayList<>();
         for (DecisionJournal.Row r : rows) {
             String reason = r.reason() == null ? "" : r.reason();
+            if (Double.isFinite(r.spotAgeSeconds())) {
+                spotAges.add(r.spotAgeSeconds());
+            }
+            if (Double.isFinite(r.chainAgeSeconds())) {
+                chainAges.add(r.chainAgeSeconds());
+            }
+            if (Double.isFinite(r.optionQuoteAgeSeconds())) {
+                optionAges.add(r.optionQuoteAgeSeconds());
+            }
             if (r.orders() != null && !r.orders().isBlank()) {
                 ordersAttempted++;
             }
@@ -91,6 +103,25 @@ public final class SessionReport {
             sb.append(String.format(Locale.ROOT, "  feed age of stale option quotes: %d waits, %.0f to %.0f s, mean %.0f s%n",
                     ages.size(), s.getMin(), s.getMax(), s.getAverage()));
         }
+        if (!spotAges.isEmpty() || !chainAges.isEmpty() || !optionAges.isEmpty()) {
+            sb.append("  quote & chain age (s):");
+            if (!spotAges.isEmpty()) {
+                DoubleSummaryStatistics s = spotAges.stream().mapToDouble(Double::doubleValue).summaryStatistics();
+                sb.append(String.format(Locale.ROOT, " spot mean %.1f (%.1f to %.1f)", s.getAverage(), s.getMin(), s.getMax()));
+            }
+            if (!chainAges.isEmpty()) {
+                DoubleSummaryStatistics s = chainAges.stream().mapToDouble(Double::doubleValue).summaryStatistics();
+                sb.append(String.format(Locale.ROOT, "%s chain mean %.1f (%.1f to %.1f)", !spotAges.isEmpty() ? " |" : "", s.getAverage(), s.getMin(), s.getMax()));
+            }
+            if (!optionAges.isEmpty()) {
+                DoubleSummaryStatistics s = optionAges.stream().mapToDouble(Double::doubleValue).summaryStatistics();
+                sb.append(String.format(Locale.ROOT, "%s option quote mean %.1f (%.1f to %.1f)", (!spotAges.isEmpty() || !chainAges.isEmpty()) ? " |" : "", s.getAverage(), s.getMin(), s.getMax()));
+            }
+            sb.append('\n');
+        }
+        int staleTotal = optionStale + spotStale;
+        double stalePct = rows.isEmpty() ? 0.0 : (100.0 * staleTotal / rows.size());
+        sb.append(String.format(Locale.ROOT, "  stale gate blocked: %d decisions (%.1f%% of steps)%n", staleTotal, stalePct));
         if (!edges.isEmpty()) {
             DoubleSummaryStatistics s = edges.stream().mapToDouble(Double::doubleValue).summaryStatistics();
             sb.append(String.format(Locale.ROOT, "  edge on holds (points): %+.2f to %+.2f, mean %+.2f%n", s.getMin(), s.getMax(), s.getAverage()));
