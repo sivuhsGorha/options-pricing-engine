@@ -205,6 +205,18 @@ To keep it running through a session:
 A laptop that sleeps is a poor host for an engine that is meant to watch a market all day. The VPS route in "Hosting
 on a server" is the real fix; this section only reduces the gaps until then.
 
+## Compare realized-vol forecasts
+
+```powershell
+java --add-modules jdk.incubator.vector -cp "target/classes;target/lib/*" com.sbk.optionspricer.Main --forecast-eval
+```
+
+Needs `ALPACA_KEY_ID` and `ALPACA_SECRET` in `.env` (read-only: it only fetches daily bars). It scores four forecasts (trailing
+22-day, EWMA, HAR with its illustrative weights, HAR fitted on the days known at each point) against the volatility that
+followed, 5 and 21 days ahead, and stops without a table if it has no real closes or fewer than 120. Lower RMSE and QLIKE are
+better; a negative bias means the forecast ran low. Origins are consecutive days, so the windows overlap and a small gap
+between two models is noise. It scores prediction of realised volatility, not options prices or trading profit.
+
 ## Replay a recording against a realized-vol forecast
 
 Replays the chains recorded under `data/chain_snapshots` through `VrpSignalBacktester`: trade the strategy's front

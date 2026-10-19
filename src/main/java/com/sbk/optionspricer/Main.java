@@ -59,6 +59,10 @@ public class Main {
             System.exit(runSessionReport(java.nio.file.Path.of(com.sbk.optionspricer.config.EnvironmentConfigLoader.getOrDefault("DATA_DIR", "data")), day));
             return;
         }
+        if (args.length > 0 && "--forecast-eval".equals(args[0])) {
+            System.exit(runForecastEval());
+            return;
+        }
         if (args.length > 0 && "--test-buy-straddle".equals(args[0])) {
             System.exit(runTestBuyStraddle(args.length > 1 && "--confirm".equals(args[1])));
             return;
@@ -135,6 +139,63 @@ public class Main {
             return client.dailyBars(REPLAY_SYMBOL, start).stream()
                     .map(b -> new com.sbk.optionspricer.volatility.DailyCloseFeed.DailyClose(b.date(), b.close())).toList();
         });
+    }
+
+    /** The forecast comparison with real daily closes from Alpaca's bars; needs ALPACA_KEY_ID and ALPACA_SECRET in .env. */
+    public static int runForecastEval() {
+        return runForecastEval(start -> {
+            com.sbk.optionspricer.execution.AlpacaPaperClient client = com.sbk.optionspricer.execution.AlpacaPaperClient.fromEnv();
+            return client.dailyBars(REPLAY_SYMBOL, start).stream()
+                    .map(b -> new com.sbk.optionspricer.volatility.DailyCloseFeed.DailyClose(b.date(), b.close())).toList();
+        });
+    }
+
+    /** Fewest daily closes worth comparing forecasts on: 66 to train on, a 21-day horizon, and some origins to score. */
+    static final int FORECAST_EVAL_MIN_CLOSES = 120;
+
+    /**
+     * Compares realized-volatility forecasts (trailing, EWMA, HAR with its illustrative weights, HAR fitted on the days
+     * known at each point) on real daily closes, walk-forward, and prints how well each predicted what volatility did
+     * next. It stops without a table when it has no real closes: it never invents them.
+     */
+    public static int runForecastEval(java.util.function.Function<java.time.LocalDate, java.util.List<com.sbk.optionspricer.volatility.DailyCloseFeed.DailyClose>> closesSource) {
+        System.out.println("=========================================================================");
+        System.out.println("        BLACKTHORN STERLING REALIZED-VOL FORECAST COMPARISON             ");
+        System.out.println("=========================================================================");
+        java.util.List<com.sbk.optionspricer.volatility.DailyCloseFeed.DailyClose> bars;
+        try {
+            bars = closesSource.apply(java.time.LocalDate.now(java.time.ZoneOffset.UTC).minusDays(500));
+        } catch (RuntimeException e) {
+            System.err.println("[FORECAST] Cannot get real daily closes: " + e.getMessage());
+            System.err.println("[FORECAST] It never invents closes. Put ALPACA_KEY_ID and ALPACA_SECRET in .env and run it from the project folder.");
+            return 2;
+        }
+        java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneOffset.UTC);
+        double[] closes = bars.stream()
+                .filter(b -> b.date().isBefore(today) && Double.isFinite(b.close()) && b.close() > 0.0)
+                .sorted(java.util.Comparator.comparing(com.sbk.optionspricer.volatility.DailyCloseFeed.DailyClose::date))
+                .mapToDouble(com.sbk.optionspricer.volatility.DailyCloseFeed.DailyClose::close).toArray();
+        if (closes.length < FORECAST_EVAL_MIN_CLOSES) {
+            System.err.println("[FORECAST] Only " + closes.length + " completed daily closes; at least " + FORECAST_EVAL_MIN_CLOSES + " are needed.");
+            return 2;
+        }
+        System.out.printf(java.util.Locale.ROOT, "[FORECAST] %s: %d completed daily closes. Each origin uses only the days before it.%n", REPLAY_SYMBOL, closes.length);
+        for (int horizon : new int[]{5, 21}) {
+            var result = com.sbk.optionspricer.volatility.ForecastEvaluator.evaluate(closes, horizon, 66);
+            System.out.printf(java.util.Locale.ROOT, "%n%d days ahead: %d origins, mean realised vol %.1f%%, HAR fitted at %.0f%% of them%n",
+                    horizon, result.evaluations(), 100 * result.meanRealized(), 100 * result.fittedShare());
+            System.out.println("| Forecast      | RMSE (vol pts) | Bias (vol pts) | QLIKE  |");
+            System.out.println("| :------------ | -------------: | -------------: | -----: |");
+            for (var s : result.scores()) {
+                System.out.printf(java.util.Locale.ROOT, "| %-13s | %14.2f | %+14.2f | %6.3f |%n", s.model(), 100 * s.rmse(), 100 * s.bias(), s.qlike());
+            }
+        }
+        System.out.println();
+        System.out.println("[FORECAST] Bias is forecast minus realised (negative = ran low). Lower RMSE and QLIKE are better.");
+        System.out.println("[FORECAST] Origins are consecutive days, so their windows overlap: the scores are not independent, and a");
+        System.out.println("[FORECAST] small gap between two models is within the noise. This is one asset over one stretch of history,");
+        System.out.println("[FORECAST] and it measures prediction of realised volatility, not options prices or trading profit.");
+        return 0;
     }
 
     /**
