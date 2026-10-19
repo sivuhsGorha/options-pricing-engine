@@ -1192,18 +1192,21 @@ public class OptionsDashboardServer {
         };
     }
 
-    /** Exchange attribute holding the request body bytes once an HMAC request has read them for verification. */
-    private static final String BODY_ATTRIBUTE = "blackthorn.body";
     /** Largest request body any handler accepts; one byte more is read so an oversized body is seen, not truncated silently. */
     private static final int MAX_BODY_BYTES = 4096;
 
+    /** The request's own body. A signed request has its body put back by {@link #keepBody} after the signature check. */
+    static byte[] requestBody(HttpExchange exchange) throws IOException {
+        return exchange.getRequestBody().readNBytes(MAX_BODY_BYTES + 1);
+    }
+
     /**
-     * The request body, from the bytes an HMAC request already read for its signature check, or from the stream.
-     * A body can be read once, so authorization and the handler must share it.
+     * Hands the body already read for the signature check back to this exchange's handler by replacing this exchange's own
+     * input stream. It must not go through an exchange attribute: an attribute is the HTTP context's, shared by every
+     * request to that path, so one request's body became every later request's body (seen live on JDK 25).
      */
-    private static byte[] requestBody(HttpExchange exchange) throws IOException {
-        Object read = exchange.getAttribute(BODY_ATTRIBUTE);
-        return read instanceof byte[] bytes ? bytes : exchange.getRequestBody().readNBytes(MAX_BODY_BYTES + 1);
+    static void keepBody(HttpExchange exchange, byte[] body) {
+        exchange.setStreams(new java.io.ByteArrayInputStream(body), null);
     }
 
     private boolean authorizeApi(HttpExchange exchange) throws IOException {
@@ -1217,7 +1220,7 @@ public class OptionsDashboardServer {
             // The signature covers the body, so read it first and keep it for the handler. An oversized body is cut
             // at the limit plus one byte; its digest cannot match what the client signed, so it is refused here.
             byte[] body = exchange.getRequestBody().readNBytes(MAX_BODY_BYTES + 1);
-            exchange.setAttribute(BODY_ATTRIBUTE, body);
+            keepBody(exchange, body);
             authorized = HmacAuth.verify(apiSecret, exchange.getRequestHeaders().getFirst("X-Signature"),
                     exchange.getRequestMethod(), exchange.getRequestURI().getPath(),
                     exchange.getRequestURI().getQuery(), exchange.getRequestHeaders().getFirst("X-Timestamp"),
