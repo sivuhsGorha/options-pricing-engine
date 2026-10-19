@@ -138,6 +138,18 @@ public class OrderManager {
      * Admission, risk, transmission and fill booking run as one atomic step under this manager's
      * lock, so two concurrent orders can never both pass a limit check against the same book.
      */
+    /**
+     * True when the order only reduces the position already held in this instrument: a buy against a short, or a sell against
+     * a long, for no more than is held. An order that opens a position, adds to it, or would carry it through zero is an entry.
+     */
+    private boolean reducesPosition(Order order, String symbol) {
+        if (positionTracker == null || symbol == null) {
+            return false;
+        }
+        int net = positionTracker.getNetQuantity(symbol);
+        return order.isBuy() ? (net < 0 && order.quantity() <= -net) : (net > 0 && order.quantity() <= net);
+    }
+
     public synchronized OrderDecision submit(Order order, com.sbk.optionspricer.market.MarketSnapshot snapshot) {
         if (order == null || snapshot == null) {
             return new OrderDecision(false, OrderStatus.REJECTED, "order and snapshot must not be null", -1L);
@@ -173,7 +185,8 @@ public class OrderManager {
             }
         }
 
-        if (!riskFilter.checkRisk(order, underlying, snapshot.bid(), snapshot.ask(), snapshot.volume(), multiplier)) {
+        if (!riskFilter.checkRisk(order, underlying, snapshot.bid(), snapshot.ask(), snapshot.volume(), multiplier,
+                reducesPosition(order, snapshot.symbol()))) {
             return reject(orderId, mds, "failed pre-trade risk validation", "order failed pre-trade risk validation");
         }
 
@@ -269,7 +282,8 @@ public class OrderManager {
                 }
             }
 
-            if (!riskFilter.checkRisk(order, underlying, snapshot.bid(), snapshot.ask(), snapshot.volume(), multiplier)) {
+            if (!riskFilter.checkRisk(order, underlying, snapshot.bid(), snapshot.ask(), snapshot.volume(), multiplier,
+                    reducesPosition(order, snapshot.symbol()))) {
                 return reject(orderId, mds, "failed pre-trade risk validation on leg " + snapshot.symbol(), "order failed pre-trade risk validation");
             }
 

@@ -65,6 +65,17 @@ public class PreTradeRiskFilter {
 
     /** @param multiplier units of the underlying per contract: the order notional is quantity x price x multiplier */
     public synchronized boolean checkRisk(Order order, String underlying, double bid, double ask, long volume, int multiplier) {
+        return checkRisk(order, underlying, bid, ask, volume, multiplier, false);
+    }
+
+    /**
+     * @param reducesPosition true when the order only reduces an existing position (it does not open, add to or flip one).
+     *                        The spread and volume limits test the quality of an entry, and must not trap a position while the
+     *                        market is wide, so such an order skips them (and says so); size, price, notional, concentration
+     *                        and rate limits still apply.
+     */
+    public synchronized boolean checkRisk(Order order, String underlying, double bid, double ask, long volume, int multiplier,
+                                          boolean reducesPosition) {
         if (multiplier < 1) {
             throw new IllegalArgumentException("multiplier must be at least 1");
         }
@@ -124,14 +135,22 @@ public class PreTradeRiskFilter {
             boolean hasBook = Double.isFinite(bid) && Double.isFinite(ask) && bid > 0.0 && ask > bid;
             boolean hasVolume = volume >= 0L;
             if (hasBook && !liquidityRiskMonitor.isSpreadAcceptable(bid, ask)) {
-                System.err.printf(java.util.Locale.ROOT, "[RISK BLOCK] Spread too wide: bid=%.2f ask=%.2f (%.1f bps > %.1f)%n",
+                if (!reducesPosition) {
+                    System.err.printf(java.util.Locale.ROOT, "[RISK BLOCK] Spread too wide: bid=%.2f ask=%.2f (%.1f bps > %.1f)%n",
+                            bid, ask, liquidityRiskMonitor.calculateSpreadBps(bid, ask), liquidityRiskMonitor.getMaxSpreadBps());
+                    return false;
+                }
+                System.err.printf(java.util.Locale.ROOT, "[RISK NOTE] Exit allowed despite a wide spread: bid=%.2f ask=%.2f (%.1f bps > %.1f)%n",
                         bid, ask, liquidityRiskMonitor.calculateSpreadBps(bid, ask), liquidityRiskMonitor.getMaxSpreadBps());
-                return false;
             }
             if (hasVolume && !liquidityRiskMonitor.isVolumeAcceptable(volume)) {
-                System.err.printf(java.util.Locale.ROOT, "[RISK BLOCK] Volume too thin: %d < %d%n",
+                if (!reducesPosition) {
+                    System.err.printf(java.util.Locale.ROOT, "[RISK BLOCK] Volume too thin: %d < %d%n",
+                            volume, liquidityRiskMonitor.getMinimumVolume());
+                    return false;
+                }
+                System.err.printf(java.util.Locale.ROOT, "[RISK NOTE] Exit allowed despite thin volume: %d < %d%n",
                         volume, liquidityRiskMonitor.getMinimumVolume());
-                return false;
             }
         }
 
