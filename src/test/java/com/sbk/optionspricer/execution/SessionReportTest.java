@@ -114,4 +114,21 @@ class SessionReportTest {
         assertTrue(report.contains("option quote mean"), report);
         assertTrue(report.contains("stale gate blocked: 2 decisions (50.0% of steps)"), report);
     }
+
+    @Test
+    void reportsHowWideTheOptionSpreadsWereAndHowOftenTheyWereOverTheEntryLimit() {
+        List<DecisionJournal.Row> rows = List.of(
+                new DecisionJournal.Row(T0, "HOLD", "2026-11-13", 769.0, 0.14, 0.141, -0.001, 0, "", "x", 1.0, 45.0, 1.0, 80.0),
+                new DecisionJournal.Row(T0.plusSeconds(30), "HOLD", "2026-11-13", 769.0, 0.14, 0.141, -0.001, 0, "", "x", 1.0, 45.0, 1.0, 150.0),
+                new DecisionJournal.Row(T0.plusSeconds(60), "HOLD", "2026-11-13", 769.0, 0.14, 0.141, -0.001, 0, "", "x", 1.0, 45.0, 1.0, 315.0),
+                new DecisionJournal.Row(T0.plusSeconds(90), "WAIT", "", Double.NaN, Double.NaN, Double.NaN, Double.NaN, 0, "", "y")
+        );
+
+        String report = SessionReport.build(rows, List.of(), DAY);
+
+        assertTrue(report.contains("option spread (bps, wider leg): mean 182 (80 to 315)"), report);
+        assertTrue(report.contains("1 of 3 above the 200 bps entry limit"), report);
+        // no spread recorded at all (older journals): the line is simply absent
+        assertFalse(SessionReport.build(List.of(rows.get(3)), List.of(), DAY).contains("option spread"));
+    }
 }

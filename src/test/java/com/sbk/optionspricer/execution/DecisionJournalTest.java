@@ -98,8 +98,8 @@ class DecisionJournalTest {
         new DecisionJournal(file).record(d);
 
         List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
-        assertTrue(lines.get(0).endsWith(",spotAgeSeconds,chainAgeSeconds,optionQuoteAgeSeconds"), "header has age fields: " + lines.get(0));
-        assertTrue(lines.get(1).endsWith(",1.2,45.0,3.5"), "row ends with formatted ages: " + lines.get(1));
+        assertTrue(lines.get(0).contains(",spotAgeSeconds,chainAgeSeconds,optionQuoteAgeSeconds"), "header has age fields: " + lines.get(0));
+        assertTrue(lines.get(1).contains(",1.2,45.0,3.5,"), "row carries the formatted ages: " + lines.get(1));
 
         DecisionJournal.Row row = DecisionJournal.read(file).get(0);
         assertEquals(1.2, row.spotAgeSeconds(), 1e-6);
@@ -121,5 +121,25 @@ class DecisionJournalTest {
         assertTrue(Double.isNaN(r.spotAgeSeconds()), "legacy spotAge is NaN");
         assertTrue(Double.isNaN(r.chainAgeSeconds()), "legacy chainAge is NaN");
         assertTrue(Double.isNaN(r.optionQuoteAgeSeconds()), "legacy optionQuoteAge is NaN");
+    }
+
+    @Test
+    void recordsTheOptionSpreadAndReadsOlderRowsWithoutIt(@TempDir Path dir) throws IOException {
+        Path file = dir.resolve("decisions.csv");
+        new DecisionJournal(file).record(new VolSpreadStrategy.Decision(T0, "HOLD", "within band", LocalDate.of(2026, 11, 13),
+                769.0, 0.140, 0.143, -0.003, 0, List.of(), 1.2, 45.0, 3.5, 187.4));
+
+        List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
+        assertTrue(lines.get(0).endsWith(",optionQuoteAgeSeconds,optionSpreadBps"), lines.get(0));
+        assertTrue(lines.get(1).endsWith(",1.2,45.0,3.5,187.4"), lines.get(1));
+        assertEquals(187.4, DecisionJournal.read(file).get(0).optionSpreadBps(), 1e-6);
+
+        // a row written before the column existed (13 fields) has no spread
+        Path older = dir.resolve("older.csv");
+        Files.writeString(older, "at,action,expiry,strike,marketIv,referenceIv,edge,straddleSign,orders,reason,spotAgeSeconds,chainAgeSeconds,optionQuoteAgeSeconds\n"
+                + "2026-10-15T14:00:00Z,HOLD,2026-11-13,769.00,0.140000,0.143000,-0.003000,0,,within band,1.2,45.0,3.5\n", StandardCharsets.UTF_8);
+        DecisionJournal.Row row = DecisionJournal.read(older).get(0);
+        assertEquals(3.5, row.optionQuoteAgeSeconds(), 1e-6);
+        assertTrue(Double.isNaN(row.optionSpreadBps()));
     }
 }

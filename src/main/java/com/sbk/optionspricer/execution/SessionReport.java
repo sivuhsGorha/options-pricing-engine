@@ -23,6 +23,10 @@ import java.util.regex.Pattern;
  */
 public final class SessionReport {
 
+    /** The pre-trade liquidity gate's default limit on an order's bid-ask spread; the engine's own setting may differ. */
+    static final double ENTRY_SPREAD_LIMIT_BPS = 200.0;
+
+
     public record PnlSample(Instant at, double spot, double realized, double unrealized) {}
 
     private static final DateTimeFormatter CLOCK = DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneOffset.UTC);
@@ -56,6 +60,7 @@ public final class SessionReport {
         List<Double> spotAges = new ArrayList<>();
         List<Double> chainAges = new ArrayList<>();
         List<Double> optionAges = new ArrayList<>();
+        List<Double> spreads = new ArrayList<>();
         for (DecisionJournal.Row r : rows) {
             String reason = r.reason() == null ? "" : r.reason();
             if (Double.isFinite(r.spotAgeSeconds())) {
@@ -66,6 +71,9 @@ public final class SessionReport {
             }
             if (Double.isFinite(r.optionQuoteAgeSeconds())) {
                 optionAges.add(r.optionQuoteAgeSeconds());
+            }
+            if (Double.isFinite(r.optionSpreadBps())) {
+                spreads.add(r.optionSpreadBps());
             }
             if (r.orders() != null && !r.orders().isBlank()) {
                 ordersAttempted++;
@@ -118,6 +126,12 @@ public final class SessionReport {
                 sb.append(String.format(Locale.ROOT, "%s option quote mean %.1f (%.1f to %.1f)", (!spotAges.isEmpty() || !chainAges.isEmpty()) ? " |" : "", s.getAverage(), s.getMin(), s.getMax()));
             }
             sb.append('\n');
+        }
+        if (!spreads.isEmpty()) {
+            DoubleSummaryStatistics s = spreads.stream().mapToDouble(Double::doubleValue).summaryStatistics();
+            long wide = spreads.stream().filter(v -> v > ENTRY_SPREAD_LIMIT_BPS).count();
+            sb.append(String.format(Locale.ROOT, "  option spread (bps, wider leg): mean %.0f (%.0f to %.0f); %d of %d above the %.0f bps entry limit%n",
+                    s.getAverage(), s.getMin(), s.getMax(), wide, spreads.size(), ENTRY_SPREAD_LIMIT_BPS));
         }
         int staleTotal = optionStale + spotStale;
         double stalePct = rows.isEmpty() ? 0.0 : (100.0 * staleTotal / rows.size());

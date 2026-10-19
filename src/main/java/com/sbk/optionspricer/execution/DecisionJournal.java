@@ -24,15 +24,22 @@ public final class DecisionJournal {
     /** One recorded decision. Numbers are NaN where the decision had none (a wait has no volatility, for instance). */
     public record Row(Instant at, String action, String expiry, double strike, double marketIv, double referenceIv,
                       double edge, int straddleSign, String orders, String reason,
-                      double spotAgeSeconds, double chainAgeSeconds, double optionQuoteAgeSeconds) {
+                      double spotAgeSeconds, double chainAgeSeconds, double optionQuoteAgeSeconds, double optionSpreadBps) {
         public Row(Instant at, String action, String expiry, double strike, double marketIv, double referenceIv,
                    double edge, int straddleSign, String orders, String reason) {
             this(at, action, expiry, strike, marketIv, referenceIv, edge, straddleSign, orders, reason,
-                    Double.NaN, Double.NaN, Double.NaN);
+                    Double.NaN, Double.NaN, Double.NaN, Double.NaN);
+        }
+
+        public Row(Instant at, String action, String expiry, double strike, double marketIv, double referenceIv,
+                   double edge, int straddleSign, String orders, String reason,
+                   double spotAgeSeconds, double chainAgeSeconds, double optionQuoteAgeSeconds) {
+            this(at, action, expiry, strike, marketIv, referenceIv, edge, straddleSign, orders, reason,
+                    spotAgeSeconds, chainAgeSeconds, optionQuoteAgeSeconds, Double.NaN);
         }
     }
 
-    static final String HEADER = "at,action,expiry,strike,marketIv,referenceIv,edge,straddleSign,orders,reason,spotAgeSeconds,chainAgeSeconds,optionQuoteAgeSeconds";
+    static final String HEADER = "at,action,expiry,strike,marketIv,referenceIv,edge,straddleSign,orders,reason,spotAgeSeconds,chainAgeSeconds,optionQuoteAgeSeconds,optionSpreadBps";
 
     private final Path file;
     private int failures;
@@ -79,7 +86,8 @@ public final class DecisionJournal {
                         csv(d.reason() == null ? "" : d.reason()),
                         number(d.spotAgeSeconds(), "%.1f"),
                         number(d.chainAgeSeconds(), "%.1f"),
-                        number(d.optionQuoteAgeSeconds(), "%.1f")));
+                        number(d.optionQuoteAgeSeconds(), "%.1f"),
+                        number(d.optionSpreadBps(), "%.1f")));
                 out.write('\n');
             }
         } catch (IOException | RuntimeException e) {
@@ -117,9 +125,10 @@ public final class DecisionJournal {
                 double spotAge = f.size() > 10 ? parse(f.get(10)) : Double.NaN;
                 double chainAge = f.size() > 11 ? parse(f.get(11)) : Double.NaN;
                 double optionAge = f.size() > 12 ? parse(f.get(12)) : Double.NaN;
+                double spreadBps = f.size() > 13 ? parse(f.get(13)) : Double.NaN;
                 rows.add(new Row(Instant.parse(f.get(0)), f.get(1), f.get(2), parse(f.get(3)), parse(f.get(4)), parse(f.get(5)),
                         parse(f.get(6)), f.get(7).isBlank() ? 0 : Integer.parseInt(f.get(7).trim()), f.get(8), f.get(9),
-                        spotAge, chainAge, optionAge));
+                        spotAge, chainAge, optionAge, spreadBps));
             } catch (RuntimeException unreadable) {
                 // a damaged row must not hide the others
             }

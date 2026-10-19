@@ -110,14 +110,25 @@ public final class VolSpreadStrategy {
         }
     }
 
-    /** What one step saw and did. {@code edge} is market minus reference, as a vol fraction. */
+    /**
+     * What one step saw and did. {@code edge} is market minus reference, as a vol fraction. {@code optionSpreadBps} is the
+     * wider of the call's and the put's bid-ask spread in the units of the pre-trade liquidity gate (spread over mid, in
+     * basis points), NaN when the step did not look at the straddle's quotes.
+     */
     public record Decision(Instant at, String action, String reason, LocalDate expiry, double strike,
                            double marketIv, double referenceIv, double edge, int straddleSign, List<String> orders,
-                           double spotAgeSeconds, double chainAgeSeconds, double optionQuoteAgeSeconds) {
+                           double spotAgeSeconds, double chainAgeSeconds, double optionQuoteAgeSeconds, double optionSpreadBps) {
         public Decision(Instant at, String action, String reason, LocalDate expiry, double strike,
                         double marketIv, double referenceIv, double edge, int straddleSign, List<String> orders) {
             this(at, action, reason, expiry, strike, marketIv, referenceIv, edge, straddleSign, orders,
-                    Double.NaN, Double.NaN, Double.NaN);
+                    Double.NaN, Double.NaN, Double.NaN, Double.NaN);
+        }
+
+        public Decision(Instant at, String action, String reason, LocalDate expiry, double strike,
+                        double marketIv, double referenceIv, double edge, int straddleSign, List<String> orders,
+                        double spotAgeSeconds, double chainAgeSeconds, double optionQuoteAgeSeconds) {
+            this(at, action, reason, expiry, strike, marketIv, referenceIv, edge, straddleSign, orders,
+                    spotAgeSeconds, chainAgeSeconds, optionQuoteAgeSeconds, Double.NaN);
         }
 
         public String summary() {
@@ -248,6 +259,20 @@ public final class VolSpreadStrategy {
         return step();
     }
 
+    /** Spread of the wider leg in the pre-trade gate's units (over mid, in bps); NaN when neither leg has a two-sided book. */
+    static double legSpreadBps(MarketSnapshot a, MarketSnapshot b) {
+        double worst = Double.NaN;
+        for (MarketSnapshot q : new MarketSnapshot[]{a, b}) {
+            if (q == null || !(q.bid() > 0.0) || !(q.ask() > q.bid()) || !Double.isFinite(q.ask())) continue;
+            double bps = (q.ask() - q.bid()) / ((q.ask() + q.bid()) / 2.0) * 10_000.0;
+            worst = Double.isNaN(worst) ? bps : Math.max(worst, bps);
+        }
+        return worst;
+    }
+
+    /** The straddle's spread as seen by the step in progress; stamped onto the decision it records. Steps are synchronized. */
+    private double stepSpreadBps = Double.NaN;
+
     /** Seconds since the feed stamped the quote; NaN when there is no quote or the feed gave no time (an epoch stamp). */
     static double quoteAge(MarketSnapshot s) {
         if (s == null || s.sourceTimestamp() == null || s.sourceTimestamp().equals(Instant.EPOCH)) return Double.NaN;
@@ -272,6 +297,7 @@ public final class VolSpreadStrategy {
 
     /** One evaluation: hedge if needed, then open, hold or close the straddle. Never throws for market conditions. */
     public synchronized Decision step() {
+        stepSpreadBps = Double.NaN;
         Instant now = clock.instant();
         LocalDate today = LocalDate.ofInstant(now, ZoneOffset.UTC);
         List<String> orders = new ArrayList<>();
@@ -317,6 +343,7 @@ public final class VolSpreadStrategy {
      * already open. A refusal sends nothing.
      */
     public synchronized Decision supervisedBuyStraddle(boolean confirm) {
+        stepSpreadBps = Double.NaN;
         Instant now = clock.instant();
         LocalDate today = LocalDate.ofInstant(now, ZoneOffset.UTC);
         List<String> orders = new ArrayList<>();
@@ -357,6 +384,7 @@ public final class VolSpreadStrategy {
         MarketSnapshot callQuote = resolveQuote(call);
         MarketSnapshot putQuote = resolveQuote(put);
         double optAge = maxQuoteAge(callQuote, putQuote);
+        stepSpreadBps = legSpreadBps(callQuote, putQuote);
         if (callQuote == null || putQuote == null) {
             return supervisedRefusal(now, "no quote for " + (callQuote == null ? call : put), spotAge, cAge, optAge);
         }
@@ -366,7 +394,7 @@ public final class VolSpreadStrategy {
                     params.contracts() * 100.0 * (callQuote.ask() + putQuote.ask()), callQuote.ask(), putQuote.ask());
             System.out.println("[SUPERVISED] " + plan);
             return new Decision(now, "SUPERVISED_DRY_RUN", plan, front, strike, Double.NaN, Double.NaN, Double.NaN, 0, orders,
-                    spotAge, cAge, optAge);
+                    spotAge, cAge, optAge, stepSpreadBps);
         }
         System.out.println("[SUPERVISED] operator confirmed: buying 1 straddle " + front + " " + strike);
         return placeStraddle(now, front, strike, null, false, orders, "SUPERVISED_",
@@ -409,6 +437,7 @@ public final class VolSpreadStrategy {
         MarketSnapshot openCallQuote = resolveQuote(openCall);
         MarketSnapshot openPutQuote = resolveQuote(openPut);
         double optAge = maxQuoteAge(openCallQuote, openPutQuote);
+        stepSpreadBps = legSpreadBps(openCallQuote, openPutQuote);
 
         int sign = Integer.signum(tracker.getNetQuantity(openCall) != 0 ? tracker.getNetQuantity(openCall) : tracker.getNetQuantity(openPut));
         if ((tracker.getNetQuantity(openCall) == 0) != (tracker.getNetQuantity(openPut) == 0)) {
@@ -531,6 +560,7 @@ public final class VolSpreadStrategy {
         MarketSnapshot callQuote = resolveQuote(call);
         MarketSnapshot putQuote = resolveQuote(put);
         double optAge = maxQuoteAge(callQuote, putQuote);
+        stepSpreadBps = legSpreadBps(callQuote, putQuote);
 
         Edge edge = edgeFor(front, strike, spot.last(), t, callQuote, putQuote);
         if (edge == null) {
@@ -596,6 +626,7 @@ public final class VolSpreadStrategy {
         double spotAge = quoteAge(spotSupplier.get());
         double cAge = chainAge(front, now);
         double optAge = maxQuoteAge(callQuote, putQuote);
+        stepSpreadBps = legSpreadBps(callQuote, putQuote);
         if (callQuote == null || putQuote == null) {
             orders.add((callQuote == null ? call : put) + ": no quote");
             return record(new Decision(now, prefix + (sell ? "SELL_STRADDLE_REJECTED" : "BUY_STRADDLE_REJECTED"), String.join("; ", orders),
@@ -791,6 +822,11 @@ public final class VolSpreadStrategy {
     }
 
     private Decision record(Decision decision) {
+        if (Double.isNaN(decision.optionSpreadBps()) && Double.isFinite(stepSpreadBps)) {
+            decision = new Decision(decision.at(), decision.action(), decision.reason(), decision.expiry(), decision.strike(),
+                    decision.marketIv(), decision.referenceIv(), decision.edge(), decision.straddleSign(), decision.orders(),
+                    decision.spotAgeSeconds(), decision.chainAgeSeconds(), decision.optionQuoteAgeSeconds(), stepSpreadBps);
+        }
         lastDecision = decision;
         System.out.println("[VOL SPREAD] " + decision.summary() + (decision.orders().isEmpty() ? "" : " | " + String.join("; ", decision.orders())));
         java.util.function.Consumer<Decision> listener = decisionListener;

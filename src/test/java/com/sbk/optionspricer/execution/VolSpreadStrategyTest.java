@@ -619,4 +619,25 @@ class VolSpreadStrategyTest {
         assertEquals("SELL_STRADDLE", d.action(), d.summary());
         assertEquals(-1, d.straddleSign());
     }
+
+    @Test
+    void aDecisionRecordsTheWiderOfTheTwoLegSpreadsInTheGatesOwnUnits() {
+        PositionTracker tracker = new PositionTracker(FillRecorder.NONE);
+        FlatChains market = new FlatChains(0.20, TODAY);
+        VolSpreadStrategy s = strategy(tracker, market, 0.20, null, Clock.fixed(NOW, ZoneOffset.UTC));
+
+        VolSpreadStrategy.Decision d = s.step();
+
+        assertEquals("HOLD", d.action(), d.summary());
+        double expected = 0.0;
+        for (OptionType type : OptionType.values()) {
+            MarketSnapshot q = market.optionQuote(OccSymbol.format("SPY", d.expiry(), type, d.strike())).orElseThrow();
+            expected = Math.max(expected, (q.ask() - q.bid()) / ((q.ask() + q.bid()) / 2.0) * 10_000.0);
+        }
+        assertTrue(expected > 0.0, "the generated quotes have a spread");
+        assertEquals(expected, d.optionSpreadBps(), 1e-6);
+
+        VolSpreadStrategy.Decision waiting = strategy(tracker, market, 0.20, null, Clock.fixed(NOW, ZoneOffset.UTC)).supervisedBuyStraddle(false);
+        assertEquals(expected, waiting.optionSpreadBps(), 1e-6, "a supervised dry run shows the spread it would have faced");
+    }
 }
