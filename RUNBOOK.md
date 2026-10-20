@@ -300,7 +300,9 @@ about 30 seconds later: the test exercises open and close, and costs the spread.
 the straddle went as one atomic order, filled (net 25.27), was booked, and was closed by the strategy 33 seconds later for a net
 -$3.00, the spread. A second run the same day (14:09) filled at a net 24.59, was booked at Alpaca's own leg prices (12.09 and 12.50), showed
 both option legs marked on the dashboard with their Greeks while open, and cost $19.00 round trip. The close is two separate orders and can leave
-one long leg for a few seconds (about 18 s that time). Not seen: a reconcile line while the positions were open (OK before and after).
+one long leg for a few seconds (about 18 s that time). Since then the strategy closes a whole straddle as one multi-leg order (`sell_to_close`
+on both legs, offered at the sum of the bids) and falls back to leg by leg if it is not filled; the 14:43 run went in and out as single
+orders (24.18 paid, 24.09 received, $9). Not seen: a reconcile line while the positions were open (OK before and after).
 Before sending, read the legs' spreads: the engine refuses an entry whose spread is over `risk.max_spread_bps` (200), and Alpaca's
 indicative quotes swing from tight to wide within seconds. Each attempt is in EXECUTION.md section 5.
 

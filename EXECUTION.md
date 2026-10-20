@@ -361,6 +361,8 @@ ledger and Alpaca's own order list.
 | 20 Oct 14:08 | one atomic multi-leg order (772 strike) | refused by the spread gate; nothing sent | |
 | 20 Oct 14:09 | the same, with the cushion | **filled at a net 24.59**: call 12.09, put 12.50; the engine booked exactly those leg prices | the leg-price fix works on a real fill; the dashboard was sampled 35 times while the legs were open (below) |
 | 20 Oct 14:09 | the strategy's close | the call sell timed out unfilled; the put sold at 12.46; the next step sold the lone call at 11.94, about 18 s later | the close is two separate orders and can leave a lone long leg for a few seconds; round trip -$19.00 (24.59 paid, 24.40 received) |
+| 20 Oct 14:38 | the 774 straddle; the first atomic close | the entry filled (call 12.03, put 12.33). The close went as one multi-leg order, `sell_to_close` on both legs at a net -24.54: **Alpaca accepted it** and it did not fill, so after the 10 s wait the strategy sold the legs separately (call 12.03, put 12.24) | the intents and the negative net are accepted; the close was priced at the mids (the sum of the mids, 24.54) when the bids summed to about 24.27, so it never filled. Fixed: a close is priced at the touch (dda53d5) |
+| 20 Oct 14:43 | the 775 straddle, with the close priced at the bids | the entry filled at a net 24.18 (`buy_to_open`: call 11.70, put 12.48); **the strategy's close went as one order and filled at a net credit of 24.09** (`sell_to_close`: call 11.67, put 12.42, limit -23.93), 3.5 s later | the first fully atomic round trip, in and out; the engine booked every leg at Alpaca's price; -$9.00 (24.18 paid, 24.09 received) |
 
 **What this shows.** The path works end to end: the order manager, the Alpaca transport (single orders and one atomic multi-leg
 order), the fill ledger, the strategy's close, and the unwind of a failed leg. The safety gates held every time, and twice
@@ -382,6 +384,12 @@ the engine then split the net price itself. From the fix of 20 Oct the engine bo
 it, and the 14:09 straddle was booked 12.09 and 12.50, the same as Alpaca's legs. Another session sent a deliberately
 unfillable multi-leg order (limit 0.05) on 19 Oct at 14:49 UTC, cancelled, to check that Alpaca accepts the format.
 
-**Still open from this.** The close is two orders, not one: a multi-leg sell is refused by the transport (Alpaca documents no
-credit-price convention), so a close can leave one leg for a few seconds, as it did at 14:09 (a long call, about 18 s). The
-cost of a round trip has been $3 and $19, set by the spread and by a few cents of drift between the two sets of fills.
+**Atomic close.** From commit 19f9d98 the strategy closes a whole straddle (both legs held, equal size) with one multi-leg order
+marked `sell_to_close` (`buy_to_close` for a short one), and falls back to closing leg by leg, as it always did, if that order is not
+filled. Alpaca prices a multi-leg credit as a negative limit and, on the fills seen, reports its average fill price negative too
+(-24.09); the engine reports the proceeds as a positive amount. The close is offered at the touch: the sum of the bids (the asks
+for a buy-back), with the limit cushion widening it. The 14:38 run showed why: the first version offered the sum of the mids and
+Alpaca accepted the order and did not fill it. The path is proven on one clean fill; it is a sample of one, so the fall-back stays.
+
+**Costs so far.** The round trips cost $3 (13:41), $19 (14:09), $9 (14:38, closed by the fall-back) and $9 (14:43, atomic). They are
+the bid-ask spread and a few cents of drift between the fills, and they say nothing about edge.

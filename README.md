@@ -117,7 +117,7 @@ flowchart LR
 Prerequisites: JDK 25, Maven 3.9+, and Node 22 only if you rebuild the frontend.
 
 ```bash
-# Build and test (636 tests, JaCoCo coverage gate)
+# Build and test (637 tests, JaCoCo coverage gate)
 mvn clean verify
 
 # Configuration: copy config.example.yaml to config.yaml, and put secrets in .env (never committed):
@@ -142,7 +142,7 @@ docker compose up --build -d
 
 Sign in with `OPERATOR_PASSWORD`. The paper-trading panel shows positions and every order with its fill or
 rejection reason, with HALT / RESUME and a strategy switch. `run_all.ps1` runs the same checks as CI locally:
-the Java build with 636 tests and the coverage gate, the Python tests, and the frontend lint, 95 tests and build.
+the Java build with 637 tests and the coverage gate, the Python tests, and the frontend lint, 95 tests and build.
 
 ---
 
