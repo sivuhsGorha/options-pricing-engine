@@ -76,6 +76,11 @@ public class AppCompositionRoot {
             AlpacaPaperClient alpaca = alpacaClient;
             long fillWaitSeconds = Math.max(1L, (long) config.getDouble("execution.fill_wait_seconds", 10.0));
             AlpacaPaperTransport alpacaTransport = new AlpacaPaperTransport(alpaca, java.time.Duration.ofSeconds(fillWaitSeconds));
+            double limitCushionBps = config.getDouble("execution.limit_cushion_bps", 0.0);
+            alpacaTransport.setLimitCushionBps(limitCushionBps);
+            if (limitCushionBps > 0.0) {
+                System.out.printf(java.util.Locale.ROOT, "[EXECUTION] Limits are set %.0f bps past the touch (a buy higher, a sell lower); a marketable limit still fills at the market%n", limitCushionBps);
+            }
             this.executionTransport = alpacaTransport;
             this.bookReconciler = new BookReconciler(alpaca, positionTracker, tradingHalt, java.time.Duration.ofMinutes(1), java.time.Clock.systemUTC());
             transportStatus = () -> alpacaTransport.status(bookReconciler.lastResult());

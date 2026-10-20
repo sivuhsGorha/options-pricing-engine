@@ -24,7 +24,7 @@ public final class ConfigValidator {
             "strategy", java.util.Set.of("mode", "trigger_pct", "base_quantity", "vol_edge", "reference_model", "hedge_band",
                     "min_days_to_expiry", "max_days_to_expiry", "contracts", "option_interval_seconds",
                     "fee_per_contract", "use_multi_leg", "fair_vol_model", "side"),
-            "execution", java.util.Set.of("symbol", "transport", "fill_wait_seconds", "slippage_bps", "contract_multiplier"));
+            "execution", java.util.Set.of("symbol", "transport", "fill_wait_seconds", "slippage_bps", "contract_multiplier", "limit_cushion_bps"));
     /** Renamed risk keys: they have their own, more helpful message below. */
     private static final java.util.Set<String> LEGACY_RISK_KEYS = java.util.Set.of("delta_limit", "gamma_limit", "vega_limit");
 
@@ -172,6 +172,7 @@ public final class ConfigValidator {
             }
         }
         number(config, errors, "execution.fill_wait_seconds", 10.0, v -> v >= 1.0 && v <= 120.0, "must be between 1 and 120 seconds");
+        number(config, errors, "execution.limit_cushion_bps", 0.0, v -> v >= 0.0 && v <= 500.0, "must be between 0 and 500 basis points");
         return errors;
     }
 

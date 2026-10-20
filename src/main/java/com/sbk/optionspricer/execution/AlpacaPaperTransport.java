@@ -53,6 +53,8 @@ public final class AlpacaPaperTransport implements ExchangeTransport {
     private final Sleeper sleeper;
     private final AtomicLong sequence = new AtomicLong();
     private volatile ExecutionResult lastResult;
+    /** How far past the touch a limit is set, in basis points: 0 is the touch itself. See {@link #setLimitCushionBps}. */
+    private volatile double limitCushionBps = 0.0;
     private volatile String lastVenueOrderId;
 
     public AlpacaPaperTransport(AlpacaPaperClient client, Duration fillWait) {
@@ -71,6 +73,26 @@ public final class AlpacaPaperTransport implements ExchangeTransport {
         this.sleeper = sleeper;
     }
 
+    /** Largest cushion accepted: past this a limit is no longer a protection but an invitation to pay anything. */
+    static final double MAX_LIMIT_CUSHION_BPS = 500.0;
+
+    /**
+     * Widens every limit past the touch by this many basis points: a buy is raised and a sell lowered, rounded to the cent in the
+     * direction that cannot leave the limit short of the touch. A marketable limit still fills at the market, so this is a
+     * ceiling on what is paid (a floor on what is received), not a price chased. It exists because a limit exactly on an
+     * indicative quote often misses the real market by a few cents. Zero, the default, sets the limit at the touch.
+     */
+    public void setLimitCushionBps(double bps) {
+        if (!Double.isFinite(bps) || bps < 0.0 || bps > MAX_LIMIT_CUSHION_BPS) {
+            throw new IllegalArgumentException("limit cushion must be between 0 and " + MAX_LIMIT_CUSHION_BPS + " bps, got " + bps);
+        }
+        this.limitCushionBps = bps;
+    }
+
+    public double limitCushionBps() {
+        return limitCushionBps;
+    }
+
     @Override
     public ExecutionResult transmit(Order order, String symbol, double bid, double ask) {
         if (order == null) {
@@ -78,8 +100,10 @@ public final class AlpacaPaperTransport implements ExchangeTransport {
         }
         String venueSymbol = symbol == null ? "" : symbol.trim().toUpperCase(Locale.ROOT);
         Touch touch = touch(venueSymbol, bid, ask);
-        double limit = limitPrice(order, touch.bid(), touch.ask());
-        String limitText = String.format(Locale.ROOT, "%.2f", limit) + " (" + priceSource(order, touch) + ")";
+        double cushion = limitCushionBps;
+        double limit = limitPrice(order, touch.bid(), touch.ask(), cushion);
+        String limitText = String.format(Locale.ROOT, "%.2f", limit) + " (" + priceSource(order, touch)
+                + (cushion > 0.0 ? String.format(Locale.ROOT, ", %.0f bps cushion", cushion) : "") + ")";
         String clientOrderId = "blackthorn-" + clock.millis() + "-" + sequence.incrementAndGet();
 
         AlpacaPaperClient.OrderState state;
@@ -126,6 +150,11 @@ public final class AlpacaPaperTransport implements ExchangeTransport {
             clientLegs.add(new AlpacaPaperClient.OptionLeg(symbols.get(i), 1, legs.get(i).isBuy()));
         }
         int quantity = legs.get(0).quantity();
+        double cushion = limitCushionBps;
+        if (cushion > 0.0) {
+            // every leg here is a buy (a credit was refused above), so the net is a debit: raise the most that will be paid
+            netLimitPrice = Math.ceil(netLimitPrice * (1.0 + cushion / 10_000.0) * 100.0 - 1e-9) / 100.0;
+        }
         String clientOrderId = "blackthorn-mleg-" + clock.millis() + "-" + sequence.incrementAndGet();
 
         AlpacaPaperClient.OrderState state;
@@ -226,11 +255,21 @@ public final class AlpacaPaperTransport implements ExchangeTransport {
 
     /** The touch: ask for a buy, bid for a sell; the order's own price without a book. Two decimals, as Alpaca requires. */
     static double limitPrice(Order order, double bid, double ask) {
+        return limitPrice(order, bid, ask, 0.0);
+    }
+
+    /** The limit for an order: the touch on its side, moved {@code cushionBps} past it (up for a buy, down for a sell), in cents. */
+    static double limitPrice(Order order, double bid, double ask, double cushionBps) {
         double reference;
         if (order.isBuy()) {
             reference = Double.isFinite(ask) && ask > 0.0 ? ask : order.price();
         } else {
             reference = Double.isFinite(bid) && bid > 0.0 ? bid : order.price();
+        }
+        if (cushionBps > 0.0) {
+            return order.isBuy()
+                    ? Math.ceil(reference * (1.0 + cushionBps / 10_000.0) * 100.0 - 1e-9) / 100.0
+                    : Math.floor(reference * (1.0 - cushionBps / 10_000.0) * 100.0 + 1e-9) / 100.0;
         }
         return Math.round(reference * 100.0) / 100.0;
     }

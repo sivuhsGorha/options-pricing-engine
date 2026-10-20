@@ -235,4 +235,15 @@ class ConfigHardeningTest {
         assertEquals(!keysPresent, alpacaErrors.stream().anyMatch(e -> e.contains("ALPACA_KEY_ID")),
                 "the keys are required exactly when the transport is alpaca (present here: " + keysPresent + "): " + alpacaErrors);
     }
+
+    @Test
+    void theLimitCushionIsAKnownSettingKeptBetweenZeroAndFiveHundredBasisPoints() throws Exception {
+        String base = "market_data:\n  refresh_interval_seconds: 900\ndashboard:\n  port: 8082\nexecution:\n  transport: paper\n";
+        assertTrue(ConfigValidator.validate(ConfigManager.fromFile(yaml(base + "  limit_cushion_bps: 30\n"))).isEmpty());
+        assertTrue(ConfigValidator.validate(ConfigManager.fromFile(yaml(base + "  limit_cushion_bps: 0\n"))).isEmpty());
+        for (String bad : List.of("-5", "501", "abc")) {
+            List<String> errors = ConfigValidator.validate(ConfigManager.fromFile(yaml(base + "  limit_cushion_bps: " + bad + "\n")));
+            assertTrue(errors.stream().anyMatch(e -> e.contains("execution.limit_cushion_bps")), bad + ": " + errors);
+        }
+    }
 }
