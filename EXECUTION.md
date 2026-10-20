@@ -340,3 +340,32 @@ say nothing about whether any signal predicts anything**; the run is a check tha
 
 **Not shown yet.** The Alpaca leg quotes, `long_only` and the banner in a live session; `--test-buy-straddle`, which places
 a real paper order and has not been run.
+
+### 2026-10-19 and 2026-10-20: five attempts at a supervised straddle, and the first fill
+
+The goal was to prove the live path once: a straddle opened through the strategy, the order manager and Alpaca, booked in the
+ledger, reconciled and closed. It took five attempts, and each one found something. All figures are from the engine log, the
+ledger and Alpaca's own order list.
+
+| When (UTC) | What was sent | Result | What it showed |
+| :--------- | :------------ | :----- | :------------- |
+| 19 Oct 13:40 | the 771 call and put as two orders | the call filled at 11.93; the put was refused by the spread gate (315 bps against 200); the engine sold the call back at 11.91 | the unwind works; cost $2.00 |
+| 19 Oct 13:43 | the same | the call was refused at 311 bps; nothing sent | Alpaca's indicative spreads swing from tight to wide in seconds (a put read 365, 150 and 8 bps in three reads) |
+| 19 Oct 14:13 | the same | HTTP 400 on a valid request body | a bug in the operator API: a signed request's body was kept as an exchange attribute, which on JDK 25 is shared by every request to that path. Fixed and deployed at 14:30 |
+| 19 Oct 14:37 | the same | the call buy was accepted by Alpaca and cancelled unfilled after 10 s (limit 12.04) | a limit exactly on the indicative ask misses the real market |
+| 19 Oct 14:39 | the same | the call filled at 11.95; the put was refused (204 bps); the sell-back was refused by the same gate (300 bps) | the spread gate also blocked an exit, leaving a lone long call for about 100 s until the strategy's retries filled at 12.11 (+$16, by drift). Exits are now exempt (3610a35) |
+| 20 Oct 13:32 | one atomic multi-leg order | refused by the spread gate (a leg at 204 bps); nothing sent | |
+| 20 Oct 13:33 | the same, at the touch | accepted by Alpaca (net limit 25.21), cancelled unfilled after 10 s | the multi-leg format works; the limit missed the market again |
+| 20 Oct 13:41 | the same with `limit_cushion_bps: 30` (limit 25.54) | **filled at a net 25.27**: call 12.07, put 13.20 | the first complete two-leg open |
+| 20 Oct 13:42 | the strategy's own close, 33 s later | call sold at 11.94, put at 13.30 | the close; the round trip cost $3.00 (25.27 paid, 25.24 received) |
+
+**What this shows.** The path works end to end: the order manager, the Alpaca transport (single orders and one atomic multi-leg
+order), the fill ledger, the strategy's close, and the unwind of a failed leg. The safety gates held every time, and twice
+(an exit blocked by a spread gate, a request body mixed up between requests) the attempt found a real defect, now fixed.
+
+**What it does not show.** No edge: each straddle was bought with no signal and closed with none, and the +$16 and -$3 are drift
+and spread. Not seen: the option Greeks on the dashboard while a straddle was open (the window was about 33 s and no snapshot
+was taken), and a reconcile with the three positions open (the books matched Alpaca before and after). The engine books a
+leg at the fill price Alpaca reports for it only from the fix of 2026-10-20; the straddle above was booked 12.13 and 13.14
+against Alpaca's 12.07 and 13.20 (the same total). Another session sent a deliberately unfillable multi-leg order (limit 0.05)
+on 19 Oct at 14:49 UTC, cancelled, to check that Alpaca accepts the format.

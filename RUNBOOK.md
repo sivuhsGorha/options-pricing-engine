@@ -292,10 +292,15 @@ Invoke-RestMethod "$origin/api/control/test-straddle" -Method Post -WebSession $
 Invoke-RestMethod "$origin/api/control/test-straddle" -Method Post -WebSession $s -Headers @{ Origin = $origin } -ContentType 'application/json' -Body '{"confirm":true}'    # one real paper order
 ```
 
-After a confirm: the order appears in the dashboard's order tape and on Alpaca's Orders page, the book still reconciles
-(`[RECONCILE] OK`), and the valuation marks the option legs. The next ordinary step manages the straddle like any other and,
-with no edge to hold it, will usually close it about 30 seconds later: the test exercises open, mark and close, and costs
-the spread. Not yet run against the real paper account.
+After a confirm: the order appears in the dashboard's order tape and on Alpaca's Orders page and the book should still reconcile
+(`[RECONCILE] OK`). The next ordinary step manages the straddle like any other and, with no edge to hold it, will usually close it
+about 30 seconds later: the test exercises open and close, and costs the spread.
+
+**Run live on 2026-10-20** (after five attempts over two days): with `strategy.use_multi_leg: true` and `execution.limit_cushion_bps: 30`
+the straddle went as one atomic order, filled (net 25.27), was booked, and was closed by the strategy 33 seconds later for a net
+-$3.00, the spread. Not seen in that window: the option Greeks on the dashboard, and a reconcile with the three positions open.
+Before sending, read the legs' spreads: the engine refuses an entry whose spread is over `risk.max_spread_bps` (200), and Alpaca's
+indicative quotes swing from tight to wide within seconds. Each attempt is in EXECUTION.md section 5.
 
 ## Push alerts
 
