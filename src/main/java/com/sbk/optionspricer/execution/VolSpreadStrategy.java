@@ -525,12 +525,20 @@ public final class VolSpreadStrategy {
         }
         boolean buyBack = callQty < 0;
         int quantity = Math.abs(callQty);
+        // priced at the touch, as a single order is: the bids for a sell (the proceeds asked for), the asks for a buy-back. The mid
+        // asks for more than the market pays for a sell and was never filled (live, 2026-10-20); a leg without a book falls back to its last
+        double net = touchOrLast(callQuote, buyBack) + touchOrLast(putQuote, buyBack);
         OrderManager.OrderDecision decision = orderManager.submitMultiLeg(
                 List.of(new Order(0, buyBack, quantity, callQuote.last()), new Order(0, buyBack, quantity, putQuote.last())),
-                List.of(callQuote, putQuote), callQuote.last() + putQuote.last());
+                List.of(callQuote, putQuote), net);
         orders.add((buyBack ? "BUY " : "SELL ") + quantity + " " + openCall + "/" + openPut + " MLEG "
                 + (decision.accepted() ? "filled" : "rejected: " + decision.message()));
         return decision.accepted();
+    }
+
+    private static double touchOrLast(MarketSnapshot quote, boolean buy) {
+        double touch = buy ? quote.ask() : quote.bid();
+        return Double.isFinite(touch) && touch > 0.0 ? touch : quote.last();
     }
 
     private void closeStraddle(List<String> orders) {

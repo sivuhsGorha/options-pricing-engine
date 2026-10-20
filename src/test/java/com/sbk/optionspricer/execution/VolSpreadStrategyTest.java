@@ -646,6 +646,7 @@ class VolSpreadStrategyTest {
     /** Accepts every order, and every multi-leg order unless told not to; remembers what it was asked. */
     private static final class MlegTransport implements ExchangeTransport {
         final List<List<Boolean>> multiLegClosing = new ArrayList<>();
+        final List<Double> multiLegNets = new ArrayList<>();
         boolean acceptMultiLeg = true;
         int singleLegOrders;
 
@@ -657,6 +658,7 @@ class VolSpreadStrategyTest {
         @Override public ExecutionResult transmitMultiLeg(List<Order> legs, List<String> symbols, List<Double> bids, List<Double> asks,
                                                           double net, List<Boolean> closing) {
             multiLegClosing.add(closing);
+            multiLegNets.add(net);
             if (!acceptMultiLeg) {
                 return new ExecutionResult(symbols.get(0), 0, 0.0, false, "Alpaca order x canceled, nothing filled: no multi-leg fill within 10 s");
             }
@@ -720,5 +722,28 @@ class VolSpreadStrategyTest {
         assertEquals("CLOSE", close.action(), close.summary());
         assertTrue(transport.multiLegClosing.isEmpty(), "no multi-leg order at all: " + transport.multiLegClosing);
         assertEquals(4, transport.singleLegOrders, "two to open and two to close");
+    }
+
+    @Test
+    void anAtomicCloseIsPricedAtTheBidsLikeASingleSellAndNotAtTheMid() {
+        // Live on 2026-10-20 the atomic close asked for 24.54, the sum of the mids, while the bids summed to about 24.27: Alpaca
+        // accepted it and it never filled. A sell is priced at the touch (the bid), and a buy-back at the ask.
+        PositionTracker tracker = new PositionTracker(FillRecorder.NONE);
+        MlegTransport transport = new MlegTransport();
+        FlatChains market = new FlatChains(0.20, TODAY);
+        VolSpreadStrategy s = mlegStrategy(tracker, transport, true);
+        s.supervisedBuyStraddle(true);
+
+        VolSpreadStrategy.Decision close = s.step();
+
+        assertEquals("CLOSE", close.action(), close.summary());
+        double bids = 0.0, mids = 0.0;
+        for (OptionType type : OptionType.values()) {
+            MarketSnapshot q = market.optionQuote(OccSymbol.format("SPY", close.expiry(), type, close.strike())).orElseThrow();
+            bids += q.bid();
+            mids += q.last();
+        }
+        assertTrue(bids < mids, "the generated quotes have a spread");
+        assertEquals(bids, transport.multiLegNets.get(1), 1e-9, "the close is offered at the sum of the bids: " + transport.multiLegNets);
     }
 }
