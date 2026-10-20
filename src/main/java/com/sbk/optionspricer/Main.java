@@ -59,6 +59,10 @@ public class Main {
             System.exit(runSessionReport(java.nio.file.Path.of(com.sbk.optionspricer.config.EnvironmentConfigLoader.getOrDefault("DATA_DIR", "data")), day));
             return;
         }
+        if (args.length > 0 && "--vrp-study".equals(args[0])) {
+            System.exit(runVrpStudy(java.nio.file.Path.of(args.length > 1 ? args[1] : "data/historical/VIX_History.csv")));
+            return;
+        }
         if (args.length > 0 && "--forecast-eval".equals(args[0])) {
             System.exit(runForecastEval());
             return;
@@ -139,6 +143,106 @@ public class Main {
             return client.dailyBars(REPLAY_SYMBOL, start).stream()
                     .map(b -> new com.sbk.optionspricer.volatility.DailyCloseFeed.DailyClose(b.date(), b.close())).toList();
         });
+    }
+
+    /** The VIX history file the study reads, and where to get it. */
+    static final String VIX_HISTORY_URL = "https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv";
+
+    /** The premium study with SPY's closes from Alpaca (needs ALPACA_KEY_ID and ALPACA_SECRET in .env) and a VIX history file. */
+    public static int runVrpStudy(java.nio.file.Path vixCsv) {
+        return runVrpStudy(vixCsv, start -> {
+            com.sbk.optionspricer.execution.AlpacaPaperClient client = com.sbk.optionspricer.execution.AlpacaPaperClient.fromEnv();
+            return client.dailyBarsFrom(REPLAY_SYMBOL, start).stream()
+                    .map(b -> new com.sbk.optionspricer.volatility.VrpStudy.Close(b.date(), b.close())).toList();
+        });
+    }
+
+    /** Fewest observations worth summarising: about a year of days. */
+    static final int VRP_STUDY_MIN_OBSERVATIONS = 250;
+
+    /**
+     * Sets implied volatility (the VIX) against the volatility SPY then had over the next 21 trading days, over as many years as
+     * the two series share, and prints the premium, how often it was positive, how it varied with the level of the VIX, and what a
+     * short variance position would have lost in its worst months. It is a study of the premium and not a backtest of a trade.
+     * It stops, without a table, when either series is missing: it never invents data.
+     */
+    public static int runVrpStudy(java.nio.file.Path vixCsv,
+                                  java.util.function.Function<java.time.LocalDate, java.util.List<com.sbk.optionspricer.volatility.VrpStudy.Close>> closesSource) {
+        System.out.println("=========================================================================");
+        System.out.println("        BLACKTHORN STERLING IMPLIED VS REALISED VOLATILITY STUDY         ");
+        System.out.println("=========================================================================");
+        java.util.Map<java.time.LocalDate, Double> vix;
+        try {
+            vix = com.sbk.optionspricer.volatility.VrpStudy.parseVixCsv(java.nio.file.Files.readAllLines(vixCsv));
+        } catch (java.io.IOException | RuntimeException e) {
+            System.err.println("[VRP] Cannot read the VIX history at " + vixCsv + " (" + e.getMessage() + ").");
+            System.err.println("[VRP] Download it from " + VIX_HISTORY_URL + " and pass its path, or save it as data/historical/VIX_History.csv.");
+            return 2;
+        }
+        if (vix.isEmpty()) {
+            System.err.println("[VRP] No VIX closes found in " + vixCsv + ". Download " + VIX_HISTORY_URL);
+            return 2;
+        }
+        java.util.List<com.sbk.optionspricer.volatility.VrpStudy.Close> closes;
+        try {
+            closes = closesSource.apply(java.time.LocalDate.of(2016, 1, 1));
+        } catch (RuntimeException e) {
+            System.err.println("[VRP] Cannot get SPY's daily closes: " + e.getMessage());
+            System.err.println("[VRP] It never invents closes. Put ALPACA_KEY_ID and ALPACA_SECRET in .env and run it from the project folder.");
+            return 2;
+        }
+        java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneOffset.UTC);
+        closes = closes.stream().filter(c -> c.date().isBefore(today) && Double.isFinite(c.close()) && c.close() > 0.0).toList();
+        java.util.List<com.sbk.optionspricer.volatility.VrpStudy.Observation> observations;
+        try {
+            observations = com.sbk.optionspricer.volatility.VrpStudy.observations(closes, vix, 21);
+        } catch (IllegalArgumentException e) {
+            observations = java.util.List.of();
+        }
+        if (observations.size() < VRP_STUDY_MIN_OBSERVATIONS) {
+            System.err.println("[VRP] Only " + observations.size() + " days where the VIX and a following month of SPY closes both exist; at least "
+                    + VRP_STUDY_MIN_OBSERVATIONS + " are needed.");
+            return 2;
+        }
+        var r = com.sbk.optionspricer.volatility.VrpStudy.study(observations, 21);
+        var f = java.util.Locale.ROOT;
+        System.out.printf(f, "[VRP] %d days, %s to %s. Mean VIX %.1f; mean realised volatility over the next month %.1f.%n",
+                r.observations(), r.first(), r.last(), 100 * r.meanImplied(), 100 * r.meanRealized());
+        System.out.printf(f, "%nThe premium, VIX minus the volatility that followed, in vol points: mean %+.2f, median %+.2f; positive on %.0f%% of days.%n",
+                r.meanPremiumPoints(), r.medianPremiumPoints(), 100 * r.shareWithPositivePremium());
+        var q = r.premiumQuantilesPoints();
+        System.out.printf(f, "  5%% %+.1f | 25%% %+.1f | 50%% %+.1f | 75%% %+.1f | 95%% %+.1f | worst %+.1f | best %+.1f%n",
+                q.get(0), q.get(1), q.get(2), q.get(3), q.get(4), r.minPremiumPoints(), r.maxPremiumPoints());
+
+        System.out.println("\nBy year:");
+        System.out.println("| Year | Days | Mean premium | Positive | Worst 21-day payoff (any start day) |");
+        System.out.println("| ---: | ---: | -----------: | -------: | ----------------------------------: |");
+        for (var y : r.years()) {
+            System.out.printf(f, "| %d | %d | %+.2f | %.0f%% | %+.1f |%n", y.year(), y.n(), y.meanPremiumPoints(), 100 * y.shareWithPositivePremium(), y.worstPayoffPoints());
+        }
+        System.out.println("\nBy the level of the VIX that day:");
+        System.out.println("| Level | Days | Mean premium | Positive | Worst 21-day payoff |");
+        System.out.println("| :---- | ---: | -----------: | -------: | ------------------: |");
+        for (var b : r.buckets()) {
+            System.out.printf(f, "| %s | %d | %s | %s | %s |%n", b.label(), b.n(),
+                    b.n() == 0 ? "-" : String.format(f, "%+.2f", b.meanPremiumPoints()),
+                    b.n() == 0 ? "-" : String.format(f, "%.0f%%", 100 * b.shareWithPositivePremium()),
+                    b.n() == 0 ? "-" : String.format(f, "%+.1f", b.worstPayoffPoints()));
+        }
+        var m = r.monthly();
+        System.out.printf(f, "%nNon-overlapping months (a short variance position sized at $1 a vol point, rolled every 21 trading days): %d months,%n", m.months());
+        System.out.printf(f, "  mean payoff %+.2f vol points a month, standard deviation %.2f, negative in %.0f%% of months,%n",
+                m.meanPayoffPoints(), m.stdPayoffPoints(), 100 * m.shareNegative());
+        System.out.printf(f, "  worst month %+.1f (%s), largest fall from a peak %.1f vol points.%n", m.worstPayoffPoints(), m.worstDate(), m.maxDrawdownPoints());
+        System.out.println("Worst five of those months (starting on every 21st day: the worst start day of any window is the \"worst 21-day payoff\" above, and is worse):");
+        for (var o : m.worstFive()) {
+            System.out.printf(f, "  %s: VIX %.1f, realised %.1f, payoff %+.1f%n", o.date(), 100 * o.impliedVol(), 100 * o.realizedVol(), o.payoffPoints());
+        }
+        System.out.println();
+        System.out.println("[VRP] This is a study of the premium, not a backtest of any trade: no costs (spreads, fees), no margin, no options prices,");
+        System.out.println("[VRP] and the VIX is the S&P 500's 30-day implied volatility, not SPY's. Daily windows overlap, so the daily rows are not");
+        System.out.println("[VRP] independent samples. It covers one market and one stretch of history, and says nothing about the future.");
+        return 0;
     }
 
     /** The forecast comparison with real daily closes from Alpaca's bars; needs ALPACA_KEY_ID and ALPACA_SECRET in .env. */

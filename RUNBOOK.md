@@ -233,6 +233,23 @@ To keep it running through a session:
 A laptop that sleeps is a poor host for an engine that is meant to watch a market all day. The VPS route in "Hosting
 on a server" is the real fix; this section only reduces the gaps until then.
 
+## Implied against realised volatility (the premium study)
+
+```powershell
+# once: the VIX history (public, from the CBOE), saved where the command looks for it
+curl.exe -L -o data/historical/VIX_History.csv https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv
+java --add-modules jdk.incubator.vector -cp "target/classes;target/lib/*" com.sbk.optionspricer.Main --vrp-study
+```
+
+Needs `ALPACA_KEY_ID` and `ALPACA_SECRET` in `.env` (read-only: it fetches SPY's daily bars from 2016) and the VIX file; it stops, without a
+table, if either is missing or the two share fewer than 250 days. For each day it sets the VIX against SPY's realised volatility over
+the next 21 trading days and prints the premium (VIX minus what followed, in vol points), how often it was positive, the same by year
+and by the level of the VIX, and the payoff of a short variance position sized at $1 a vol point when it is struck, rolled every 21 days
+(mean, standard deviation, worst month, largest fall from a peak). It is a study of the premium, **not a backtest of any trade**: no
+costs, no margin, no options prices, the VIX is the S&P 500's and not SPY's, daily windows overlap, and it covers one market. The
+bars come from the SIP feed because the free IEX feed has almost nothing before mid-2020 (none for 2019 or March 2020); a window that
+spans a hole of more than a week in the closes is dropped, not read as a quiet month.
+
 ## Compare realized-vol forecasts
 
 ```powershell

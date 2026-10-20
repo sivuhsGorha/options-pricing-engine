@@ -318,12 +318,21 @@ public final class AlpacaPaperClient {
      * forming. No bars at all is an error, never an empty series that would read as a calm market.
      */
     public List<DailyBar> dailyBars(String symbol, java.time.LocalDate start) {
+        List<DailyBar> out = barsPage(symbol, start, "iex", null);
+        if (out.isEmpty()) {
+            throw new IllegalStateException("Alpaca returned no daily bars for " + symbol.trim().toUpperCase(Locale.ROOT));
+        }
+        return out;
+    }
+
+    /** At most {@value #BARS_PER_PAGE} bars from {@code start} on, oldest first; empty when there are none. */
+    private List<DailyBar> barsPage(String symbol, java.time.LocalDate start, String feed, java.time.LocalDate end) {
         if (symbol == null || symbol.isBlank() || start == null) {
             throw new IllegalArgumentException("symbol and start are required");
         }
         String sym = symbol.trim().toUpperCase(Locale.ROOT);
-        JsonNode bars = callData("/v2/stocks/" + sym + "/bars?timeframe=1Day&start=" + start
-                + "&limit=1000&feed=iex&adjustment=split").path("bars");
+        JsonNode bars = callData("/v2/stocks/" + sym + "/bars?timeframe=1Day&start=" + start + (end == null ? "" : "&end=" + end)
+                + "&limit=" + BARS_PER_PAGE + "&feed=" + feed + "&adjustment=split").path("bars");
         List<DailyBar> out = new ArrayList<>();
         if (bars.isArray()) {
             for (JsonNode bar : bars) {
@@ -333,11 +342,49 @@ public final class AlpacaPaperClient {
                 }
             }
         }
-        if (out.isEmpty()) {
-            throw new IllegalStateException("Alpaca returned no daily bars for " + sym);
-        }
         out.sort(java.util.Comparator.comparing(DailyBar::date));
         return List.copyOf(out);
+    }
+
+    static final int BARS_PER_PAGE = 1000;
+
+    /**
+     * Every daily bar from {@code start} to yesterday, fetched a page at a time (a page holds about four years), from the SIP feed:
+     * the free IEX feed has almost nothing before mid-2020 (none for 2019, none for March 2020), which would read as calm. The SIP
+     * refuses data from the last 15 minutes, so the request ends before today.
+     */
+    public List<DailyBar> dailyBarsFrom(String symbol, java.time.LocalDate start) {
+        java.time.LocalDate end = java.time.LocalDate.now(java.time.ZoneOffset.UTC).minusDays(1);
+        List<DailyBar> all = pageForward(day -> barsPage(symbol, day, "sip", end), start);
+        if (all.isEmpty()) {
+            throw new IllegalStateException("Alpaca returned no daily bars for " + symbol.trim().toUpperCase(Locale.ROOT));
+        }
+        return all;
+    }
+
+    /**
+     * Collects pages of at most {@value #BARS_PER_PAGE} bars, each asked for from the day after the last bar so far, until a page
+     * is short (the end), empty, or adds no new date. A date is never kept twice.
+     */
+    public static List<DailyBar> pageForward(java.util.function.Function<java.time.LocalDate, List<DailyBar>> page, java.time.LocalDate start) {
+        List<DailyBar> all = new ArrayList<>();
+        java.time.LocalDate next = start;
+        while (true) {
+            List<DailyBar> batch = page.apply(next);
+            java.time.LocalDate last = all.isEmpty() ? null : all.get(all.size() - 1).date();
+            int before = all.size();
+            for (DailyBar bar : batch) {
+                if (last == null || bar.date().isAfter(last)) {
+                    all.add(bar);
+                    last = bar.date();
+                }
+            }
+            if (batch.size() < BARS_PER_PAGE || all.size() == before) {
+                break;
+            }
+            next = last.plusDays(1);
+        }
+        return List.copyOf(all);
     }
 
     // ------------------------------------------------------------------ plumbing

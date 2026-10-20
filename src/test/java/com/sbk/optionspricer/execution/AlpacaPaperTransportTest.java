@@ -427,4 +427,19 @@ class AlpacaPaperTransportTest {
         assertThrows(IllegalArgumentException.class, () -> new AlpacaPaperClient("", "secret"));
         assertThrows(IllegalArgumentException.class, () -> new AlpacaPaperClient("key", " "));
     }
+
+    @Test
+    void theStudyAsksForTheCompleteFeedWhileTheEngineKeepsTheOneItAlwaysUsed() {
+        // The free IEX feed has almost nothing before mid-2020 (none for 2019, none for March 2020); the SIP feed has it all.
+        String body = "{\"bars\":[{\"c\":300.0,\"t\":\"2016-01-04T05:00:00Z\"}],\"symbol\":\"SPY\",\"next_page_token\":null}";
+
+        FakeAlpaca forStudy = new FakeAlpaca().quote(body);
+        new AlpacaPaperClient(forStudy).dailyBarsFrom("SPY", java.time.LocalDate.of(2016, 1, 1));
+        assertTrue(forStudy.dataCalls.get(0).contains("feed=sip"), forStudy.dataCalls.get(0));
+        assertTrue(forStudy.dataCalls.get(0).contains("end="), "SIP refuses data from the last 15 minutes, so the request ends before today: " + forStudy.dataCalls.get(0));
+
+        FakeAlpaca forEngine = new FakeAlpaca().quote(body);
+        new AlpacaPaperClient(forEngine).dailyBars("SPY", java.time.LocalDate.of(2026, 5, 1));
+        assertTrue(forEngine.dataCalls.get(0).contains("feed=iex"), forEngine.dataCalls.get(0));
+    }
 }
