@@ -136,24 +136,46 @@ public final class AlpacaPaperTransport implements ExchangeTransport {
 
     @Override
     public ExecutionResult transmitMultiLeg(List<Order> legs, List<String> symbols, List<Double> bids, List<Double> asks, double netLimitPrice) {
+        return transmitMultiLeg(legs, symbols, bids, asks, netLimitPrice, null);
+    }
+
+    @Override
+    public ExecutionResult transmitMultiLeg(List<Order> legs, List<String> symbols, List<Double> bids, List<Double> asks, double netLimitPrice,
+                                            List<Boolean> closing) {
         if (legs == null || symbols == null || legs.isEmpty() || legs.size() != symbols.size()) {
             return remember(new ExecutionResult("UNKNOWN", 0, 0.0, false, "Invalid multi-leg parameters"));
         }
-        if (legs.stream().anyMatch(leg -> !leg.isBuy())) {
-            // Alpaca documents no sign for a net-credit limit price, and a multi-leg order must cover every short leg
-            // inside itself, which a short straddle does not. Nothing of the kind is sent until a paper order shows it works.
+        boolean allBuy = legs.stream().allMatch(Order::isBuy);
+        boolean allSell = legs.stream().noneMatch(Order::isBuy);
+        if (!allBuy && !allSell) {
             return remember(new ExecutionResult(symbols.get(0), 0, 0.0, false,
-                    "multi-leg orders with a short leg (a net credit) are not enabled: Alpaca documents no credit price convention and requires short legs to be covered"));
+                    "multi-leg orders that mix buys and sells are not enabled: the net price would need a sign no order here has been shown to use"));
+        }
+        boolean everyLegCloses = closing != null && closing.size() == legs.size() && closing.stream().allMatch(Boolean.TRUE::equals);
+        if (allSell && !everyLegCloses) {
+            // A sell that opens a position writes an option, which this account is not eligible for (Alpaca answers 403, uncovered
+            // option contracts); only a sell that closes a long already held is sent.
+            return remember(new ExecutionResult(symbols.get(0), 0, 0.0, false,
+                    "multi-leg sells that would open a position (a net credit from uncovered short options) are not enabled: only a close of legs held is"));
         }
         List<AlpacaPaperClient.OptionLeg> clientLegs = new java.util.ArrayList<>();
         for (int i = 0; i < legs.size(); i++) {
-            clientLegs.add(new AlpacaPaperClient.OptionLeg(symbols.get(i), 1, legs.get(i).isBuy()));
+            boolean legCloses = closing != null && i < closing.size() && Boolean.TRUE.equals(closing.get(i));
+            clientLegs.add(new AlpacaPaperClient.OptionLeg(symbols.get(i), 1, legs.get(i).isBuy(), legCloses));
         }
         int quantity = legs.get(0).quantity();
         double cushion = limitCushionBps;
-        if (cushion > 0.0) {
-            // every leg here is a buy (a credit was refused above), so the net is a debit: raise the most that will be paid
-            netLimitPrice = Math.ceil(netLimitPrice * (1.0 + cushion / 10_000.0) * 100.0 - 1e-9) / 100.0;
+        if (allBuy) {
+            if (cushion > 0.0) {
+                // a debit: raise the most that will be paid
+                netLimitPrice = Math.ceil(netLimitPrice * (1.0 + cushion / 10_000.0) * 100.0 - 1e-9) / 100.0;
+            }
+        } else {
+            // proceeds: Alpaca prices a credit as a negative net, and the cushion lowers what is asked for
+            double proceeds = cushion > 0.0
+                    ? Math.floor(netLimitPrice * (1.0 - cushion / 10_000.0) * 100.0 + 1e-9) / 100.0
+                    : netLimitPrice;
+            netLimitPrice = -Math.abs(proceeds);
         }
         String clientOrderId = "blackthorn-mleg-" + clock.millis() + "-" + sequence.incrementAndGet();
 
@@ -184,7 +206,8 @@ public final class AlpacaPaperTransport implements ExchangeTransport {
         }
         ExecutionResult filled = report(state, symbols.get(0), legs.get(0), null);
         if (filled.executed()) {
-            filled = new ExecutionResult(filled.symbol(), filled.filledQuantity(), filled.executionPrice(), true, filled.message(),
+            // proceeds are reported as a positive amount, whichever sign the venue gives a credit
+            filled = new ExecutionResult(filled.symbol(), filled.filledQuantity(), Math.abs(filled.executionPrice()), true, filled.message(),
                     legFillPrices(state, symbols));
         }
         return remember(filled);
@@ -270,7 +293,8 @@ public final class AlpacaPaperTransport implements ExchangeTransport {
 
     private static ExecutionResult report(AlpacaPaperClient.OrderState state, String symbol, Order order, String note) {
         int filled = (int) Math.round(state.filledQty());
-        if (filled > 0 && Double.isFinite(state.filledAvgPrice()) && state.filledAvgPrice() > 0.0) {
+        // a multi-leg credit may be reported with a negative average price: a fill is a fill whichever sign
+        if (filled > 0 && Double.isFinite(state.filledAvgPrice()) && Math.abs(state.filledAvgPrice()) > 0.0) {
             String message = filled == order.quantity()
                     ? "filled at Alpaca paper (order " + state.id() + ")"
                     : "partial fill " + filled + " of " + order.quantity() + " at Alpaca paper (order " + state.id() + ")";

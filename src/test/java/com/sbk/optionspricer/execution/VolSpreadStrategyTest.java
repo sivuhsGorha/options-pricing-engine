@@ -640,4 +640,85 @@ class VolSpreadStrategyTest {
         VolSpreadStrategy.Decision waiting = strategy(tracker, market, 0.20, null, Clock.fixed(NOW, ZoneOffset.UTC)).supervisedBuyStraddle(false);
         assertEquals(expected, waiting.optionSpreadBps(), 1e-6, "a supervised dry run shows the spread it would have faced");
     }
+
+    // ------------------------------------------------------------------ closing in one order
+
+    /** Accepts every order, and every multi-leg order unless told not to; remembers what it was asked. */
+    private static final class MlegTransport implements ExchangeTransport {
+        final List<List<Boolean>> multiLegClosing = new ArrayList<>();
+        boolean acceptMultiLeg = true;
+        int singleLegOrders;
+
+        @Override public ExecutionResult transmit(Order order, String symbol, double bid, double ask) {
+            singleLegOrders++;
+            return new ExecutionResult(symbol, order.quantity(), order.price(), true, "Executed");
+        }
+
+        @Override public ExecutionResult transmitMultiLeg(List<Order> legs, List<String> symbols, List<Double> bids, List<Double> asks,
+                                                          double net, List<Boolean> closing) {
+            multiLegClosing.add(closing);
+            if (!acceptMultiLeg) {
+                return new ExecutionResult(symbols.get(0), 0, 0.0, false, "Alpaca order x canceled, nothing filled: no multi-leg fill within 10 s");
+            }
+            return new ExecutionResult(symbols.get(0), legs.get(0).quantity(), net, true, "Multi-leg executed");
+        }
+    }
+
+    private static VolSpreadStrategy mlegStrategy(PositionTracker tracker, MlegTransport transport, boolean useMultiLeg) {
+        OrderManager manager = new OrderManager(new PreTradeRiskFilter(1_000, 1e9, 1_000), transport, tracker,
+                OrderManager.MarketDataPolicy.allowSimulated(), new TradingHalt(), null, 1);
+        VolSpreadStrategy.Params params = new VolSpreadStrategy.Params(0.01, 50.0, 7, 14, 1, "SSVI", 0.65, useMultiLeg);
+        VolSpreadStrategy s = new VolSpreadStrategy(manager, new FlatChains(0.20, TODAY), referenceSurface(0.20), null, VolSpreadStrategyTest::spot,
+                tracker, "SPY", R, Q, params, Clock.fixed(NOW, ZoneOffset.UTC));
+        s.allowSimulatedChains(true);
+        return s;
+    }
+
+    @Test
+    void aMultiLegStraddleIsClosedInOneOrderMarkedAsClosing() {
+        PositionTracker tracker = new PositionTracker(FillRecorder.NONE);
+        MlegTransport transport = new MlegTransport();
+        VolSpreadStrategy s = mlegStrategy(tracker, transport, true);
+        assertEquals("SUPERVISED_BUY_STRADDLE", s.supervisedBuyStraddle(true).action());
+
+        VolSpreadStrategy.Decision close = s.step();
+
+        assertEquals("CLOSE", close.action(), close.summary());
+        assertEquals(1, close.orders().size(), "one order for both legs: " + close.orders());
+        assertTrue(close.orders().get(0).startsWith("SELL 1 ") && close.orders().get(0).contains("MLEG filled"), close.orders().toString());
+        assertEquals(List.of(List.of(false, false), List.of(true, true)), transport.multiLegClosing, "the open, then the close");
+        assertEquals(0, transport.singleLegOrders, "no leg-by-leg order was needed");
+        assertTrue(tracker.getPositions().keySet().stream().allMatch(sym -> tracker.getNetQuantity(sym) == 0), tracker.getPositions().toString());
+    }
+
+    @Test
+    void ifTheAtomicCloseIsNotFilledTheLegsAreClosedOneByOneAsBefore() {
+        PositionTracker tracker = new PositionTracker(FillRecorder.NONE);
+        MlegTransport transport = new MlegTransport();
+        VolSpreadStrategy s = mlegStrategy(tracker, transport, true);
+        s.supervisedBuyStraddle(true);
+        transport.acceptMultiLeg = false;
+
+        VolSpreadStrategy.Decision close = s.step();
+
+        assertEquals("CLOSE", close.action(), close.summary());
+        assertTrue(close.orders().get(0).contains("MLEG rejected"), "the failed atomic close is reported: " + close.orders());
+        assertEquals(2, transport.singleLegOrders, "then each leg sold on its own");
+        assertTrue(close.orders().stream().filter(o -> o.startsWith("SELL 1 ") && o.endsWith("filled")).count() == 2, close.orders().toString());
+        assertTrue(tracker.getPositions().keySet().stream().allMatch(sym -> tracker.getNetQuantity(sym) == 0), "flat: " + tracker.getPositions());
+    }
+
+    @Test
+    void withMultiLegOffTheCloseIsLegByLegAsItAlwaysWas() {
+        PositionTracker tracker = new PositionTracker(FillRecorder.NONE);
+        MlegTransport transport = new MlegTransport();
+        VolSpreadStrategy s = mlegStrategy(tracker, transport, false);
+        s.supervisedBuyStraddle(true); // opens leg by leg: multi-leg is off
+
+        VolSpreadStrategy.Decision close = s.step();
+
+        assertEquals("CLOSE", close.action(), close.summary());
+        assertTrue(transport.multiLegClosing.isEmpty(), "no multi-leg order at all: " + transport.multiLegClosing);
+        assertEquals(4, transport.singleLegOrders, "two to open and two to close");
+    }
 }

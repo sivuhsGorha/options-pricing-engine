@@ -507,8 +507,35 @@ public final class VolSpreadStrategy {
                 exp, strk, edge.marketIv(), edge.referenceIv(), edge.value(), sign, orders, spotAge, cAge, optAge));
     }
 
+    /**
+     * One order for both legs, marked as closing, when the straddle is whole (both legs held, in equal size, on the same side)
+     * and multi-leg orders are on; the venue fills both or neither, so a close cannot leave one leg behind. When it is not filled
+     * (or cannot be tried) the caller closes leg by leg, as it always did. Returns whether both legs are closed.
+     */
+    private boolean closeAtomically(List<String> orders) {
+        int callQty = tracker.getNetQuantity(openCall);
+        int putQty = tracker.getNetQuantity(openPut);
+        if (callQty == 0 || putQty == 0 || Integer.signum(callQty) != Integer.signum(putQty) || Math.abs(callQty) != Math.abs(putQty)) {
+            return false;
+        }
+        MarketSnapshot callQuote = resolveQuote(openCall);
+        MarketSnapshot putQuote = resolveQuote(openPut);
+        if (callQuote == null || putQuote == null) {
+            return false;
+        }
+        boolean buyBack = callQty < 0;
+        int quantity = Math.abs(callQty);
+        OrderManager.OrderDecision decision = orderManager.submitMultiLeg(
+                List.of(new Order(0, buyBack, quantity, callQuote.last()), new Order(0, buyBack, quantity, putQuote.last())),
+                List.of(callQuote, putQuote), callQuote.last() + putQuote.last());
+        orders.add((buyBack ? "BUY " : "SELL ") + quantity + " " + openCall + "/" + openPut + " MLEG "
+                + (decision.accepted() ? "filled" : "rejected: " + decision.message()));
+        return decision.accepted();
+    }
+
     private void closeStraddle(List<String> orders) {
-        for (String leg : new String[]{openCall, openPut}) {
+        boolean closedTogether = params.useMultiLeg() && closeAtomically(orders);
+        for (String leg : closedTogether ? new String[0] : new String[]{openCall, openPut}) {
             int qty = tracker.getNetQuantity(leg);
             if (qty == 0) {
                 continue;

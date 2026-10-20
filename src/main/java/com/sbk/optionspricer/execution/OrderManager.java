@@ -258,6 +258,7 @@ public class OrderManager {
         java.util.List<String> symbols = new java.util.ArrayList<>();
         java.util.List<Double> bids = new java.util.ArrayList<>();
         java.util.List<Double> asks = new java.util.ArrayList<>();
+        java.util.List<Boolean> closing = new java.util.ArrayList<>();
 
         for (int i = 0; i < legOrders.size(); i++) {
             Order order = legOrders.get(i);
@@ -291,9 +292,10 @@ public class OrderManager {
             symbols.add(snapshot.symbol());
             bids.add(snapshot.bid());
             asks.add(snapshot.ask());
+            closing.add(reducesPosition(order, snapshot.symbol()));
         }
 
-        ExecutionResult result = transport.transmitMultiLeg(legOrders, symbols, bids, asks, netLimitPrice);
+        ExecutionResult result = transport.transmitMultiLeg(legOrders, symbols, bids, asks, netLimitPrice, closing);
         if (!result.executed()) {
             return reject(orderId, snapshots.get(0).status(), result.message(), "execution transport rejected multi-leg order: " + result.message());
         }

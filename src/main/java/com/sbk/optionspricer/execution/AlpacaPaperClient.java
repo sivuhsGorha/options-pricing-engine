@@ -196,12 +196,24 @@ public final class AlpacaPaperClient {
         return order(call("POST", "/v2/orders", body));
     }
 
-    public record OptionLeg(String symbol, int ratioQty, boolean buy) {}
+    /** @param closing true when the leg closes a position already held (to_close); false when it opens one (to_open) */
+    public record OptionLeg(String symbol, int ratioQty, boolean buy, boolean closing) {
+        public OptionLeg(String symbol, int ratioQty, boolean buy) {
+            this(symbol, ratioQty, buy, false);
+        }
 
-    /** A multi-leg complex limit order (e.g. straddle or spread) sent atomically to Alpaca. */
+        String positionIntent() {
+            return (buy ? "buy" : "sell") + (closing ? "_to_close" : "_to_open");
+        }
+    }
+
+    /**
+     * A multi-leg complex limit order (e.g. straddle or spread) sent atomically to Alpaca. The price is the net: positive for
+     * a debit, negative for a credit (Alpaca's documented convention).
+     */
     public OrderState submitMultiLegOrder(List<OptionLeg> legs, int quantity, double limitPrice, String clientOrderId) {
-        if (legs == null || legs.isEmpty() || quantity <= 0 || !Double.isFinite(limitPrice) || limitPrice <= 0.0) {
-            throw new IllegalArgumentException("legs, a positive quantity and a positive limit price are required");
+        if (legs == null || legs.isEmpty() || quantity <= 0 || !Double.isFinite(limitPrice) || limitPrice == 0.0) {
+            throw new IllegalArgumentException("legs, a positive quantity and a non-zero net limit price are required");
         }
         StringBuilder sb = new StringBuilder();
         sb.append(String.format(Locale.ROOT,
@@ -210,10 +222,9 @@ public final class AlpacaPaperClient {
         for (int i = 0; i < legs.size(); i++) {
             OptionLeg leg = legs.get(i);
             if (i > 0) sb.append(",");
-            // every example in Alpaca's multi-leg documentation names the intent; these orders only ever open
+            // every example in Alpaca's multi-leg documentation names the intent; a sell that closes a long is not a sell that writes
             sb.append(String.format(Locale.ROOT, "{\"symbol\":\"%s\",\"ratio_qty\":\"%d\",\"side\":\"%s\",\"position_intent\":\"%s\"}",
-                    leg.symbol().trim().toUpperCase(Locale.ROOT), leg.ratioQty(), leg.buy() ? "buy" : "sell",
-                    leg.buy() ? "buy_to_open" : "sell_to_open"));
+                    leg.symbol().trim().toUpperCase(Locale.ROOT), leg.ratioQty(), leg.buy() ? "buy" : "sell", leg.positionIntent()));
         }
         sb.append("]}");
         return order(call("POST", "/v2/orders", sb.toString()));

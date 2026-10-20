@@ -29,4 +29,15 @@ public interface ExchangeTransport {
         }
         return new ExecutionResult(symbols.get(0), legs.get(0).quantity(), netLimitPrice, true, "Multi-leg executed");
     }
+
+    /**
+     * The same, told which legs close a position already held ({@code closing.get(i)}): a venue that names an order's intent
+     * needs it, since a sell that closes a long and a sell that writes an option are different orders. The net price is an
+     * amount: a debit when every leg buys, the proceeds when every leg sells. A transport that does not care ignores it.
+     */
+    default ExecutionResult transmitMultiLeg(java.util.List<Order> legs, java.util.List<String> symbols,
+                                             java.util.List<Double> bids, java.util.List<Double> asks, double netLimitPrice,
+                                             java.util.List<Boolean> closing) {
+        return transmitMultiLeg(legs, symbols, bids, asks, netLimitPrice);
+    }
 }
