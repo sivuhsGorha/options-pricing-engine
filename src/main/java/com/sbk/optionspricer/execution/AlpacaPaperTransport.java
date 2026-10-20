@@ -182,7 +182,34 @@ public final class AlpacaPaperTransport implements ExchangeTransport {
         if (state.isWorking()) {
             return remember(cancelAndReport(state, symbols.get(0), legs.get(0), "no multi-leg fill within " + fillWait.toSeconds() + " s at limit " + netLimitPrice));
         }
-        return remember(report(state, symbols.get(0), legs.get(0), null));
+        ExecutionResult filled = report(state, symbols.get(0), legs.get(0), null);
+        if (filled.executed()) {
+            filled = new ExecutionResult(filled.symbol(), filled.filledQuantity(), filled.executionPrice(), true, filled.message(),
+                    legFillPrices(state, symbols));
+        }
+        return remember(filled);
+    }
+
+    /**
+     * The price each leg filled at, in the order the legs were sent and matched by contract symbol (the venue does not promise
+     * an order); empty unless every sent leg has a filled price, so the result is never half-known.
+     */
+    static List<Double> legFillPrices(AlpacaPaperClient.OrderState state, List<String> symbols) {
+        List<Double> prices = new java.util.ArrayList<>();
+        for (String symbol : symbols) {
+            double price = Double.NaN;
+            for (AlpacaPaperClient.LegFill leg : state.legs()) {
+                if (symbol.equalsIgnoreCase(leg.symbol()) && leg.filledQty() > 0.0 && leg.filledAvgPrice() > 0.0) {
+                    price = leg.filledAvgPrice();
+                    break;
+                }
+            }
+            if (!Double.isFinite(price)) {
+                return List.of();
+            }
+            prices.add(price);
+        }
+        return prices;
     }
 
     /**

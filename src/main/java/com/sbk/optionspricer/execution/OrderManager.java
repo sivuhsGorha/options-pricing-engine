@@ -311,6 +311,14 @@ public class OrderManager {
             legScale = result.executionPrice() / limitSum;
         }
 
+        // When the venue also gives each leg's own fill price and they add up to the net it reported, those are what the account
+        // paid for each leg: book them. Otherwise (none given, or they do not add up) the proportional split above stands.
+        java.util.List<Double> venueLegPrices = result.legPrices();
+        boolean useVenueLegPrices = sameSide && venueLegPrices.size() == legOrders.size()
+                && venueLegPrices.stream().allMatch(p -> Double.isFinite(p) && p > 0.0)
+                && Double.isFinite(result.executionPrice())
+                && Math.abs(venueLegPrices.stream().mapToDouble(Double::doubleValue).sum() - result.executionPrice()) <= 0.01 * legOrders.size();
+
         try {
             if (positionTracker != null) {
                 for (int i = 0; i < legOrders.size(); i++) {
@@ -318,7 +326,7 @@ public class OrderManager {
                     com.sbk.optionspricer.market.MarketSnapshot snapshot = snapshots.get(i);
                     int mult = snapshot.multiplierOr(contractMultiplier);
                     int signedQuantity = order.isBuy() ? filled : -filled;
-                    double bookedPrice = order.price() * legScale;
+                    double bookedPrice = useVenueLegPrices ? venueLegPrices.get(i) : order.price() * legScale;
                     positionTracker.applyFill(new PositionTracker.ExecutionFill(snapshot.symbol(), signedQuantity, mult, bookedPrice));
                     double notional = (double) filled * bookedPrice * mult;
                     riskFilter.recordFill(snapshot.underlying(), order.isBuy() ? notional : -notional);

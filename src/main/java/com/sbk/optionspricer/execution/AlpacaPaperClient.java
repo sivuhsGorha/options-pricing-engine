@@ -71,7 +71,15 @@ public final class AlpacaPaperClient {
 
     /** An order at the venue; {@code filledAvgPrice} is NaN until something has filled. */
     public record OrderState(String id, String clientOrderId, String symbol, String status, double qty, double filledQty,
-                             double filledAvgPrice) {
+                             double filledAvgPrice, List<LegFill> legs) {
+        public OrderState(String id, String clientOrderId, String symbol, String status, double qty, double filledQty, double filledAvgPrice) {
+            this(id, clientOrderId, symbol, status, qty, filledQty, filledAvgPrice, List.of());
+        }
+
+        public OrderState {
+            legs = legs == null ? List.of() : List.copyOf(legs);
+        }
+
         public boolean isWorking() {
             return switch (status) {
                 case "new", "accepted", "pending_new", "accepted_for_bidding", "partially_filled", "pending_cancel",
@@ -80,6 +88,9 @@ public final class AlpacaPaperClient {
             };
         }
     }
+
+    /** One leg of a multi-leg order as the venue reports it: its contract, and the average price it filled at (NaN until it has). */
+    public record LegFill(String symbol, double filledQty, double filledAvgPrice) {}
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
@@ -352,8 +363,15 @@ public final class AlpacaPaperClient {
     }
 
     private static OrderState order(JsonNode n) {
+        List<LegFill> legs = new java.util.ArrayList<>();
+        if (n.has("legs") && n.get("legs").isArray()) {
+            for (JsonNode leg : n.get("legs")) {
+                legs.add(new LegFill(text(leg, "symbol"), number(leg, "filled_qty"),
+                        leg.hasNonNull("filled_avg_price") ? number(leg, "filled_avg_price") : Double.NaN));
+            }
+        }
         return new OrderState(text(n, "id"), text(n, "client_order_id"), text(n, "symbol"), text(n, "status"),
-                number(n, "qty"), number(n, "filled_qty"), n.hasNonNull("filled_avg_price") ? number(n, "filled_avg_price") : Double.NaN);
+                number(n, "qty"), number(n, "filled_qty"), n.hasNonNull("filled_avg_price") ? number(n, "filled_avg_price") : Double.NaN, legs);
     }
 
     private static String text(JsonNode n, String field) {
