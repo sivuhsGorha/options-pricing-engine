@@ -41,9 +41,15 @@ public final class DecisionJournal {
 
     static final String HEADER = "at,action,expiry,strike,marketIv,referenceIv,edge,straddleSign,orders,reason,spotAgeSeconds,chainAgeSeconds,optionQuoteAgeSeconds,optionSpreadBps";
 
+    /** The headers this file has had before; a journal that starts with one is brought up to date, nothing else is touched. */
+    private static final java.util.Set<String> OLDER_HEADERS = java.util.Set.of(
+            "at,action,expiry,strike,marketIv,referenceIv,edge,straddleSign,orders,reason",
+            "at,action,expiry,strike,marketIv,referenceIv,edge,straddleSign,orders,reason,spotAgeSeconds,chainAgeSeconds,optionQuoteAgeSeconds");
+
     private final Path file;
     private int failures;
     private boolean warned;
+    private boolean headerChecked;
 
     public DecisionJournal(Path file) {
         if (file == null) {
@@ -56,6 +62,38 @@ public final class DecisionJournal {
         return file;
     }
 
+    /**
+     * A journal that began before a column was added keeps its old header while new rows carry the new fields. The first line is
+     * replaced, once, with the current header (the rows beneath it are copied unchanged, through a temporary file swapped in
+     * whole); a file whose first line is not one of this journal's own earlier headers is left exactly as it is.
+     */
+    private void upgradeOlderHeader() throws IOException {
+        if (!Files.exists(file) || Files.size(file) == 0) {
+            return;
+        }
+        byte[] all = Files.readAllBytes(file);
+        int newline = -1;
+        for (int i = 0; i < all.length; i++) {
+            if (all[i] == '\n') {
+                newline = i;
+                break;
+            }
+        }
+        if (newline < 0) {
+            return;
+        }
+        String first = new String(all, 0, newline, StandardCharsets.UTF_8).stripTrailing();
+        if (!OLDER_HEADERS.contains(first)) {
+            return;
+        }
+        Path temp = file.resolveSibling(file.getFileName() + ".upgrade");
+        try (java.io.OutputStream out = Files.newOutputStream(temp)) {
+            out.write((HEADER + "\n").getBytes(StandardCharsets.UTF_8));
+            out.write(all, newline + 1, all.length - newline - 1);
+        }
+        Files.move(temp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+    }
+
     /** How many decisions could not be written. */
     public synchronized int failures() {
         return failures;
@@ -66,6 +104,10 @@ public final class DecisionJournal {
             Path parent = file.toAbsolutePath().getParent();
             if (parent != null) {
                 Files.createDirectories(parent);
+            }
+            if (!headerChecked) {
+                headerChecked = true;
+                upgradeOlderHeader();
             }
             boolean needHeader = !Files.exists(file) || Files.size(file) == 0;
             try (BufferedWriter out = Files.newBufferedWriter(file, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND)) {

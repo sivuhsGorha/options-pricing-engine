@@ -142,4 +142,43 @@ class DecisionJournalTest {
         assertEquals(3.5, row.optionQuoteAgeSeconds(), 1e-6);
         assertTrue(Double.isNaN(row.optionSpreadBps()));
     }
+
+    private static final String OLD_10 = "at,action,expiry,strike,marketIv,referenceIv,edge,straddleSign,orders,reason";
+    private static final String OLD_13 = OLD_10 + ",spotAgeSeconds,chainAgeSeconds,optionQuoteAgeSeconds";
+
+    private static VolSpreadStrategy.Decision aHold() {
+        return new VolSpreadStrategy.Decision(T0, "HOLD", "within band", LocalDate.of(2026, 11, 13), 769.0, 0.14, 0.143, -0.003, 0,
+                List.of(), 1.2, 45.0, 3.5, 187.4);
+    }
+
+    @Test
+    void anOlderHeaderIsBroughtUpToDateOnceAndTheRowsUnderItAreKept(@TempDir Path dir) throws IOException {
+        for (String older : List.of(OLD_10, OLD_13)) {
+            Path file = dir.resolve("decisions-" + older.length() + ".csv");
+            Files.writeString(file, older + "\n2026-10-15T14:00:00Z,HOLD,2026-11-13,769.00,0.140000,0.143000,-0.003000,0,,legacy row\n", StandardCharsets.UTF_8);
+
+            DecisionJournal journal = new DecisionJournal(file);
+            journal.record(aHold());
+            journal.record(aHold());
+
+            List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
+            assertEquals(DecisionJournal.HEADER, lines.get(0), "the header names every column the new rows have");
+            assertEquals(4, lines.size(), "one header, the legacy row, and the two new rows: " + lines);
+            assertTrue(lines.get(1).endsWith("legacy row"), "the old row is untouched: " + lines.get(1));
+            assertEquals(1, lines.stream().filter(l -> l.startsWith("at,action")).count(), "the header is not repeated");
+            assertEquals(3, DecisionJournal.read(file).size(), "every row still reads");
+        }
+    }
+
+    @Test
+    void aFileThatDoesNotStartWithOneOfOurHeadersIsNeverRewritten(@TempDir Path dir) throws IOException {
+        Path file = dir.resolve("other.csv");
+        Files.writeString(file, "something,else\n1,2\n", StandardCharsets.UTF_8);
+
+        new DecisionJournal(file).record(aHold());
+
+        List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
+        assertEquals("something,else", lines.get(0), "a file we do not recognise keeps its first line");
+        assertEquals(3, lines.size());
+    }
 }
