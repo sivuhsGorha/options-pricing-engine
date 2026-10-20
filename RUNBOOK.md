@@ -21,6 +21,34 @@ Dashboard: http://127.0.0.1:8080 (sign in with `OPERATOR_PASSWORD`). WebSocket f
 Ready when the log prints `Options Trading Dashboard Live at:`; the surface calibrates afterwards in the
 background and the panel badge shows `LOADING` until it does.
 
+## Changing config.yaml
+
+The engine reads `config.yaml` once, at start, through a single-file mount (`./config.yaml:/app/config.yaml:ro`). After
+you edit it, **recreate the container**:
+
+```powershell
+docker compose up -d --force-recreate     # no rebuild; about a minute; then check the startup lines below
+```
+
+`docker compose restart` is not enough. Many editors save by writing a new file and swapping it in, which gives the host
+file a new identity while the container's mount still points at the old one, so a restart can start the engine on the
+**previous** contents. On 2026-10-20 the container showed an older copy of the file than the host after several edits, and
+a setting was nearly lost on the next restart. (A change to the code or the image needs `docker compose up -d --build`.)
+
+Check that a setting took effect from the startup lines, not from the file:
+
+| Setting | Startup line to look for |
+| :------ | :----------------------- |
+| `strategy.use_multi_leg: true` | `[STRATEGY] multi-leg orders are ON` |
+| `execution.limit_cushion_bps: 30` | `[EXECUTION] Limits are set 30 bps past the touch` |
+| `strategy.fair_vol_model` | `[FAIR VOL] EWMA realized-vol forecast reported beside each hold` |
+| any setting | `docker compose exec options-engine cat /app/config.yaml` shows what the container sees |
+
+Run `java -jar target/options-pricing-engine-1.0.0-SNAPSHOT.jar --check-config` first when you can: it reports every bad value at
+once, and an unknown key in a safety-relevant section such as `strategy` or `execution` is an error, not ignored. Edit the file from one place at a time: two sessions
+rewriting it on 2026-10-20 made a setting appear, vanish and reappear. `config.yaml` is in `.gitignore`, so a change to it
+is not in git; the backup (see Backup and recovery) is the only other copy.
+
 ## Health
 
 `GET /api/health` (session cookie or HMAC) returns:
