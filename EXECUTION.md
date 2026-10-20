@@ -358,14 +358,30 @@ ledger and Alpaca's own order list.
 | 20 Oct 13:33 | the same, at the touch | accepted by Alpaca (net limit 25.21), cancelled unfilled after 10 s | the multi-leg format works; the limit missed the market again |
 | 20 Oct 13:41 | the same with `limit_cushion_bps: 30` (limit 25.54) | **filled at a net 25.27**: call 12.07, put 13.20 | the first complete two-leg open |
 | 20 Oct 13:42 | the strategy's own close, 33 s later | call sold at 11.94, put at 13.30 | the close; the round trip cost $3.00 (25.27 paid, 25.24 received) |
+| 20 Oct 14:08 | one atomic multi-leg order (772 strike) | refused by the spread gate; nothing sent | |
+| 20 Oct 14:09 | the same, with the cushion | **filled at a net 24.59**: call 12.09, put 12.50; the engine booked exactly those leg prices | the leg-price fix works on a real fill; the dashboard was sampled 35 times while the legs were open (below) |
+| 20 Oct 14:09 | the strategy's close | the call sell timed out unfilled; the put sold at 12.46; the next step sold the lone call at 11.94, about 18 s later | the close is two separate orders and can leave a lone long leg for a few seconds; round trip -$19.00 (24.59 paid, 24.40 received) |
 
 **What this shows.** The path works end to end: the order manager, the Alpaca transport (single orders and one atomic multi-leg
 order), the fill ledger, the strategy's close, and the unwind of a failed leg. The safety gates held every time, and twice
 (an exit blocked by a spread gate, a request body mixed up between requests) the attempt found a real defect, now fixed.
 
-**What it does not show.** No edge: each straddle was bought with no signal and closed with none, and the +$16 and -$3 are drift
-and spread. Not seen: the option Greeks on the dashboard while a straddle was open (the window was about 33 s and no snapshot
-was taken), and a reconcile with the three positions open (the books matched Alpaca before and after). The engine books a
-leg at the fill price Alpaca reports for it only from the fix of 2026-10-20; the straddle above was booked 12.13 and 13.14
-against Alpaca's 12.07 and 13.20 (the same total). Another session sent a deliberately unfillable multi-leg order (limit 0.05)
-on 19 Oct at 14:49 UTC, cancelled, to check that Alpaca accepts the format.
+**What it does not show.** No edge: each straddle was bought with no signal and closed with none, and the +$16, -$3 and -$19
+are drift and spread. Nothing was observed on the reconcile line while the legs were open (the status was OK before and after
+and nothing halted).
+
+**Seen on the 14:09 run (the dashboard sampled every 1.5 s while the straddle was open, 35 samples over about 40 s).** The
+valuation marked both option legs at once (SVI volatility; call mark 10.72 delta 0.506, put mark 14.10 delta -0.494, each gamma
+0.0127 and vega 89.3 per share). The portfolio figures were those two legs added to the short 20 SPY: net delta -18.8, net gamma
+2.55, net vega 17,869 and net theta -14,623 per year (two contracts of 100 each), and the risk panel agreed with the valuation.
+The book notional counted the legs at the prices they were booked at (17,990.40). Once the put was sold the figures halved to
+the shares and the remaining call (net gamma 1.27, net vega 8,936).
+
+**Leg prices.** The straddle of 20 Oct 13:41 was booked 12.13 and 13.14 against Alpaca's 12.07 and 13.20 (the same total):
+the engine then split the net price itself. From the fix of 20 Oct the engine books each leg at the price Alpaca reports for
+it, and the 14:09 straddle was booked 12.09 and 12.50, the same as Alpaca's legs. Another session sent a deliberately
+unfillable multi-leg order (limit 0.05) on 19 Oct at 14:49 UTC, cancelled, to check that Alpaca accepts the format.
+
+**Still open from this.** The close is two orders, not one: a multi-leg sell is refused by the transport (Alpaca documents no
+credit-price convention), so a close can leave one leg for a few seconds, as it did at 14:09 (a long call, about 18 s). The
+cost of a round trip has been $3 and $19, set by the spread and by a few cents of drift between the two sets of fills.
