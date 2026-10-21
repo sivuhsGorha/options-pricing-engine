@@ -18,6 +18,8 @@ that account every minute. Binary-protocol gateway simulations that earlier vers
 decoder, a FIX encoder, a smart order router) were removed on 2026-10-10 because nothing used them. No latency
 figure is measured or claimed.
 
+**Case study:** [what was built, what running it live found, and what the evidence says about making money](docs/CASE_STUDY.md).
+
 ---
 
 ## What is implemented
