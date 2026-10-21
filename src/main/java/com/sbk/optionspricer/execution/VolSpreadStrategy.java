@@ -769,7 +769,8 @@ public final class VolSpreadStrategy {
             }
             if (quote.status() == MarketDataStatus.STALE || quote.status() == MarketDataStatus.UNAVAILABLE) {
                 lastEdgeProblem = leg + ": quote " + quote.status() + (quote.status() == MarketDataStatus.STALE
-                        ? String.format(Locale.ROOT, " (feed %d s old, limit %d s)", quote.derivedQuoteAgeMs() / 1000L, OptionQuoteSnapshots.STALE_AFTER_MS / 1000L)
+                        ? String.format(Locale.ROOT, " (feed %d s old, limit %d s)", quote.derivedQuoteAgeMs() / 1000L,
+                                com.sbk.optionspricer.market.StalenessPolicy.current().limitMs(quote.source(), MarketDataStatus.DELAYED) / 1000L)
                         : "");
                 return null;
             }

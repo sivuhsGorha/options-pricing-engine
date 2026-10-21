@@ -15,7 +15,7 @@ import java.util.Optional;
  */
 public final class OptionQuoteSnapshots {
 
-    /** Same window as a delayed spot source: the feed's own timestamp lags the market by design. */
+    /** The default window, the same as a delayed spot source (the feed's own timestamp lags the market by design); a source may have its own, see {@link StalenessPolicy}. */
     public static final long STALE_AFTER_MS = 120_000L;
     /** Standard US equity and ETF option contract. */
     public static final int STANDARD_EQUITY_MULTIPLIER = 100;
@@ -53,7 +53,7 @@ public final class OptionQuoteSnapshots {
             sourceTime = Instant.EPOCH;
         } else {
             ageMs = Math.max(0L, now.toEpochMilli() - asOf.toEpochMilli());
-            status = ageMs > STALE_AFTER_MS ? MarketDataStatus.STALE : MarketDataStatus.DELAYED;
+            status = ageMs > StalenessPolicy.current().limitMs(source, MarketDataStatus.DELAYED) ? MarketDataStatus.STALE : MarketDataStatus.DELAYED;
             sourceTime = asOf;
         }
         if (!twoSided) {

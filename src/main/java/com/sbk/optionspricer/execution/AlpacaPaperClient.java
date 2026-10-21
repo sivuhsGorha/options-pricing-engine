@@ -295,7 +295,8 @@ public final class AlpacaPaperClient {
         // DELAYED, not LIVE: the request names no feed, and the quotes this account gets come from Alpaca's indicative
         // options feed, which has not been shown to be the exchange's own real-time quote. Fresh enough to back an
         // order under the data-quality policy, but not claimed to be more than it is.
-        var status = ageMs > com.sbk.optionspricer.market.OptionQuoteSnapshots.STALE_AFTER_MS
+        var status = ageMs > com.sbk.optionspricer.market.StalenessPolicy.current()
+                .limitMs("ALPACA_INDICATIVE", com.sbk.optionspricer.market.MarketDataStatus.DELAYED)
                 ? com.sbk.optionspricer.market.MarketDataStatus.STALE
                 : com.sbk.optionspricer.market.MarketDataStatus.DELAYED;
         var contract = parsed.get();

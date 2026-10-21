@@ -59,6 +59,8 @@ public class AppCompositionRoot {
         System.out.println("[LEDGER] " + fillLedger.path() + ": " + positionTracker.replayedFills() + " fills replayed, "
                 + positionTracker.getPositions().values().stream().filter(p -> p.getQuantity() != 0).count() + " open positions");
         engine.setExposureSource(positionTracker::snapshotExposure);
+        com.sbk.optionspricer.market.StalenessPolicy.configure(
+                com.sbk.optionspricer.market.StalenessPolicy.fromEnvironment(com.sbk.optionspricer.config.EnvironmentConfigLoader::get));
         this.spotProvider = new LiveSpotProvider();
         this.marketAdapter = new LiveMarketSnapshotAdapter(spotProvider);
         double maxConcentration = config.getDouble("risk.max_concentration", maxNotional);

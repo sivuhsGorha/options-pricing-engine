@@ -73,6 +73,7 @@ Secrets and deployment settings come from the environment or a `.env` file in th
 | `LOG_FORMAT` | no (text) | `json` prints each console line as one JSON object; secrets are replaced by `***` in both formats |
 | `HEARTBEAT_INTERVAL_SECONDS` | no (30) | how often the heartbeat file is rewritten (a record that shows a stale one at start; it alerts no one by itself) |
 | `HEARTBEAT_STALE_MULTIPLIER` | no (3.0) | stale threshold is interval × multiplier (default 90 seconds) |
+| `STALE_LIMITS_SECONDS` | no | per-source staleness limits, `SOURCE=seconds,...` (sources: `POLYGON`, `FINNHUB`, `ALPHA_VANTAGE`, `MARKETSTACK`, `ALPACA_INDICATIVE` for option quotes). Defaults: 30 s for a LIVE quote, 120 s for a DELAYED one. The order gate keeps its own 120 s cap, so a longer limit changes the label, not what can trade |
 | `HEARTBEAT_URL` | no | an external watcher (e.g. a healthchecks.io check URL) pinged while the engine is alive; the service alerts your phone when the pings stop. Secret: never printed |
 | `HEARTBEAT_PING_SECONDS` | no (60) | how often the watcher is pinged |
 | `ALPACA_KEY_ID`, `ALPACA_SECRET` | only with `execution.transport: alpaca` | Alpaca paper-account keys; the client can only address `paper-api.alpaca.markets` |
