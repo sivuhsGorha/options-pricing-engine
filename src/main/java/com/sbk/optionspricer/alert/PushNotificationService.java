@@ -75,7 +75,9 @@ public final class PushNotificationService implements AutoCloseable {
         if (halt == null) return;
         // Check periodically or report when tripped
         Thread t = new Thread(() -> {
-            boolean previouslyHalted = halt.isHalted();
+            // Start from "not halted": a halt already on when this attaches, or tripped before this thread's first look, is a change and is
+            // reported; taking the state at that first look as the starting state would silently swallow it.
+            boolean previouslyHalted = false;
             while (!closed) {
                 try {
                     Thread.sleep(1000L);

@@ -164,4 +164,26 @@ class PushNotificationServiceTest {
             assertTrue(hook.bodies.get(0).contains("TRADING HALTED") && hook.bodies.get(0).contains("local 3, alpaca 0"), hook.bodies.get(0));
         }
     }
+
+    @Test
+    void aHaltThatIsAlreadyOnWhenTheMonitorAttachesIsStillReported() throws Exception {
+        // Found when this test's neighbour failed on a slower machine in CI: the monitor took "was it halted?" as its starting state inside
+        // its own thread, so a halt that happened before that first read was the starting state and was never reported.
+        TradingHalt halt = new TradingHalt();
+        halt.halt("book does not match the Alpaca account: SPY261120C00772000: local 3, alpaca 0");
+        try (FakeWebhook hook = new FakeWebhook(200);
+             PushNotificationService service = new PushNotificationService(null, hook.url(), Duration.ofMinutes(5), null)) {
+
+            service.monitorTradingHalt(halt);
+
+            long deadline = System.currentTimeMillis() + 5_000;
+            while (hook.bodies.isEmpty() && System.currentTimeMillis() < deadline) {
+                Thread.sleep(50);
+            }
+            assertEquals(1, hook.bodies.size(), "the standing halt was reported once");
+            assertTrue(hook.bodies.get(0).contains("TRADING HALTED") && hook.bodies.get(0).contains("local 3, alpaca 0"), hook.bodies.get(0));
+            Thread.sleep(2_500);
+            assertEquals(1, hook.bodies.size(), "and not again on every poll while it stays on");
+        }
+    }
 }
