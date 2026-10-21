@@ -151,6 +151,7 @@ public final class VolSpreadStrategy {
     private final double dividendYield;
     private final Params params;
     private volatile Clock clock;
+    private final com.sbk.optionspricer.market.MarketCalendar marketCalendar = new com.sbk.optionspricer.market.MarketCalendar();
 
     /** The chain's own underlying price may differ from the live spot by at most this fraction before the chain is distrusted. */
     static final double MAX_SPOT_DISAGREEMENT = 0.10;
@@ -338,8 +339,8 @@ public final class VolSpreadStrategy {
      * From then on the ordinary {@link #step()} manages it (hedge, hold, close), so the position is booked where the
      * reconciliation against the venue can see it. Without {@code confirm} it only reports the legs and the debit.
      *
-     * <p>Refused outside US regular hours (09:30 to 16:00 New York, Monday to Friday; exchange holidays and early closes are
-     * left to the stale-quote gate and the venue), when the strategy is short-only, with a stale spot, or while a straddle is
+     * <p>Refused outside US regular hours (09:30 to 16:00 New York on a trading day, per the market calendar: exchange holidays
+     * and the 13:00 early closes included), when the strategy is short-only, with a stale spot, or while a straddle is
      * already open. A refusal sends nothing.
      */
     public synchronized Decision supervisedBuyStraddle(boolean confirm) {
@@ -348,10 +349,8 @@ public final class VolSpreadStrategy {
         LocalDate today = LocalDate.ofInstant(now, ZoneOffset.UTC);
         List<String> orders = new ArrayList<>();
         java.time.ZonedDateTime ny = java.time.ZonedDateTime.ofInstant(now, NEW_YORK);
-        java.time.LocalTime open = java.time.LocalTime.of(9, 30), close = java.time.LocalTime.of(16, 0);
-        boolean weekend = ny.getDayOfWeek() == java.time.DayOfWeek.SATURDAY || ny.getDayOfWeek() == java.time.DayOfWeek.SUNDAY;
-        if (weekend || ny.toLocalTime().isBefore(open) || !ny.toLocalTime().isBefore(close)) {
-            return supervisedRefusal(now, "outside US regular trading hours (09:30-16:00 New York, Monday to Friday): it is "
+        if (!marketCalendar.isMarketOpen(now)) {
+            return supervisedRefusal(now, "outside US regular trading hours (09:30-16:00 New York on a trading day, 13:00 on an early close): it is "
                     + ny.toLocalDate() + " " + ny.toLocalTime().withNano(0) + " there");
         }
         if (params.allowedSide() == AllowedSide.SHORT_ONLY) {

@@ -12,7 +12,8 @@ import java.util.function.Supplier;
 /**
  * What the phone hears from the engine without anyone asking: a message when it starts (an unexpected one means it restarted: a
  * reboot, a crash, a sleeping laptop that woke), a summary shortly after the US market opens, and one shortly after it closes, on
- * weekdays, once each. There is no market calendar, so an exchange holiday still gets its two summaries, saying the market is stale.
+ * weekdays, once each. Given a market calendar, an exchange holiday gets none and an early close moves the close summary; without one an
+ * exchange holiday still gets its two summaries, saying the market is stale.
  * A summary that cannot be built is reported as unavailable, not skipped: its absence would otherwise be the only sign.
  */
 public final class StatusDigest implements AutoCloseable {
@@ -33,7 +34,16 @@ public final class StatusDigest implements AutoCloseable {
     private Thread worker;
     private volatile boolean closed;
 
+    private final com.sbk.optionspricer.market.MarketCalendar calendar;
+
     public StatusDigest(Notifier notifier, Supplier<String> openBody, Supplier<String> closeBody, Clock clock) {
+        this(notifier, openBody, closeBody, clock, null);
+    }
+
+    /** With a calendar, an exchange holiday gets no summaries and an early-close day gets its close summary ten minutes after the real close. */
+    public StatusDigest(Notifier notifier, Supplier<String> openBody, Supplier<String> closeBody, Clock clock,
+                        com.sbk.optionspricer.market.MarketCalendar calendar) {
+        this.calendar = calendar;
         if (notifier == null || openBody == null || closeBody == null || clock == null) {
             throw new IllegalArgumentException("notifier, both bodies and clock are required");
         }
@@ -47,9 +57,13 @@ public final class StatusDigest implements AutoCloseable {
         if (!now.toLocalTime().isBefore(OPEN_AT)) {
             openSentOn = now.toLocalDate();
         }
-        if (!now.toLocalTime().isBefore(CLOSE_AT)) {
+        if (!now.toLocalTime().isBefore(closeAt(now.toLocalDate()))) {
             closeSentOn = now.toLocalDate();
         }
+    }
+
+    private LocalTime closeAt(LocalDate date) {
+        return calendar == null ? CLOSE_AT : calendar.closeTime(date).plusMinutes(10);
     }
 
     public void sendStartup(String body) {
@@ -64,11 +78,14 @@ public final class StatusDigest implements AutoCloseable {
         }
         LocalDate today = now.toLocalDate();
         LocalTime time = now.toLocalTime();
+        if (calendar != null && !calendar.isTradingDay(today)) {
+            return;
+        }
         if (!today.equals(openSentOn) && within(time, OPEN_AT)) {
             openSentOn = today;
             notifier.send("MARKET OPEN", bodyOf(openBody), "default", "bell");
         }
-        if (!today.equals(closeSentOn) && within(time, CLOSE_AT)) {
+        if (!today.equals(closeSentOn) && within(time, closeAt(today))) {
             closeSentOn = today;
             notifier.send("MARKET CLOSE", bodyOf(closeBody), "default", "checkered_flag");
         }

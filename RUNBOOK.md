@@ -379,10 +379,10 @@ log, for example "Options trading halted: book does not match the Alpaca account
 topic or the URL.
 
 **What sends nothing:** a crash, a power loss, a sleeping laptop or a stopped Docker Desktop, because the engine that would send the alert is the thing
-that is down. Catching that needs a check from outside the machine (a heartbeat the engine pings and a service that alerts when the pings stop); none is
-set up. A halt tripped while the phone alert was off is found only by reading `/api/control` or the log, which is how the halt of 2026-10-20 15:22
-stayed on overnight. `ALERT_STALE_MINUTES` is read but nothing uses it yet, and there is no market-data-stale alert: with no market calendar it would
-fire every night, weekend and close.
+that is down. Catching that needs a check from outside the machine: the engine pings `HEARTBEAT_URL` (a free healthchecks.io check, say) every minute and that service
+alerts when the pings stop. It works only once you create the check and put its URL in `.env`; until then none is set up. A halt tripped while the phone alert was off is found only by reading `/api/control` or the log, which is how the halt of 2026-10-20 15:22
+stayed on overnight. `ALERT_STALE_MINUTES` is read but nothing uses it yet, and there is no market-data-stale alert. The calendar now exists (holidays, 13:00 early closes), so one could be built;
+it has not been.
 
 ## Downtime banner
 

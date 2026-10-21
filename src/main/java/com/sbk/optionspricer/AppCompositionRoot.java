@@ -255,7 +255,7 @@ public class AppCompositionRoot {
                 } catch (java.io.IOException e) {
                     return status.get();
                 }
-            }, java.time.Clock.systemUTC());
+            }, java.time.Clock.systemUTC(), new com.sbk.optionspricer.market.MarketCalendar());
             statusDigest.sendStartup(status.get() + "\nLast run: " + heartbeatMonitor.describePreviousRun());
             statusDigest.start();
             System.out.println("[ALERT] Status messages to the phone: on start, after the US open and after the close on weekdays, and on every trade");

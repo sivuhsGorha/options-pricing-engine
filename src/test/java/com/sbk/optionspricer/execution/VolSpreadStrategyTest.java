@@ -430,6 +430,20 @@ class VolSpreadStrategyTest {
     private static final Instant SATURDAY = Instant.parse("2026-10-10T15:00:00Z");
 
     @Test
+    void aSupervisedTestIsRefusedOnAnExchangeHolidayAndAfterAnEarlyClose() {
+        for (String instant : new String[] {"2026-11-26T15:00:00Z" /* Thanksgiving 10:00 */, "2026-11-27T19:30:00Z" /* 14:30, after the 13:00 close */}) {
+            PositionTracker tracker = new PositionTracker(FillRecorder.NONE);
+            VolSpreadStrategy s = strategy(tracker, new FlatChains(0.20, TODAY), 0.20, null, Clock.fixed(Instant.parse(instant), ZoneOffset.UTC));
+
+            VolSpreadStrategy.Decision d = s.supervisedBuyStraddle(true);
+
+            assertEquals("SUPERVISED_REFUSED", d.action(), instant + ": " + d.summary());
+            assertTrue(d.reason().contains("trading hours"), d.reason());
+            assertTrue(tracker.getPositions().isEmpty());
+        }
+    }
+
+    @Test
     void aSupervisedDryRunNamesTheLegsAndTheDebitAndSendsNothing() {
         PositionTracker tracker = new PositionTracker(FillRecorder.NONE);
         VolSpreadStrategy s = strategy(tracker, new FlatChains(0.20, TODAY), 0.20, null, Clock.fixed(NOW, ZoneOffset.UTC));

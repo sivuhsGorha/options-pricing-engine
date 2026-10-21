@@ -65,6 +65,43 @@ class StatusDigestTest {
         assertEquals(3, sent.size(), "a new day, a new open summary");
     }
 
+    private StatusDigest calendarDigest(MovableClock clock) {
+        return new StatusDigest((title, message, priority, tags) -> { sent.add(new Sent(title, message, priority)); return true; },
+                () -> "open body", () -> "close body", clock, new com.sbk.optionspricer.market.MarketCalendar());
+    }
+
+    @Test
+    void anExchangeHolidayGetsNoSummariesWithACalendar() {
+        MovableClock clock = new MovableClock("2026-11-26T14:00:00Z"); // Thanksgiving, 09:00 in New York
+        StatusDigest digest = calendarDigest(clock);
+
+        clock.at("2026-11-26T14:40:00Z");
+        digest.tick();
+        clock.at("2026-11-26T21:15:00Z");
+        digest.tick();
+
+        assertTrue(sent.isEmpty(), "the market is shut: " + titles());
+    }
+
+    @Test
+    void anEarlyCloseDaySendsTheCloseSummaryTenMinutesAfterOneOClock() {
+        MovableClock clock = new MovableClock("2026-11-27T14:00:00Z"); // the day after Thanksgiving, 09:00 in New York
+        StatusDigest digest = calendarDigest(clock);
+
+        clock.at("2026-11-27T14:40:00Z");
+        digest.tick();
+        assertEquals(1, sent.size(), "the open summary: " + titles());
+
+        clock.at("2026-11-27T18:05:00Z"); // 13:05
+        digest.tick();
+        assertEquals(1, sent.size(), "ten minutes after the close, not before");
+
+        clock.at("2026-11-27T18:11:00Z"); // 13:11
+        digest.tick();
+        assertEquals(2, sent.size(), titles().toString());
+        assertTrue(sent.get(1).title().contains("CLOSE"));
+    }
+
     @Test
     void thereIsNothingAtTheWeekend() {
         MovableClock clock = new MovableClock("2026-10-17T14:00:00Z"); // Saturday

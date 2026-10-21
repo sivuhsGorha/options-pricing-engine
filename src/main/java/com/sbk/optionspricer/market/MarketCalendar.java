@@ -24,6 +24,7 @@ public final class MarketCalendar {
     private static final ZoneId NYSE_ZONE = ZoneId.of("America/New_York");
     private static final LocalTime MARKET_OPEN = LocalTime.of(9, 30);
     private static final LocalTime MARKET_CLOSE = LocalTime.of(16, 0);
+    private static final LocalTime EARLY_CLOSE = LocalTime.of(13, 0);
 
     private final Set<LocalDate> holidays;
 
@@ -47,7 +48,14 @@ public final class MarketCalendar {
      * updated annually or fetched from an API.
      */
     private void initializeHolidays() {
-        int year = LocalDate.now().getYear();
+        // The engine runs for weeks: the year it started in is not enough across New Year, so the neighbours are loaded too.
+        int thisYear = LocalDate.now().getYear();
+        for (int year = thisYear - 1; year <= thisYear + 1; year++) {
+            initializeHolidays(year);
+        }
+    }
+
+    private void initializeHolidays(int year) {
 
         // New Year's Day
         addHolidayIfWeekday(LocalDate.of(year, 1, 1));
@@ -78,6 +86,18 @@ public final class MarketCalendar {
 
         // Christmas Day (December 25, observed on Friday if Saturday, Monday if Sunday)
         addHoliday(observedHoliday(LocalDate.of(year, 12, 25)));
+    }
+
+    /** The close on a date: 13:00 on the early-close days (the day after Thanksgiving, Christmas Eve, the day before Independence Day), else 16:00. */
+    public LocalTime closeTime(LocalDate date) {
+        if (holidays.contains(date) || date.getDayOfWeek() == DayOfWeek.SATURDAY || date.getDayOfWeek() == DayOfWeek.SUNDAY) {
+            return MARKET_CLOSE;
+        }
+        LocalDate thanksgiving = monthNthWeekday(date.getYear(), 11, DayOfWeek.THURSDAY, 4);
+        boolean dayAfterThanksgiving = thanksgiving != null && date.equals(thanksgiving.plusDays(1));
+        boolean christmasEve = date.getMonthValue() == 12 && date.getDayOfMonth() == 24;
+        boolean julyThird = date.getMonthValue() == 7 && date.getDayOfMonth() == 3;
+        return dayAfterThanksgiving || christmasEve || julyThird ? EARLY_CLOSE : MARKET_CLOSE;
     }
 
     private void addHolidayIfWeekday(LocalDate date) {
@@ -114,7 +134,7 @@ public final class MarketCalendar {
         }
 
         // Check if it's within trading hours
-        return !time.isBefore(MARKET_OPEN) && time.isBefore(MARKET_CLOSE);
+        return !time.isBefore(MARKET_OPEN) && time.isBefore(closeTime(date));
     }
 
     /**
@@ -138,15 +158,13 @@ public final class MarketCalendar {
         LocalDate date = nyTime.toLocalDate();
         LocalTime time = nyTime.toLocalTime();
 
-        // If it's already past market close, start from tomorrow
-        if (time.isAfter(MARKET_CLOSE) || isMarketClosed(instant)) {
+        // Today still counts when the bell has not rung yet (and the day is a trading day); otherwise start from tomorrow
+        if (!(isTradingDay(date) && time.isBefore(MARKET_OPEN))) {
             date = date.plusDays(1);
         }
 
         // Find the next weekday that's not a holiday
-        while (date.getDayOfWeek() == DayOfWeek.SATURDAY
-                || date.getDayOfWeek() == DayOfWeek.SUNDAY
-                || holidays.contains(date)) {
+        while (!isTradingDay(date)) {
             date = date.plusDays(1);
         }
 
@@ -164,19 +182,16 @@ public final class MarketCalendar {
         LocalDate date = nyTime.toLocalDate();
         LocalTime time = nyTime.toLocalTime();
 
-        // If it's already past market close, start from tomorrow
-        if (time.isAfter(MARKET_CLOSE) || isMarketClosed(instant)) {
+        // Today's close counts while it has not passed (open or before the bell on a trading day); otherwise start from tomorrow
+        if (!(isTradingDay(date) && time.isBefore(closeTime(date)))) {
             date = date.plusDays(1);
         }
 
-        // Find the next weekday that's not a holiday
-        while (date.getDayOfWeek() == DayOfWeek.SATURDAY
-                || date.getDayOfWeek() == DayOfWeek.SUNDAY
-                || holidays.contains(date)) {
+        while (!isTradingDay(date)) {
             date = date.plusDays(1);
         }
 
-        return ZonedDateTime.of(date, MARKET_CLOSE, NYSE_ZONE).toInstant();
+        return ZonedDateTime.of(date, closeTime(date), NYSE_ZONE).toInstant();
     }
 
     /**
@@ -291,6 +306,10 @@ public final class MarketCalendar {
      * @param date the date to check
      * @return true if it's a holiday
      */
+    public boolean isTradingDay(LocalDate date) {
+        return date.getDayOfWeek() != DayOfWeek.SATURDAY && date.getDayOfWeek() != DayOfWeek.SUNDAY && !holidays.contains(date);
+    }
+
     public boolean isHoliday(LocalDate date) {
         return holidays.contains(date);
     }
