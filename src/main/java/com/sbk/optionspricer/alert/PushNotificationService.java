@@ -3,6 +3,7 @@ package com.sbk.optionspricer.alert;
 import com.sbk.optionspricer.config.EnvironmentConfigLoader;
 import com.sbk.optionspricer.execution.TradingHalt;
 import com.sbk.optionspricer.market.MarketDataStatus;
+import com.sbk.optionspricer.util.SafeErrorReporting;
 
 import java.io.IOException;
 import java.net.URI;
@@ -157,7 +158,7 @@ public final class PushNotificationService implements AutoCloseable {
                 System.err.println("[ALERT] ntfy alert not delivered: interrupted");
             } catch (IOException | RuntimeException e) {
                 // the topic is not printed: a public topic is readable by anyone who knows its name
-                System.err.println("[ALERT] ntfy alert not delivered: " + e.getClass().getSimpleName());
+                System.err.println("[ALERT] ntfy alert not delivered: " + SafeErrorReporting.errorTypeOnly(e));
             }
         }
 
@@ -182,7 +183,7 @@ public final class PushNotificationService implements AutoCloseable {
                 System.err.println("[ALERT] webhook alert not delivered: interrupted");
             } catch (IOException | RuntimeException e) {
                 // the URL is not printed (it usually carries a secret token), and neither is the exception text, which can quote it
-                System.err.println("[ALERT] webhook alert not delivered: " + e.getClass().getSimpleName());
+                System.err.println("[ALERT] webhook alert not delivered: " + SafeErrorReporting.errorTypeOnly(e));
             }
         }
 

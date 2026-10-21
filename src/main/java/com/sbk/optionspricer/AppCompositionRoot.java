@@ -34,6 +34,7 @@ public class AppCompositionRoot {
     public final com.sbk.optionspricer.execution.VolSpreadStrategy volSpreadStrategy;
     public final com.sbk.optionspricer.data.CompressedChainSnapshotRecorder chainRecorder;
     public final com.sbk.optionspricer.alert.PushNotificationService pushNotifier;
+    public final com.sbk.optionspricer.core.HeartbeatMonitor heartbeatMonitor;
 
     public AppCompositionRoot() throws Exception {
         this.config = new ConfigManager();
@@ -66,6 +67,9 @@ public class AppCompositionRoot {
         com.sbk.optionspricer.execution.TradingHalt tradingHalt = new com.sbk.optionspricer.execution.TradingHalt();
         this.pushNotifier = new com.sbk.optionspricer.alert.PushNotificationService();
         pushNotifier.monitorTradingHalt(tradingHalt);
+
+        // Heartbeat monitor to detect crashes, power loss, or laptop standby
+        this.heartbeatMonitor = new com.sbk.optionspricer.core.HeartbeatMonitor();
         // Where orders go: the in-process simulator, or an Alpaca paper account (the client can only address the
         // paper endpoint). With Alpaca, the book is reconciled with the account at start and every minute.
         String transportName = config.getString("execution.transport", "paper");
@@ -256,6 +260,9 @@ public class AppCompositionRoot {
             statusDigest.start();
             System.out.println("[ALERT] Status messages to the phone: on start, after the US open and after the close on weekdays, and on every trade");
         }
+
+        // Start heartbeat monitor after everything else is initialized
+        heartbeatMonitor.start();
     }
 
     /** One short block for the phone: whether trading is on, whether the books agree with Alpaca, the positions, the last decision and the P&L. */
@@ -353,6 +360,9 @@ public class AppCompositionRoot {
         }
         if (pushNotifier != null) {
             step("push notifications", pushNotifier::close);
+        }
+        if (heartbeatMonitor != null) {
+            step("heartbeat monitor", heartbeatMonitor::close);
         }
         step("engine", harness::stop);
         System.out.println("[SHUTDOWN] done");
