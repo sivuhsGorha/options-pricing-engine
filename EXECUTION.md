@@ -393,3 +393,26 @@ Alpaca accepted the order and did not fill it. The path is proven on one clean f
 
 **Costs so far.** The round trips cost $3 (13:41), $19 (14:09), $9 (14:38, closed by the fall-back) and $9 (14:43, atomic). They are
 the bid-ask spread and a few cents of drift between the fills, and they say nothing about edge.
+
+### 2026-10-20 afternoon: the first trade the strategy chose itself, and a halt it should not have had
+
+After the trade band was lowered to 0.50 vol points and the size raised to 3 contracts (15:05 UTC), the strategy opened a position on its
+own signal for the first time. Figures are from the decision journal, the ledger and Alpaca's order list.
+
+| When (UTC) | What happened | Detail |
+| :--------- | :------------ | :----- |
+| 15:13:58 | `BUY_STRADDLE` 3 x the 772 call and put | the market 13.58% against the SSVI reference 14.19%: an edge of -0.62 vol points, beyond the band and the cost hurdle. One atomic multi-leg order, limit 24.50, **filled at a net 24.46** (call 11.89, put 12.57), $7,338 for three |
+| 15:22:28 | `CLOSE`, edge reverted inside half the band | the atomic close (limit -24.54) was accepted and cancelled unfilled after 10 s |
+| 15:22:42 and :44 | the fall-back sold the legs | call 3 at 12.32, put 3 at 12.18: a net 24.50, **+$12.00** over the 8 minutes |
+| 15:22:43 | **a false halt** | the minute's reconciliation read the books between Alpaca's fill of the call sale (15:22:42) and the engine's booking of it (15:22:43.317): local 3, alpaca 0. Trading was halted for the rest of the session |
+
+**What it shows.** The whole chain ran on a signal and not an operator: the edge computed against the surface, the cost-aware hurdle, an atomic entry
+at three times the old size, the strategy's own exit, and the fall-back when the atomic close did not fill. The result is $12 on one trade, which is a
+sample of one and well inside the noise of the spread. The atomic close missed again by a few cents (it is priced at the indicative bids, which sit a
+little above Alpaca's fills) and the fall-back closed the position, so for now the leg-by-leg path is the one that actually closes.
+
+**The bug.** An order is filled at Alpaca before the engine books it, and the reconciliation read the engine's book and then Alpaca's positions without
+regard to that. It found a difference that existed for about a second, and a halt waits for an operator, so one false positive cost about 4.5 hours of the
+session (and nothing else: no position was open at the time and the books agreed). The reconciliation now holds the order manager's lock while it
+compares, so it can only read between orders. It was found on reading the control state the next morning: the halt had written `[ALERT][URGENT] TRADING HALTED` to the
+log, and nobody was reading the log.
