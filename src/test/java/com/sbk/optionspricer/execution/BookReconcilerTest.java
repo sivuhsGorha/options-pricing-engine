@@ -111,4 +111,55 @@ class BookReconcilerTest {
         assertTrue(r.message().contains("HTTP 403: forbidden."), r.message());
         assertFalse(halt.isHalted());
     }
+
+    /**
+     * Found live on 2026-10-20 at 15:22:43: the strategy's close sold 3 calls, Alpaca filled the sale at 15:22:42, the engine booked it
+     * at 15:22:43.317, and the minute's reconciliation read the two books in between: local 3, alpaca 0. It halted trading, and the
+     * halt stayed on for the rest of the session although the books agreed a second later. An order is in flight between Alpaca
+     * filling it and the engine booking it, and a reconciliation must not read the books then.
+     */
+    @Test
+    void aReconciliationWaitsForAnOrderInFlightAndNeverSeesAHalfBookedFill() throws Exception {
+        PositionTracker tracker = book(10, 3); // the engine still holds the 3 calls: the sale is not booked yet
+        FakeAlpaca fake = new FakeAlpaca().positions(FakeAlpaca.positionJson("SPY", "long", "10", "us_equity", "777.1")); // Alpaca: the calls are sold
+        TradingHalt halt = new TradingHalt();
+        Object orderLock = new Object();
+        BookReconciler reconciler = reconciler(fake, tracker, halt);
+        reconciler.serializeWith(orderLock);
+
+        java.util.concurrent.CountDownLatch inFlight = new java.util.concurrent.CountDownLatch(1);
+        Thread order = new Thread(() -> {
+            synchronized (orderLock) {
+                inFlight.countDown();
+                try {
+                    Thread.sleep(300);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                tracker.applyFill(new PositionTracker.ExecutionFill(CALL, -3, 100, 12.32)); // the booking, after Alpaca's fill
+            }
+        });
+        order.start();
+        assertTrue(inFlight.await(2, java.util.concurrent.TimeUnit.SECONDS));
+
+        BookReconciler.Result r = reconciler.reconcile();
+        order.join(2000);
+
+        assertEquals("OK", r.status(), "read after the booking, not between the fill and the booking: " + r.message());
+        assertFalse(halt.isHalted(), "a fill that is merely in flight is not a mismatch");
+    }
+
+    @Test
+    void aRealMismatchIsStillCaughtWhenNoOrderIsInFlight() {
+        PositionTracker tracker = book(10, 3);
+        FakeAlpaca fake = new FakeAlpaca().positions(FakeAlpaca.positionJson("SPY", "long", "10", "us_equity", "777.1"));
+        TradingHalt halt = new TradingHalt();
+        BookReconciler reconciler = reconciler(fake, tracker, halt);
+        reconciler.serializeWith(new Object());
+
+        BookReconciler.Result r = reconciler.reconcile();
+
+        assertEquals("MISMATCH", r.status());
+        assertTrue(halt.isHalted());
+    }
 }

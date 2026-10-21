@@ -227,6 +227,7 @@ public class AppCompositionRoot {
                 () -> volSpreadStrategy.lastDecision().map(com.sbk.optionspricer.execution.VolSpreadStrategy.Decision::summary).orElse(null));
 
         if (bookReconciler != null) {
+            bookReconciler.serializeWith(orderManager); // never read the books between an order's fill at Alpaca and its booking
             // The first reconciliation runs before any order can be placed; a mismatch halts trading from the start.
             BookReconciler.Result first = bookReconciler.reconcile();
             System.out.println("[RECONCILE] " + first.status() + ": " + first.message());

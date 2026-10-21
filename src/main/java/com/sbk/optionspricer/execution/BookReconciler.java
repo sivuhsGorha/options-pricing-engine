@@ -31,6 +31,7 @@ public final class BookReconciler implements AutoCloseable {
     private final Clock clock;
 
     private volatile Result last;
+    private volatile Object orderLock;
     private String haltedFor;
     private Thread worker;
     private volatile boolean closed;
@@ -46,8 +47,27 @@ public final class BookReconciler implements AutoCloseable {
         this.clock = clock;
     }
 
+    /**
+     * Reads the books only while no order is in flight, by taking this lock (the order manager's own, which every order holds from
+     * submission to booking). An order is filled at Alpaca before the engine books it; a reconciliation that reads between the two
+     * sees a difference that is not real, and halts trading for it (seen live, 2026-10-20).
+     */
+    public void serializeWith(Object lock) {
+        this.orderLock = lock;
+    }
+
     /** Reconciles now, on the calling thread. */
     public synchronized Result reconcile() {
+        Object lock = orderLock;
+        if (lock == null) {
+            return reconcileNow();
+        }
+        synchronized (lock) {
+            return reconcileNow();
+        }
+    }
+
+    private Result reconcileNow() {
         Instant now = clock.instant();
         Map<String, Integer> local = new TreeMap<>();
         for (Map.Entry<String, PortfolioPosition> e : tracker.getPositions().entrySet()) {
