@@ -67,6 +67,11 @@ public class Main {
             System.exit(runChainReplay(args.length > 1 ? Double.parseDouble(args[1]) : 0.04));
             return;
         }
+        if (args.length > 0 && "--spread-study".equals(args[0])) {
+            System.exit(runSpreadStudy(args.length > 1 ? Double.parseDouble(args[1]) : 0.05, args.length > 2 ? Double.parseDouble(args[2]) : 0.03,
+                    args.length > 3 ? Double.parseDouble(args[3]) : 5.0));
+            return;
+        }
         if (args.length > 0 && "--vrp-study".equals(args[0])) {
             System.exit(runVrpStudy(java.nio.file.Path.of(args.length > 1 ? args[1] : "data/historical/VIX_History.csv")));
             return;
@@ -235,6 +240,127 @@ public class Main {
         System.out.println("[HISTORY] account cannot write uncovered options (Alpaca refuses them). Early 2024 to now is one market and about 2.7 years, with American-style exercise and");
         System.out.println("[HISTORY] dividends ignored. It says whether the premium survives costs on real option prices, and nothing about the future.");
         return 0;
+    }
+
+    /** Fewest monthly trades worth summarising. */
+    static final int SPREAD_STUDY_MIN_TRADES = 12;
+    /** The most one spread may lose and still be called affordable: 1% of the paper account's $100,000. */
+    static final double SPREAD_STUDY_AFFORDABLE_LOSS = 1_000.0;
+
+    public static int runSpreadStudy(double costPerLeg, double distance, double width) {
+        com.sbk.optionspricer.execution.AlpacaPaperClient client;
+        try {
+            client = com.sbk.optionspricer.execution.AlpacaPaperClient.fromEnv();
+        } catch (RuntimeException e) {
+            System.err.println("[SPREADS] Cannot reach Alpaca: " + e.getMessage());
+            System.err.println("[SPREADS] It never invents prices. Put ALPACA_KEY_ID and ALPACA_SECRET in .env and run it from the project folder.");
+            return 2;
+        }
+        return runSpreadStudy(start -> client.dailyBarsFrom(REPLAY_SYMBOL, start).stream()
+                        .map(b -> new com.sbk.optionspricer.volatility.VrpStudy.Close(b.date(), b.close())).toList(),
+                (symbols, entry) -> {
+                    try {
+                        Thread.sleep(150); // a polite pace for the data API
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                    var bars = client.optionDailyBars(symbols, entry, entry.plusDays(1));
+                    double[] prices = new double[symbols.size()];
+                    for (int i = 0; i < prices.length; i++) {
+                        Double c = bars.getOrDefault(symbols.get(i), java.util.Map.of()).get(entry);
+                        if (c == null) {
+                            return java.util.Optional.<double[]>empty();
+                        }
+                        prices[i] = c;
+                    }
+                    return java.util.Optional.of(prices);
+                }, costPerLeg, distance, width);
+    }
+
+    /**
+     * Sells a put credit spread and an iron condor on a calendar at real daily option closes (monthly expiries bought 30 days ahead, and every Friday 28 days
+     * ahead), holds to expiry, and prints the results with the pass rule applied: a positive mean after costs, a t-statistic above 2, a positive mean in every
+     * year, and a worst trade within 1% of the account. Stops without a table when the closes or prices cannot be had.
+     */
+    public static int runSpreadStudy(java.util.function.Function<java.time.LocalDate, java.util.List<com.sbk.optionspricer.volatility.VrpStudy.Close>> closesSource,
+                                     com.sbk.optionspricer.volatility.SpreadHistoryStudy.Pricer pricer, double costPerLeg, double distance, double width) {
+        System.out.println("=========================================================================");
+        System.out.println("        BLACKTHORN STERLING  SPREAD HISTORY ON REAL OPTION PRICES        ");
+        System.out.println("=========================================================================");
+        var kinds = java.util.List.of(com.sbk.optionspricer.volatility.SpreadHistoryStudy.Kind.PUT_SPREAD, com.sbk.optionspricer.volatility.SpreadHistoryStudy.Kind.IRON_CONDOR);
+        java.util.Map<com.sbk.optionspricer.volatility.SpreadHistoryStudy.Kind, com.sbk.optionspricer.volatility.SpreadHistoryStudy.Result> monthly = new java.util.LinkedHashMap<>();
+        java.util.Map<com.sbk.optionspricer.volatility.SpreadHistoryStudy.Kind, com.sbk.optionspricer.volatility.SpreadHistoryStudy.Result> weekly = new java.util.LinkedHashMap<>();
+        try {
+            java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneOffset.UTC);
+            var closes = closesSource.apply(java.time.LocalDate.of(2024, 1, 1)).stream()
+                    .filter(c -> c.date().isBefore(today) && Double.isFinite(c.close()) && c.close() > 0.0).toList();
+            java.time.LocalDate first = closes.stream().map(com.sbk.optionspricer.volatility.VrpStudy.Close::date).min(java.util.Comparator.naturalOrder()).orElseThrow();
+            java.time.LocalDate last = closes.stream().map(com.sbk.optionspricer.volatility.VrpStudy.Close::date).max(java.util.Comparator.naturalOrder()).orElseThrow();
+            for (var kind : kinds) {
+                monthly.put(kind, com.sbk.optionspricer.volatility.SpreadHistoryStudy.simulate(closes, kind,
+                        com.sbk.optionspricer.volatility.OptionHistoryStudy.thirdFridays(first.plusDays(31), last), 30, distance, width, pricer));
+                weekly.put(kind, com.sbk.optionspricer.volatility.SpreadHistoryStudy.simulate(closes, kind,
+                        com.sbk.optionspricer.volatility.OptionHistoryStudy.fridays(first.plusDays(29), last), 28, distance, width, pricer));
+            }
+        } catch (RuntimeException e) {
+            System.err.println("[SPREADS] Cannot get the closes or the option prices: " + e.getMessage());
+            System.err.println("[SPREADS] It never invents them. Put ALPACA_KEY_ID and ALPACA_SECRET in .env and run it from the project folder.");
+            return 2;
+        }
+        for (var kind : kinds) {
+            if (monthly.get(kind).trades().size() < SPREAD_STUDY_MIN_TRADES) {
+                System.err.println("[SPREADS] Only " + monthly.get(kind).trades().size() + " monthly " + kind + " trades have prices; at least " + SPREAD_STUDY_MIN_TRADES
+                        + " are needed. It never invents the rest.");
+                return 2;
+            }
+        }
+        var f = java.util.Locale.ROOT;
+        System.out.printf(f, "[SPREADS] SPY, sold %.0f%% out of the money with a $%.0f width, at the day's closing prices, held to expiry. Costs assumed: $%.2f a share on every leg, once.%n",
+                100 * distance, width, costPerLeg);
+        for (var kind : kinds) {
+            String name = kind == com.sbk.optionspricer.volatility.SpreadHistoryStudy.Kind.PUT_SPREAD ? "Put credit spread" : "Iron condor";
+            printSpreadSchedule(name + ", monthly", "(third Friday, sold 30 days before; the trades do not overlap)", monthly.get(kind), costPerLeg, 1.0);
+            printSpreadSchedule(name + ", weekly", "(every Friday, sold 28 days before; four are open at once, so the t-statistic uses a quarter of the trades)", weekly.get(kind), costPerLeg, 4.0);
+        }
+        System.out.println("\nBy year (monthly trades, mean result per spread in dollars):");
+        System.out.println("| Year | Put spread | Iron condor |");
+        System.out.println("| ---: | ---------: | ----------: |");
+        var puts = com.sbk.optionspricer.volatility.SpreadHistoryStudy.byYear(monthly.get(kinds.get(0)).trades(), costPerLeg);
+        var condors = com.sbk.optionspricer.volatility.SpreadHistoryStudy.byYear(monthly.get(kinds.get(1)).trades(), costPerLeg);
+        for (var row : puts) {
+            double condor = condors.stream().filter(c -> c.year() == row.year()).mapToDouble(com.sbk.optionspricer.volatility.SpreadHistoryStudy.YearRow::meanPnl).findFirst().orElse(Double.NaN);
+            System.out.printf(f, "| %d | %+.0f | %s |%n", row.year(), 100 * row.meanPnl(), Double.isFinite(condor) ? String.format(f, "%+.0f", 100 * condor) : "-");
+        }
+        System.out.printf(f, "%nPass rule (monthly trades): a positive mean after costs, a t-statistic above 2, a positive mean in every year, and a worst trade within $%.0f.%n",
+                SPREAD_STUDY_AFFORDABLE_LOSS);
+        for (var kind : kinds) {
+            var v = com.sbk.optionspricer.volatility.SpreadHistoryStudy.evaluate(monthly.get(kind).trades(), costPerLeg, 1.0, SPREAD_STUDY_AFFORDABLE_LOSS);
+            System.out.printf(f, "  %-17s mean positive: %s | t above 2: %s (t = %+.1f) | every year positive: %s | worst trade affordable: %s ($%.0f) -> %s%n",
+                    kind == com.sbk.optionspricer.volatility.SpreadHistoryStudy.Kind.PUT_SPREAD ? "Put credit spread" : "Iron condor",
+                    yesNo(v.positiveMean()), yesNo(v.tStatisticAboveTwo()), v.tStatistic(), yesNo(v.everyYearPositive()), yesNo(v.worstTradeAffordable()), v.worstTradeDollars(), v.overall());
+        }
+        System.out.println();
+        System.out.println("[SPREADS] PASS means the rule was met on this data, UNPROVEN that the mean is positive but not by more than luck, FAIL that it was not. This is a screen, not a trade signal:");
+        System.out.println("[SPREADS] about thirty monthly trades in one market over a few years cannot separate a small premium from zero, and a premium seller's losses arrive rarely and large.");
+        System.out.println("[SPREADS] A daily close has no bid or ask, so costs are assumed; a four-leg spread pays more of the spread than two legs do. Early exercise and dividends are ignored.");
+        System.out.println("[SPREADS] The strikes are the nearest dollar to a fixed distance from the spot, not chosen by delta or by what the surface said.");
+        return 0;
+    }
+
+    private static String yesNo(boolean b) {
+        return b ? "yes" : "no";
+    }
+
+    private static void printSpreadSchedule(String name, String how, com.sbk.optionspricer.volatility.SpreadHistoryStudy.Result r, double cost, double overlap) {
+        var f = java.util.Locale.ROOT;
+        var s = com.sbk.optionspricer.volatility.SpreadHistoryStudy.summarise(r.trades(), cost, overlap);
+        System.out.printf(f, "%n%s %s: %d trades (%d skipped for a missing price or no credit).%n", name, how, r.trades().size(), r.skippedNoPrice());
+        System.out.printf(f, "  Collected $%.0f on average against a most-it-could-lose of $%.0f.%n", 100 * s.meanCredit(), 100 * s.meanMaxLoss());
+        System.out.println("| Mean | Median | Std dev | Win rate | Worst | Best | Largest fall from a peak | t-statistic |");
+        System.out.println("| ---: | -----: | ------: | -------: | ----: | ---: | -----------------------: | ----------: |");
+        System.out.printf(f, "| %+.0f | %+.0f | %.0f | %.0f%% | %+.0f | %+.0f | %.0f | %+.1f |%n", 100 * s.meanPnl(), 100 * s.medianPnl(), 100 * s.stdPnl(), 100 * s.winRate(),
+                100 * s.worstPnl(), 100 * s.bestPnl(), 100 * s.maxDrawdown(), s.tStatistic());
+        System.out.println("  (dollars per spread, one contract)");
     }
 
     /** Fewest decision days worth analysing. */

@@ -33,7 +33,7 @@ feed, and a column labelled "worst month" that was the worst window from any sta
 
 ## What the evidence says about making money
 
-Four studies, each labelled for what it is:
+Five studies, each labelled for what it is:
 
 1. **Implied against realised volatility, ten years** (2,693 days, SPY and the VIX). The VIX averaged 18.5 and the volatility that followed 14.7, a
    premium of +3.8 vol points, positive on 84% of days. A short variance position sized at $1 a vol point averaged +2.1 a month with a standard deviation
@@ -49,6 +49,12 @@ Four studies, each labelled for what it is:
    Split in thirds by edge, the buyer averaged -$199, -$459 and -$73 (standard errors $320 to $470), no pattern. Buying when the edge was below minus half a point
    averaged -$319 (standard error $495); selling when it was above, which this account cannot do, +$223 (standard error $312). Both are inside their noise.
    This is the question that decides whether the strategy is worth running, and on this data the answer is that the edge it trades on did not predict anything.
+
+5. **Selling defined-risk spreads on real option prices** (`--spread-study`, 31 monthly trades, early 2024 to 2026, with a pass rule written before the run). A put credit
+   spread sold 3% out of the money with a $5 width collected $78 on average against a possible loss of $422, and averaged +$3 after assumed costs (t-statistic +0.1, 87% winners,
+   worst trade -$462). An iron condor collected $188 against $312 and averaged +$33 (t-statistic +0.8, 73% winners, worst -$374). The weekly versions, which overlap, averaged
+   +$15 and -$2. Both lost money in 2025. The rule needs a positive mean, a t-statistic above 2, a positive mean every year and an affordable worst trade: both met the first and
+   last and missed the other two, so the verdict is UNPROVEN, not a pass. About thirty trades cannot tell a small premium from zero, and the losses of a premium seller arrive rarely and large.
 
 **What the engine itself did.** It placed one trade on its own signal (three straddles, +$12 over about nine minutes), which is a sample of one. The round trips
 made to test the order path cost $3 to $19 each in spread. No edge has been demonstrated.

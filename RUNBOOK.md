@@ -248,6 +248,17 @@ To keep it running through a session:
 A laptop that sleeps is a poor host for an engine that is meant to watch a market all day. The VPS route in "Hosting
 on a server" is the real fix; this section only reduces the gaps until then.
 
+## Would selling defined-risk spreads have paid? (the spread study)
+
+```powershell
+java --add-modules jdk.incubator.vector -cp "target/classes;target/lib/*" com.sbk.optionspricer.Main --spread-study 0.05 0.03 5
+```
+
+Arguments: the assumed cost in dollars a share on every leg (once), how far out of the money to sell as a fraction of spot (0.03 is 3%), and the width in dollars. Same keys as the
+history study; about 500 read-only calls and a few minutes. It sells a put credit spread and an iron condor on a fixed calendar at the day's closing prices, holds them to expiry,
+and applies a pass rule written before the first run: a positive mean after costs, a t-statistic above 2, a positive mean in every year, and a worst trade within $1,000.
+PASS, UNPROVEN (positive but not by more than luck) or FAIL is printed per spread. The run of 2026-10-21 gave UNPROVEN for both. It is a screen on closing prices, not a trade signal.
+
 ## Does the edge predict anything? (the chain replay)
 
 ```powershell
