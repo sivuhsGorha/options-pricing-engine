@@ -206,8 +206,9 @@ class HeartbeatMonitorTest {
 
             monitor.start();
 
-            assertTrue(waitFor(() -> watcher.pings.get() >= 3, 5_000), "the first ping at start and one a second after: " + watcher.pings.get());
-            assertTrue(monitor.pingSuccesses() >= 3 && monitor.pingFailures() == 0);
+            // the monitor's own count, not the watcher's: the watcher counts a request when it arrives, the monitor when the answer has come back
+            assertTrue(waitFor(() -> monitor.pingSuccesses() >= 3, 5_000), "the first ping at start and one a second after: " + monitor.pingSuccesses());
+            assertEquals(0, monitor.pingFailures());
             monitor.close();
             int atClose = watcher.pings.get();
             Thread.sleep(1_500);

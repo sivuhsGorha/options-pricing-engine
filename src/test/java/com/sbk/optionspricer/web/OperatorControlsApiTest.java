@@ -107,6 +107,33 @@ class OperatorControlsApiTest {
     }
 
     @Test
+    void everyControlActionAndEveryRefusedAttemptIsWrittenToTheAuditLog() throws Exception {
+        Path auditFile = Files.createTempDirectory("control-audit").resolve("control_audit.csv");
+        server.setControlAudit(new ControlAuditLog(auditFile, java.time.Clock.systemUTC()));
+        String cookie = cookie();
+        String origin = OptionsDashboardServerTest.ALLOWED_ORIGIN;
+
+        call("POST", "/api/control/halt", "{\"reason\":\"manual check\"}", cookie, origin);
+        call("POST", "/api/control/resume", null, cookie, origin);
+        call("POST", "/api/control/strategy", "{\"enabled\":false}", cookie, origin);
+        call("POST", "/api/control/halt", "{\"reason\":\"no login\"}", null, origin);
+
+        // the refusal is answered first and recorded just after, so give the last row a moment to land
+        long deadline = System.currentTimeMillis() + 3_000;
+        java.util.List<String> rows = Files.readAllLines(auditFile);
+        while (rows.size() < 5 && System.currentTimeMillis() < deadline) {
+            Thread.sleep(25);
+            rows = Files.readAllLines(auditFile);
+        }
+        assertEquals("timestamp,action,outcome,client,detail", rows.get(0));
+        assertTrue(rows.get(1).contains(",halt,applied,127.0.0.1,operator: manual check"), rows.toString());
+        assertTrue(rows.get(2).contains(",resume,applied,127.0.0.1,"), rows.toString());
+        assertTrue(rows.get(3).contains(",strategy,applied,127.0.0.1,enabled=false"), rows.toString());
+        assertTrue(rows.get(4).contains(",halt,denied,127.0.0.1,"), "a refused attempt is recorded too: " + rows);
+        assertFalse(String.join("\n", rows).contains("no login"), "a refused request's body is never copied into the log");
+    }
+
+    @Test
     void theStateIsReadableAndHaltAndResumeChangeWhatTheOrderManagerDoes() throws Exception {
         String cookie = cookie();
         String origin = OptionsDashboardServerTest.ALLOWED_ORIGIN;

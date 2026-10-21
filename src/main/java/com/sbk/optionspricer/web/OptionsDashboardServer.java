@@ -101,6 +101,7 @@ public class OptionsDashboardServer {
     }
 
     private volatile com.sbk.optionspricer.execution.OperatorControls operatorControls;
+    private volatile ControlAuditLog controlAudit;
     private volatile com.sbk.optionspricer.execution.ValuationSource valuationSource;
 
     /** Supplies the mark-to-market of the book for /api/valuation. Call before {@link #start()}. */
@@ -523,6 +524,19 @@ public class OptionsDashboardServer {
     private static final com.fasterxml.jackson.databind.ObjectMapper JSON_IN = new com.fasterxml.jackson.databind.ObjectMapper();
 
     /** Exposes halt/resume and the strategy switch at /api/control. Call before {@link #start()}. */
+    /** Where each control action and each refused attempt is recorded; none until set. */
+    public void setControlAudit(ControlAuditLog audit) {
+        this.controlAudit = audit;
+    }
+
+    private void audit(HttpExchange exchange, String action, String outcome, String detail) {
+        ControlAuditLog log = controlAudit;
+        if (log != null) {
+            log.record(action, outcome, ClientAddressResolver.resolve(exchange.getRemoteAddress(),
+                    exchange.getRequestHeaders().getFirst("X-Forwarded-For"), trustedProxies), detail);
+        }
+    }
+
     public void setOperatorControls(com.sbk.optionspricer.execution.OperatorControls controls) {
         this.operatorControls = controls;
     }
@@ -914,7 +928,14 @@ public class OptionsDashboardServer {
 
         server.createContext("/api/control", guarded(exchange -> {
             applySecurityHeaders(exchange, true, isSecureRequest(exchange));
-            if (!authorizeApi(exchange)) return;
+            if (!authorizeApi(exchange)) {
+                // only an attempt to change something is worth a row; a refused read of the state is not
+                if (!"GET".equals(exchange.getRequestMethod())) {
+                    String attempted = exchange.getRequestURI().getPath();
+                    audit(exchange, attempted.substring(attempted.lastIndexOf('/') + 1), "denied", "");
+                }
+                return;
+            }
             com.sbk.optionspricer.execution.OperatorControls controls = operatorControls;
             if (controls == null) {
                 sendJsonError(exchange, 503, "operator controls unavailable");
@@ -930,22 +951,36 @@ public class OptionsDashboardServer {
                 sendJson(exchange, 200, controlWithTransport(controls.state()));
                 return;
             }
-            if (!acceptMutation(exchange)) return;
+            String actionName = path.substring(path.lastIndexOf('/') + 1);
+            if (!acceptMutation(exchange)) {
+                audit(exchange, actionName, "denied", "");
+                return;
+            }
             com.fasterxml.jackson.databind.JsonNode body = readJsonObject(exchange);
             if (body == null) return;
             switch (path) {
                 case "/api/control/halt" -> {
                     com.fasterxml.jackson.databind.JsonNode reason = body.get("reason");
-                    sendJson(exchange, 200, controlWithTransport(controls.halt(reason == null || !reason.isTextual() ? null : reason.asText())));
+                    com.sbk.optionspricer.execution.OperatorControls.ControlState state =
+                            controls.halt(reason == null || !reason.isTextual() ? null : reason.asText());
+                    audit(exchange, "halt", "applied", state.haltReason());
+                    sendJson(exchange, 200, controlWithTransport(state));
                 }
-                case "/api/control/resume" -> sendJson(exchange, 200, controlWithTransport(controls.resume()));
+                case "/api/control/resume" -> {
+                    com.sbk.optionspricer.execution.OperatorControls.ControlState state = controls.resume();
+                    audit(exchange, "resume", "applied", "");
+                    sendJson(exchange, 200, controlWithTransport(state));
+                }
                 case "/api/control/strategy" -> {
                     com.fasterxml.jackson.databind.JsonNode enabled = body.get("enabled");
                     if (enabled == null || !enabled.isBoolean()) {
+                        audit(exchange, "strategy", "rejected", "invalid body");
                         sendJsonError(exchange, 400, "body must be {\"enabled\": true|false}");
                         return;
                     }
-                    sendJson(exchange, 200, controlWithTransport(controls.setStrategyEnabled(enabled.asBoolean())));
+                    com.sbk.optionspricer.execution.OperatorControls.ControlState state = controls.setStrategyEnabled(enabled.asBoolean());
+                    audit(exchange, "strategy", "applied", "enabled=" + enabled.asBoolean());
+                    sendJson(exchange, 200, controlWithTransport(state));
                 }
                 case "/api/control/test-straddle" -> {
                     com.fasterxml.jackson.databind.JsonNode confirm = body.get("confirm");
@@ -957,6 +992,7 @@ public class OptionsDashboardServer {
                     com.sbk.optionspricer.execution.VolSpreadStrategy.Decision d;
                     try {
                         d = controls.supervisedStraddle(confirm.asBoolean());
+                        audit(exchange, "test-straddle", "applied", "confirm=" + confirm.asBoolean() + " result=" + d.action());
                     } catch (UnsupportedOperationException e) {
                         sendJsonError(exchange, 501, "the supervised test straddle needs the vol_spread strategy");
                         return;

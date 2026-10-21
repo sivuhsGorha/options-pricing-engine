@@ -169,6 +169,7 @@ public class AppCompositionRoot {
         }
         com.sbk.optionspricer.core.OperatorConsole console = new com.sbk.optionspricer.core.OperatorConsole(tradingHalt, harness, strategyLoop);
         dashboard.setOperatorControls(console);
+        dashboard.setControlAudit(new com.sbk.optionspricer.web.ControlAuditLog(dataDir.resolve("control_audit.csv"), java.time.Clock.systemUTC()));
         dashboard.setFeedStatusSource(spotProvider::lastKnownFeedStatus);
         dashboard.setTransportStatus(transportStatus);
 
