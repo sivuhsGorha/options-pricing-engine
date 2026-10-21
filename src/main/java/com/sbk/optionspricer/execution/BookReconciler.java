@@ -58,6 +58,10 @@ public final class BookReconciler implements AutoCloseable {
 
     /** Reconciles now, on the calling thread. */
     public synchronized Result reconcile() {
+        return com.sbk.optionspricer.metrics.LatencyTracker.shared().time("book.reconcile", this::reconcileUntimed);
+    }
+
+    private Result reconcileUntimed() {
         Object lock = orderLock;
         if (lock == null) {
             return reconcileNow();

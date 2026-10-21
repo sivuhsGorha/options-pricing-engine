@@ -110,6 +110,7 @@ class ApiResponseHardeningTest {
         assertEquals("LOADING", body.get("components").get("surface").get("status").asText());
         assertFalse(body.get("components").get("trading").get("halted").asBoolean());
         assertTrue(body.get("uptimeSeconds").asLong() >= 0);
+        assertTrue(body.get("latencyMs").isObject(), "per-component timings are part of health: " + body);
         assertEquals(1, statusReads.get(), "one cheap status read per request, no provider probe");
         // the original fields are still present for older clients
         assertEquals("LIVE", body.get("sourceStatus").asText());

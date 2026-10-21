@@ -27,6 +27,21 @@ class BookReconcilerTest {
     }
 
     @Test
+    void everyReconciliationIsTimed() {
+        FakeAlpaca fake = new FakeAlpaca().positions();
+        long before = countOf("book.reconcile");
+
+        reconciler(fake, book(0, 0), new TradingHalt()).reconcile();
+
+        assertEquals(before + 1, countOf("book.reconcile"));
+    }
+
+    private static long countOf(String component) {
+        var stats = com.sbk.optionspricer.metrics.LatencyTracker.shared().snapshot().get(component);
+        return stats == null ? 0L : stats.count();
+    }
+
+    @Test
     void aMatchingBookIsOkAndShortOptionPositionsCompareBySign() {
         FakeAlpaca fake = new FakeAlpaca().positions(
                 FakeAlpaca.positionJson("SPY", "long", "10", "us_equity", "777.1"),

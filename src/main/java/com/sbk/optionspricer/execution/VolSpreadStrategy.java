@@ -298,6 +298,10 @@ public final class VolSpreadStrategy {
 
     /** One evaluation: hedge if needed, then open, hold or close the straddle. Never throws for market conditions. */
     public synchronized Decision step() {
+        return com.sbk.optionspricer.metrics.LatencyTracker.shared().time("strategy.step", this::stepUntimed);
+    }
+
+    private Decision stepUntimed() {
         stepSpreadBps = Double.NaN;
         Instant now = clock.instant();
         LocalDate today = LocalDate.ofInstant(now, ZoneOffset.UTC);

@@ -430,6 +430,17 @@ class VolSpreadStrategyTest {
     private static final Instant SATURDAY = Instant.parse("2026-10-10T15:00:00Z");
 
     @Test
+    void everyStrategyStepIsTimed() {
+        VolSpreadStrategy s = strategy(new PositionTracker(FillRecorder.NONE), new FlatChains(0.20, TODAY), 0.20, null, Clock.fixed(NOW, ZoneOffset.UTC));
+        var before = com.sbk.optionspricer.metrics.LatencyTracker.shared().snapshot().get("strategy.step");
+
+        s.step();
+
+        var after = com.sbk.optionspricer.metrics.LatencyTracker.shared().snapshot().get("strategy.step");
+        assertEquals((before == null ? 0L : before.count()) + 1, after.count());
+    }
+
+    @Test
     void aSupervisedTestIsRefusedOnAnExchangeHolidayAndAfterAnEarlyClose() {
         for (String instant : new String[] {"2026-11-26T15:00:00Z" /* Thanksgiving 10:00 */, "2026-11-27T19:30:00Z" /* 14:30, after the 13:00 close */}) {
             PositionTracker tracker = new PositionTracker(FillRecorder.NONE);

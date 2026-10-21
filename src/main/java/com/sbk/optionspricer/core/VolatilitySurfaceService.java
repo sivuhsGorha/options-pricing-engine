@@ -137,6 +137,10 @@ public final class VolatilitySurfaceService implements VolatilitySurfaceSource, 
      * and the strategy waits) and leaves the surface and its status alone. Returns whether anything loaded.
      */
     public synchronized boolean refreshQuotes() {
+        return com.sbk.optionspricer.metrics.LatencyTracker.shared().time("chain.reload", this::refreshQuotesUntimed);
+    }
+
+    private boolean refreshQuotesUntimed() {
         Instant now = clock.instant();
         LocalDate today = LocalDate.ofInstant(now, ZoneOffset.UTC);
         Set<String> warnings = new LinkedHashSet<>();
@@ -228,6 +232,10 @@ public final class VolatilitySurfaceService implements VolatilitySurfaceSource, 
 
     /** Runs one calibration now, on the calling thread: reloads the chains and refits the surfaces. Safe to call from tests and from the worker. */
     public synchronized void refresh() {
+        com.sbk.optionspricer.metrics.LatencyTracker.shared().time("surface.calibrate", (Runnable) this::refreshUntimed);
+    }
+
+    private void refreshUntimed() {
         Instant now = clock.instant();
         lastFitAt = now;
         LocalDate today = LocalDate.ofInstant(now, ZoneOffset.UTC);

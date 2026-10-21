@@ -511,6 +511,7 @@ public class OptionsDashboardServer {
             transportDegraded = "MISMATCH".equals(transport.reconciliation()) || "UNREACHABLE".equals(transport.reconciliation());
         }
         body.put("components", components);
+        body.put("latencyMs", com.sbk.optionspricer.metrics.LatencyTracker.shared().toJson());
 
         boolean marketFresh = "LIVE".equals(sourceStatus) || "DELAYED".equals(sourceStatus);
         boolean surfaceFailed = "FAILED".equals(surface.get("status"));

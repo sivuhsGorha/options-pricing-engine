@@ -151,6 +151,10 @@ public class OrderManager {
     }
 
     public synchronized OrderDecision submit(Order order, com.sbk.optionspricer.market.MarketSnapshot snapshot) {
+        return com.sbk.optionspricer.metrics.LatencyTracker.shared().time("order.submit", () -> submitUntimed(order, snapshot));
+    }
+
+    private OrderDecision submitUntimed(Order order, com.sbk.optionspricer.market.MarketSnapshot snapshot) {
         if (order == null || snapshot == null) {
             return new OrderDecision(false, OrderStatus.REJECTED, "order and snapshot must not be null", -1L);
         }
@@ -244,6 +248,13 @@ public class OrderManager {
     public synchronized OrderDecision submitMultiLeg(java.util.List<Order> legOrders,
                                                      java.util.List<com.sbk.optionspricer.market.MarketSnapshot> snapshots,
                                                      double netLimitPrice) {
+        return com.sbk.optionspricer.metrics.LatencyTracker.shared().time("order.submitMultiLeg",
+                () -> submitMultiLegUntimed(legOrders, snapshots, netLimitPrice));
+    }
+
+    private OrderDecision submitMultiLegUntimed(java.util.List<Order> legOrders,
+                                                java.util.List<com.sbk.optionspricer.market.MarketSnapshot> snapshots,
+                                                double netLimitPrice) {
         if (legOrders == null || snapshots == null || legOrders.isEmpty() || legOrders.size() != snapshots.size()) {
             return new OrderDecision(false, OrderStatus.REJECTED, "legOrders and snapshots must not be null and match in size", -1L);
         }
