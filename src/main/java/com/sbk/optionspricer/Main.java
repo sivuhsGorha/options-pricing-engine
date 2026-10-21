@@ -59,6 +59,10 @@ public class Main {
             System.exit(runSessionReport(java.nio.file.Path.of(com.sbk.optionspricer.config.EnvironmentConfigLoader.getOrDefault("DATA_DIR", "data")), day));
             return;
         }
+        if (args.length > 0 && "--option-history-study".equals(args[0])) {
+            System.exit(runOptionHistoryStudy(args.length > 1 ? Double.parseDouble(args[1]) : 0.04));
+            return;
+        }
         if (args.length > 0 && "--vrp-study".equals(args[0])) {
             System.exit(runVrpStudy(java.nio.file.Path.of(args.length > 1 ? args[1] : "data/historical/VIX_History.csv")));
             return;
@@ -143,6 +147,103 @@ public class Main {
             return client.dailyBars(REPLAY_SYMBOL, start).stream()
                     .map(b -> new com.sbk.optionspricer.volatility.DailyCloseFeed.DailyClose(b.date(), b.close())).toList();
         });
+    }
+
+    /** Fewest monthly trades worth summarising. */
+    static final int OPTION_HISTORY_MIN_TRADES = 12;
+
+    /** The history study on real daily option prices from Alpaca (needs ALPACA_KEY_ID and ALPACA_SECRET in .env); costs per leg, in dollars a share. */
+    public static int runOptionHistoryStudy(double costPerLeg) {
+        com.sbk.optionspricer.execution.AlpacaPaperClient client;
+        try {
+            client = com.sbk.optionspricer.execution.AlpacaPaperClient.fromEnv();
+        } catch (RuntimeException e) {
+            System.err.println("[HISTORY] Cannot reach Alpaca: " + e.getMessage());
+            System.err.println("[HISTORY] It never invents prices. Put ALPACA_KEY_ID and ALPACA_SECRET in .env and run it from the project folder.");
+            return 2;
+        }
+        return runOptionHistoryStudy(start -> client.dailyBarsFrom(REPLAY_SYMBOL, start).stream()
+                        .map(b -> new com.sbk.optionspricer.volatility.VrpStudy.Close(b.date(), b.close())).toList(),
+                (call, put, entry) -> {
+                    try {
+                        Thread.sleep(150); // a polite pace for the data API: about 170 calls
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                    var bars = client.optionDailyBars(java.util.List.of(call, put), entry, entry.plusDays(1));
+                    Double c = bars.getOrDefault(call, java.util.Map.of()).get(entry);
+                    Double p = bars.getOrDefault(put, java.util.Map.of()).get(entry);
+                    return c == null || p == null ? java.util.Optional.<com.sbk.optionspricer.volatility.OptionHistoryStudy.Quotes>empty()
+                            : java.util.Optional.of(new com.sbk.optionspricer.volatility.OptionHistoryStudy.Quotes(c, p));
+                }, costPerLeg);
+    }
+
+    /**
+     * Buys a straddle on a fixed calendar at real daily option closes and holds it to expiry (monthly expiries 30 days ahead, and every
+     * Friday 28 days ahead), and prints what a buyer made and what a seller would have, with costs assumed. It stops, without a table, when the
+     * closes or prices cannot be had. A screen for whether the volatility premium survives costs, not a test of this engine's strategy.
+     */
+    public static int runOptionHistoryStudy(java.util.function.Function<java.time.LocalDate, java.util.List<com.sbk.optionspricer.volatility.VrpStudy.Close>> closesSource,
+                                            com.sbk.optionspricer.volatility.OptionHistoryStudy.Pricer pricer, double costPerLeg) {
+        System.out.println("=========================================================================");
+        System.out.println("        BLACKTHORN STERLING STRADDLE HISTORY ON REAL OPTION PRICES       ");
+        System.out.println("=========================================================================");
+        java.util.List<com.sbk.optionspricer.volatility.VrpStudy.Close> closes;
+        com.sbk.optionspricer.volatility.OptionHistoryStudy.Result monthly, weekly;
+        try {
+            closes = closesSource.apply(java.time.LocalDate.of(2024, 1, 1));
+            java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneOffset.UTC);
+            closes = closes.stream().filter(c -> c.date().isBefore(today) && Double.isFinite(c.close()) && c.close() > 0.0).toList();
+            java.time.LocalDate first = closes.stream().map(com.sbk.optionspricer.volatility.VrpStudy.Close::date).min(java.util.Comparator.naturalOrder()).orElseThrow();
+            java.time.LocalDate last = closes.stream().map(com.sbk.optionspricer.volatility.VrpStudy.Close::date).max(java.util.Comparator.naturalOrder()).orElseThrow();
+            monthly = com.sbk.optionspricer.volatility.OptionHistoryStudy.simulate(closes,
+                    com.sbk.optionspricer.volatility.OptionHistoryStudy.thirdFridays(first.plusDays(31), last), 30, pricer);
+            weekly = com.sbk.optionspricer.volatility.OptionHistoryStudy.simulate(closes,
+                    com.sbk.optionspricer.volatility.OptionHistoryStudy.fridays(first.plusDays(29), last), 28, pricer);
+        } catch (RuntimeException e) {
+            System.err.println("[HISTORY] Cannot get the closes or the option prices: " + e.getMessage());
+            System.err.println("[HISTORY] It never invents them. Put ALPACA_KEY_ID and ALPACA_SECRET in .env and run it from the project folder.");
+            return 2;
+        }
+        if (monthly.trades().size() < OPTION_HISTORY_MIN_TRADES) {
+            System.err.println("[HISTORY] Only " + monthly.trades().size() + " monthly trades have prices; at least " + OPTION_HISTORY_MIN_TRADES + " are needed.");
+            return 2;
+        }
+        var f = java.util.Locale.ROOT;
+        System.out.printf(f, "[HISTORY] SPY, %s to %s. A straddle at the nearest strike, bought at the day's closing prices, held to expiry. Costs assumed: $%.2f a share on each of the two legs, once (about $%.0f a straddle).%n",
+                monthly.trades().get(0).entry(), monthly.trades().get(monthly.trades().size() - 1).expiry(), costPerLeg, 2 * costPerLeg * 100);
+        printSchedule("Monthly", "(third Friday, bought 30 days before; the trades do not overlap)", monthly, costPerLeg, true);
+        printSchedule("Weekly", "(every Friday, bought 28 days before; four are open at once, so these trades overlap and are not independent)", weekly, costPerLeg, false);
+
+        System.out.println("\nBy year (monthly trades, mean result per straddle in dollars):");
+        System.out.println("| Year | Trades | Buyer | Seller |");
+        System.out.println("| ---: | -----: | ----: | -----: |");
+        for (var y : com.sbk.optionspricer.volatility.OptionHistoryStudy.byYear(monthly.trades(), costPerLeg)) {
+            System.out.printf(f, "| %d | %d | %+.0f | %+.0f |%n", y.year(), y.n(), 100 * y.longMeanPnl(), 100 * y.shortMeanPnl());
+        }
+        System.out.println();
+        System.out.println("[HISTORY] This is not a test of the engine's strategy: it buys on a calendar and holds to expiry, where the engine trades on an edge and exits within");
+        System.out.println("[HISTORY] minutes or days. A daily close has no bid or ask, so the costs are assumed, not measured. The seller rows are what a seller would have made: this");
+        System.out.println("[HISTORY] account cannot write uncovered options (Alpaca refuses them). Early 2024 to now is one market and about 2.7 years, with American-style exercise and");
+        System.out.println("[HISTORY] dividends ignored. It says whether the premium survives costs on real option prices, and nothing about the future.");
+        return 0;
+    }
+
+    private static void printSchedule(String name, String how, com.sbk.optionspricer.volatility.OptionHistoryStudy.Result r, double cost, boolean showDrawdown) {
+        var f = java.util.Locale.ROOT;
+        var buyer = com.sbk.optionspricer.volatility.OptionHistoryStudy.summarise(r.trades(), cost, true);
+        var seller = com.sbk.optionspricer.volatility.OptionHistoryStudy.summarise(r.trades(), cost, false);
+        System.out.printf(f, "%n%s %s: %d trades (%d skipped for a missing price).%n", name, how, r.trades().size(), r.skippedNoPrice());
+        System.out.printf(f, "  Buyers paid $%.0f on average for a straddle; the expiry paid $%.0f (a ratio of %.2f).%n", 100 * buyer.meanStraddlePrice(), 100 * buyer.meanPayoff(),
+                buyer.meanPayoff() / buyer.meanStraddlePrice());
+        System.out.println("| Side | Mean | Median | Std dev | Win rate | Worst | Best | Largest fall from a peak |");
+        System.out.println("| :--- | ---: | -----: | ------: | -------: | ----: | ---: | -----------------------: |");
+        for (var row : java.util.List.of(java.util.Map.entry("Buyer", buyer), java.util.Map.entry("Seller", seller))) {
+            var s = row.getValue();
+            System.out.printf(f, "| %s | %+.0f | %+.0f | %.0f | %.0f%% | %+.0f | %+.0f | %s |%n", row.getKey(), 100 * s.meanPnl(), 100 * s.medianPnl(), 100 * s.stdPnl(),
+                    100 * s.winRate(), 100 * s.worstPnl(), 100 * s.bestPnl(), showDrawdown ? String.format(f, "%.0f", 100 * s.maxDrawdown()) : "-");
+        }
+        System.out.println("  (dollars per straddle, one contract each leg)");
     }
 
     /** The VIX history file the study reads, and where to get it. */

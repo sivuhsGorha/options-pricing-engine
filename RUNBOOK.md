@@ -233,6 +233,20 @@ To keep it running through a session:
 A laptop that sleeps is a poor host for an engine that is meant to watch a market all day. The VPS route in "Hosting
 on a server" is the real fix; this section only reduces the gaps until then.
 
+## A straddle on real option prices (the history study)
+
+```powershell
+java --add-modules jdk.incubator.vector -cp "target/classes;target/lib/*" com.sbk.optionspricer.Main --option-history-study 0.04
+```
+
+Needs `ALPACA_KEY_ID` and `ALPACA_SECRET` in `.env` (read-only: SPY's daily bars and the daily bars of option contracts, about 170 calls and a minute or two).
+The argument is the assumed cost in dollars a share on each of the two legs, charged once; 0.04 is about $8 a straddle. It buys a straddle at the nearest
+strike on a fixed calendar (the third Friday's expiry bought 30 days before, and every Friday's bought 28 days before), at that day's closing prices, holds it
+to expiry, and prints what a buyer made and what a seller would have, with the mean, median, spread, win rate, worst and best trade, the largest fall from a
+peak (monthly only: the weekly trades overlap) and the result by year. A trade whose legs have no price that day is counted as skipped, never filled in.
+Alpaca's free option history starts in early 2024. It is **not a test of the engine's strategy** (a calendar and hold-to-expiry, not an edge and a quick
+exit), the daily close has no bid or ask so the costs are an assumption, and the seller rows are what a seller would have made, which this account cannot do.
+
 ## Implied against realised volatility (the premium study)
 
 ```powershell

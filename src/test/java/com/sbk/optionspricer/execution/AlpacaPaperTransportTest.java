@@ -442,4 +442,31 @@ class AlpacaPaperTransportTest {
         new AlpacaPaperClient(forEngine).dailyBars("SPY", java.time.LocalDate.of(2026, 5, 1));
         assertTrue(forEngine.dataCalls.get(0).contains("feed=iex"), forEngine.dataCalls.get(0));
     }
+
+    @Test
+    void theOptionBarsAreReadPerContractAndPerDayFromAlpacasMultiSymbolAnswer() {
+        String body = "{\"bars\":{\"SPY240315C00510000\":[{\"c\":1.75,\"t\":\"2024-02-01T05:00:00Z\"},{\"c\":1.80,\"t\":\"2024-02-02T05:00:00Z\"}],"
+                + "\"SPY240315P00510000\":[{\"c\":2.10,\"t\":\"2024-02-01T05:00:00Z\"}]},\"next_page_token\":null}";
+        FakeAlpaca fake = new FakeAlpaca().quote(body);
+
+        java.util.Map<String, java.util.Map<java.time.LocalDate, Double>> bars = new AlpacaPaperClient(fake).optionDailyBars(
+                List.of("SPY240315C00510000", "SPY240315P00510000"), java.time.LocalDate.of(2024, 2, 1), java.time.LocalDate.of(2024, 2, 2));
+
+        assertEquals(1.75, bars.get("SPY240315C00510000").get(java.time.LocalDate.of(2024, 2, 1)), 1e-12);
+        assertEquals(1.80, bars.get("SPY240315C00510000").get(java.time.LocalDate.of(2024, 2, 2)), 1e-12);
+        assertEquals(2.10, bars.get("SPY240315P00510000").get(java.time.LocalDate.of(2024, 2, 1)), 1e-12);
+        String path = fake.dataCalls.get(0);
+        assertTrue(path.contains("/v1beta1/options/bars") && path.contains("symbols=SPY240315C00510000,SPY240315P00510000")
+                && path.contains("timeframe=1Day") && path.contains("start=2024-02-01") && path.contains("end=2024-02-02"), path);
+    }
+
+    @Test
+    void aContractWithNoBarsIsAbsentFromTheAnswerNotZero() {
+        FakeAlpaca fake = new FakeAlpaca().quote("{\"bars\":{},\"next_page_token\":null}");
+
+        java.util.Map<String, java.util.Map<java.time.LocalDate, Double>> bars = new AlpacaPaperClient(fake).optionDailyBars(
+                List.of("SPY240315C00510000"), java.time.LocalDate.of(2024, 2, 1), java.time.LocalDate.of(2024, 2, 2));
+
+        assertTrue(bars.getOrDefault("SPY240315C00510000", java.util.Map.of()).isEmpty());
+    }
 }

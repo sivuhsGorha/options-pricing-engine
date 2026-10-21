@@ -349,6 +349,37 @@ public final class AlpacaPaperClient {
     static final int BARS_PER_PAGE = 1000;
 
     /**
+     * Daily bars for option contracts (the indicative feed, which has history back to early 2024): contract, then day, then close. A contract
+     * that did not trade in the range is absent from the answer, never zero. Pages are followed up to a limit of 50.
+     */
+    public java.util.Map<String, java.util.Map<java.time.LocalDate, Double>> optionDailyBars(List<String> symbols, java.time.LocalDate start,
+                                                                                            java.time.LocalDate end) {
+        if (symbols == null || symbols.isEmpty() || start == null || end == null) {
+            throw new IllegalArgumentException("symbols, start and end are required");
+        }
+        java.util.Map<String, java.util.Map<java.time.LocalDate, Double>> out = new java.util.LinkedHashMap<>();
+        String token = null;
+        for (int page = 0; page < 50; page++) {
+            JsonNode body = callData("/v1beta1/options/bars?symbols=" + String.join(",", symbols) + "&timeframe=1Day&start=" + start + "&end=" + end
+                    + "&limit=10000" + (token == null ? "" : "&page_token=" + token));
+            JsonNode bars = body.path("bars");
+            bars.fieldNames().forEachRemaining(symbol -> {
+                for (JsonNode bar : bars.path(symbol)) {
+                    if (bar.hasNonNull("t") && bar.hasNonNull("c")) {
+                        out.computeIfAbsent(symbol, s -> new java.util.TreeMap<>()).put(
+                                java.time.LocalDate.ofInstant(java.time.Instant.parse(bar.get("t").asText()), java.time.ZoneOffset.UTC), number(bar, "c"));
+                    }
+                }
+            });
+            token = body.hasNonNull("next_page_token") ? body.get("next_page_token").asText() : null;
+            if (token == null) {
+                break;
+            }
+        }
+        return out;
+    }
+
+    /**
      * Every daily bar from {@code start} to yesterday, fetched a page at a time (a page holds about four years), from the SIP feed:
      * the free IEX feed has almost nothing before mid-2020 (none for 2019, none for March 2020), which would read as calm. The SIP
      * refuses data from the last 15 minutes, so the request ends before today.
