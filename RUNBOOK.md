@@ -49,6 +49,21 @@ once, and an unknown key in a safety-relevant section such as `strategy` or `exe
 rewriting it on 2026-10-20 made a setting appear, vanish and reappear. `config.yaml` is in `.gitignore`, so a change to it
 is not in git; the backup (see Backup and recovery) is the only other copy.
 
+## Logs and secrets
+
+Everything the engine prints (the console log that `docker compose logs` shows) passes through one guard before it leaves the process:
+
+- **Secrets are removed.** The exact value of every configured secret (`ALPACA_KEY_ID`, `ALPACA_SECRET`, `API_SECRET`, `OPERATOR_PASSWORD`, `NTFY_TOPIC`,
+  `ALERT_WEBHOOK_URL`, `HEARTBEAT_URL`, `TLS_KEYSTORE_PASSWORD` and the provider keys) is replaced by `***` wherever it appears, including inside an
+  exception's message or a stack trace, and including a secret printed in pieces. A value under 8 characters is not treated as a secret. This does not
+  depend on each of the engine's print statements being careful. HTTP error responses are separate: they only ever use fixed messages, which a test enforces.
+- **JSON on request.** `LOG_FORMAT=json` in `.env` turns each line into one JSON object, `{"timestamp","level","component","message","stream"}`, for a log tool;
+  the component is the leading `[TAG]`, the level INFO on standard output, WARN on standard error and ERROR for a fatal, urgent, halt or exception line. The
+  default is the plain `[TAG] message` lines, unchanged. The setting is read at start.
+
+What the guard does not cover: a secret that is not configured (a value pasted into `config.yaml`, which holds none by design), and anything that never goes
+through the console (the files under `data/`, which hold no secrets).
+
 ## Health
 
 `GET /api/health` (session cookie or HMAC) returns:

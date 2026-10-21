@@ -68,6 +68,7 @@ Secrets and deployment settings come from the environment or a `.env` file in th
 | `MMAP_STATE_FILE` | no (`data/shm_state.dat`) | engine-to-web shared state file |
 | `DATA_DIR` | no (`data`) | fill ledger (`fills.csv`) and other state that must survive a restart |
 | `ALLOW_SIMULATED_DATA` | no (false) | lets SIMULATED quotes back paper orders |
+| `LOG_FORMAT` | no (text) | `json` prints each console line as one JSON object; secrets are replaced by `***` in both formats |
 | `HEARTBEAT_INTERVAL_SECONDS` | no (30) | how often the heartbeat file is rewritten (a record that shows a stale one at start; it alerts no one by itself) |
 | `HEARTBEAT_STALE_MULTIPLIER` | no (3.0) | stale threshold is interval × multiplier (default 90 seconds) |
 | `ALPACA_KEY_ID`, `ALPACA_SECRET` | only with `execution.transport: alpaca` | Alpaca paper-account keys; the client can only address `paper-api.alpaca.markets` |

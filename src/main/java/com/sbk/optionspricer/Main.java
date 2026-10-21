@@ -75,6 +75,10 @@ public class Main {
             System.exit(runTestBuyStraddle(args.length > 1 && "--confirm".equals(args[1])));
             return;
         }
+        // Everything the engine prints passes through the guard from here on: configured secrets are replaced wherever they appear, and
+        // LOG_FORMAT=json turns each line into one JSON object.
+        com.sbk.optionspricer.logging.ConsoleGuard.install(
+                "json".equalsIgnoreCase(com.sbk.optionspricer.config.EnvironmentConfigLoader.getOrDefault("LOG_FORMAT", "text")));
         System.out.println("=========================================================================");
         System.out.println("       BLACKTHORN STERLING  OPTIONS PRICING & PAPER-TRADING ENGINE       ");
         System.out.println("=========================================================================");
