@@ -1,6 +1,17 @@
 # TLS/HTTPS Setup for Dashboard
 
-The Blackthorn Sterling dashboard uses JDK HttpServer, which does not support HTTPS natively. The recommended approach for production and development is to use a reverse proxy with TLS termination.
+The dashboard can serve HTTPS itself. Set a PKCS12 keystore and its password in `.env` and the HTTP port speaks TLS (session cookies are marked Secure and HSTS is sent):
+
+```bash
+./scripts/generate-selfsigned-cert.sh localhost dashboard.p12 changeit   # a self-signed one for testing
+# in .env (inside Docker, mount the file and use its path in the container)
+TLS_KEYSTORE=/app/certs/dashboard.p12
+TLS_KEYSTORE_PASSWORD=changeit
+```
+
+If `TLS_KEYSTORE` is set but unreadable, the password is wrong or `TLS_KEYSTORE_PASSWORD` is missing, the engine refuses to start rather than falling back to plain HTTP. A self-signed certificate makes browsers warn; use a real certificate for anything exposed. The React dashboard uses the HTTP API only, so nothing else needs TLS. The raw WebSocket feed (port + 1) stays plain `ws://`: keep it bound to localhost or behind a proxy. This is covered by `DashboardTlsTest`, which generates a keystore and talks HTTPS to a running server.
+
+The alternative below, a reverse proxy that terminates TLS, still works and is the better choice when one already exists.
 
 ## Quick Start (Development)
 

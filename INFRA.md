@@ -64,6 +64,8 @@ Secrets and deployment settings come from the environment or a `.env` file in th
 | `ALLOWED_ORIGIN` | no | comma-separated origins for CORS and WebSocket; defaults to localhost on `PORT` |
 | `TRUSTED_PROXIES` | no | proxy addresses whose `X-Forwarded-For` is believed |
 | `COOKIE_SECURE` | no | force the `Secure` cookie flag when TLS terminates upstream |
+| `TLS_KEYSTORE` | no | path to a PKCS12 keystore: the dashboard then serves HTTPS itself (plain HTTP when unset). See `docs/TLS_SETUP.md` |
+| `TLS_KEYSTORE_PASSWORD` | with `TLS_KEYSTORE` | the keystore password; a keystore without it stops the start. Secret: never printed |
 | `HTTP_REQUEST_TIMEOUT_SECONDS` | no | per-request timeout for the dashboard server |
 | `MMAP_STATE_FILE` | no (`data/shm_state.dat`) | engine-to-web shared state file |
 | `DATA_DIR` | no (`data`) | fill ledger (`fills.csv`) and other state that must survive a restart |

@@ -46,17 +46,24 @@ public class OptionsDashboardServer {
      *
      * @param trustedProxies IPs of reverse proxies whose X-Forwarded-* headers are believed
      * @param cookieSecure   always mark session cookies Secure and send HSTS (set when serving over TLS)
+     * @param tls            when set the server itself speaks HTTPS with this context (and is always secure); null for plain HTTP
      */
-    public record SecurityOptions(java.util.Set<String> trustedProxies, boolean cookieSecure) {
+    public record SecurityOptions(java.util.Set<String> trustedProxies, boolean cookieSecure, javax.net.ssl.SSLContext tls) {
         public SecurityOptions {
             trustedProxies = java.util.Set.copyOf(trustedProxies);
+            cookieSecure = cookieSecure || tls != null;
+        }
+
+        public SecurityOptions(java.util.Set<String> trustedProxies, boolean cookieSecure) {
+            this(trustedProxies, cookieSecure, null);
         }
 
         public static SecurityOptions fromEnvironment() {
             return new SecurityOptions(
                     ClientAddressResolver.parseTrustedProxies(
                             com.sbk.optionspricer.config.EnvironmentConfigLoader.getOrDefault("TRUSTED_PROXIES", "")),
-                    Boolean.parseBoolean(com.sbk.optionspricer.config.EnvironmentConfigLoader.getOrDefault("COOKIE_SECURE", "false")));
+                    Boolean.parseBoolean(com.sbk.optionspricer.config.EnvironmentConfigLoader.getOrDefault("COOKIE_SECURE", "false")),
+                    TlsSupport.fromEnvironment(com.sbk.optionspricer.config.EnvironmentConfigLoader::get));
         }
     }
 
@@ -597,7 +604,13 @@ public class OptionsDashboardServer {
         this.positionTracker = positionTracker;
         this.marketAdapter = marketAdapter;
         InetAddress address = InetAddress.getByName(bindAddress);
-        this.server = HttpServer.create(new InetSocketAddress(address, port), 128);
+        if (securityOptions.tls() != null) {
+            com.sun.net.httpserver.HttpsServer https = com.sun.net.httpserver.HttpsServer.create(new InetSocketAddress(address, port), 128);
+            https.setHttpsConfigurator(new com.sun.net.httpserver.HttpsConfigurator(securityOptions.tls()));
+            this.server = https;
+        } else {
+            this.server = HttpServer.create(new InetSocketAddress(address, port), 128);
+        }
         this.httpExecutor = createHttpExecutor();
         this.server.setExecutor(httpExecutor);
         this.wsServer = new WebSocketDashboardServer(bindAddress, wsPort, mmapReader, apiSecret, sessions, trustedProxies);
