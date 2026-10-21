@@ -1,0 +1,212 @@
+openapi: 3.0.3
+info:
+  title: Blackthorn Sterling dashboard API
+  version: "2026-10-21"
+  description: |
+    The HTTP API of the engine's dashboard server (default http://127.0.0.1:8080, HTTPS when TLS_KEYSTORE is set).
+
+    Authentication: a browser logs in at /login and carries the session cookie; any other client signs each request with
+    HMAC (headers X-Signature, X-Timestamp, X-Nonce; see SYSTEM.md and HmacAuth). Requests that change something also need
+    an allowed Origin. Error responses are fixed messages, never the text of an exception.
+
+    This file is kept by hand; a test (OpenApiCoverageTest) fails when the server gains a route this file does not list.
+servers:
+  - url: http://127.0.0.1:8080
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: session
+    hmac:
+      type: apiKey
+      in: header
+      name: X-Signature
+  responses:
+    Unauthorized:
+      description: No valid session or signature.
+    TooManyRequests:
+      description: Login attempts rate limited; see Retry-After.
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+    ControlState:
+      type: object
+      properties:
+        halted: {type: boolean}
+        haltReason: {type: string, nullable: true}
+        strategyEnabled: {type: boolean}
+security:
+  - sessionCookie: []
+  - hmac: []
+paths:
+  /login:
+    post:
+      summary: Start a browser session
+      description: Body is the operator password as plain text. Sets the session cookie.
+      security: []
+      requestBody:
+        required: true
+        content:
+          text/plain:
+            schema: {type: string}
+      responses:
+        "200": {description: Logged in}
+        "401": {description: Wrong password}
+        "429": {$ref: "#/components/responses/TooManyRequests"}
+  /logout:
+    post:
+      summary: End the browser session
+      responses:
+        "200": {description: Logged out}
+  /api/health:
+    get:
+      summary: Component health, latency per component and execution quality
+      description: status is ok, degraded or down; latencyMs and executionQuality are objects keyed by component or order kind.
+      responses:
+        "200": {description: Health body}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+  /metrics:
+    get:
+      summary: The same numbers in Prometheus text format
+      responses:
+        "200":
+          description: Prometheus exposition format
+          content:
+            text/plain: {schema: {type: string}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+  /api/spot:
+    get:
+      summary: Latest spot quote with its status and source
+      responses:
+        "200": {description: Spot body}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "503": {description: Market data unavailable}
+  /api/execution:
+    get:
+      summary: The order audit trail
+      responses:
+        "200": {description: Audit rows}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+  /api/positions:
+    get:
+      summary: Open positions and exposure
+      responses:
+        "200": {description: Positions body}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+  /api/valuation:
+    get:
+      summary: The book marked to market with Greeks
+      responses:
+        "200": {description: Valuation body, or ready false with a status}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+  /api/stress:
+    get:
+      summary: The book revalued under spot, volatility, skew and front-month shocks
+      responses:
+        "200": {description: Scenarios with their P&L, the worst one, unvalued positions and the assumptions}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+  /api/risk:
+    get:
+      summary: Risk state and scenario margin
+      responses:
+        "200": {description: Risk body}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "503": {description: Risk state unavailable}
+  /api/pnl:
+    get:
+      summary: P&L since the ledger began and today's P&L and drawdown
+      responses:
+        "200": {description: P&L body}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+  /api/pnl/attribution:
+    get:
+      summary: P&L split into delta, gamma, vega, theta and the rest
+      responses:
+        "200": {description: Attribution body}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+  /api/surface/history:
+    get:
+      summary: The history of fitted surface parameters
+      responses:
+        "200": {description: History rows}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+  /api/surface3d:
+    get:
+      summary: The fitted volatility surface as a grid, labelled with its provenance
+      responses:
+        "200": {description: Surface body, or a status while it is not ready}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+  /api/control:
+    get:
+      summary: The operator control state
+      responses:
+        "200":
+          description: Control state
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ControlState"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+  /api/control/halt:
+    post:
+      summary: Trip the trading halt
+      description: Audited in data/control_audit.csv, as are refused attempts.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: {type: string}
+      responses:
+        "200": {description: New control state}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+  /api/control/resume:
+    post:
+      summary: Clear the trading halt
+      responses:
+        "200": {description: New control state}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+  /api/control/strategy:
+    post:
+      summary: Switch the strategy on or off
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled: {type: boolean}
+      responses:
+        "200": {description: New control state}
+        "400": {description: Body must be {"enabled": true|false}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+  /api/control/test-straddle:
+    post:
+      summary: Operator-supervised test straddle through the live order path
+      description: confirm false is a dry run and the only default; there is none, an omitted flag is refused.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirm]
+              properties:
+                confirm: {type: boolean}
+      responses:
+        "200": {description: The decision, with its orders}
+        "400": {description: confirm is required}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "501": {description: Needs the vol_spread strategy}
+  /:
+    get:
+      summary: The dashboard's static files
+      security: []
+      responses:
+        "200": {description: The React dashboard}

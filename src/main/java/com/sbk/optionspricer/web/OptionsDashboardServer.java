@@ -208,6 +208,41 @@ public class OptionsDashboardServer {
     }
 
     /** The /api/pnl body: totals since the ledger began and today's P&L and drawdown, from the sampled record. */
+    /** The /api/stress body: the book revalued under the named scenarios (spot, volatility, skew, front-month), or why it cannot be. */
+    static java.util.Map<String, Object> stressBody(com.sbk.optionspricer.execution.ValuationSource source) {
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        if (source == null) {
+            body.put("ready", false);
+            body.put("status", "no valuation service configured");
+            return body;
+        }
+        var latest = source.latestValuation();
+        if (latest.isEmpty()) {
+            body.put("ready", false);
+            body.put("status", source.valuationStatus());
+            return body;
+        }
+        var v = latest.get();
+        var result = com.sbk.optionspricer.risk.StressScenarios.run(v.positions(), v.spot(),
+                java.time.LocalDate.ofInstant(v.asOf(), java.time.ZoneOffset.UTC), STRESS_RATE, STRESS_DIVIDEND_YIELD);
+        java.util.List<java.util.Map<String, Object>> rows = new java.util.ArrayList<>();
+        for (var s : result.scenarios()) {
+            rows.add(java.util.Map.of("name", s.name(), "pnl", Json.round(s.pnl(), 2)));
+        }
+        body.put("ready", true);
+        body.put("asOf", v.asOf().toEpochMilli());
+        body.put("spot", Json.round(v.spot(), 2));
+        body.put("scenarios", rows);
+        body.put("worst", java.util.Map.of("name", result.worst().name(), "pnl", Json.round(result.worst().pnl(), 2)));
+        body.put("unvalued", result.unvalued());
+        body.put("assumptions", "each option repriced with Black-Scholes at its own implied volatility (rate " + STRESS_RATE + ", dividend yield "
+                + STRESS_DIVIDEND_YIELD + "), shocks applied per position; a scale for the loss, not a margin requirement; one underlying, so no correlation shock");
+        return body;
+    }
+
+    private static final double STRESS_RATE = 0.045;
+    private static final double STRESS_DIVIDEND_YIELD = 0.013;
+
     static java.util.Map<String, Object> pnlBody(com.sbk.optionspricer.execution.PnlHistory history, java.time.Instant now) {
         return pnlBody(history, null, now);
     }
@@ -848,6 +883,12 @@ public class OptionsDashboardServer {
             com.sbk.optionspricer.execution.Valuation valuation = source == null ? null : source.latestValuation().orElse(null);
             exchange.getResponseHeaders().set("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
             send(exchange, 200, PrometheusMetrics.render(PrometheusMetrics.fromEngine(healthBody(), valuation)));
+        }));
+
+        server.createContext("/api/stress", guarded(exchange -> {
+            applySecurityHeaders(exchange, true, isSecureRequest(exchange));
+            if (!authorizeApi(exchange)) return;
+            sendJson(exchange, 200, stressBody(valuationSource));
         }));
 
         server.createContext("/api/execution", guarded(exchange -> {

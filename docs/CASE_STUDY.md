@@ -59,6 +59,14 @@ conclusion is that the engine is a tested, instrumented piece of software and th
 
 ## What is deliberately not here
 
+Left out on purpose, with the reason, because each would be a large piece of work around a strategy that has not shown an edge: multiple underlyings (the engine is SPY by
+design); splitting pricing, risk and execution into separate processes; moving the CSV ledgers into a database (the ledger survives restarts and is read by tests as it is);
+a hot standby (it needs a second machine, and there is one laptop); a secret manager such as Vault (it needs a server; secrets are in `.env`, redacted from every line the
+engine prints and never committed); a real-time options feed (it costs money); a SPAN or TIMS margin model (the scenario margin is labelled as an approximation); Kelly or
+risk-parity sizing, fill-probability and slippage models, and adaptive limits (the fills to fit them to number a handful, and a model fitted to a handful is a guess with a
+formula; `executionQuality` in `/api/health` measures what fills cost so a model could be fitted when there is data). A Prometheus server and a signing proxy for scraping
+`/metrics` are not included either.
+
 No real money, no exchange feed, no latency claims, and no always-on host: the engine runs on a laptop, so it is not running for most of the US session.
 Binary-protocol gateway simulations were removed because nothing used them. The decisions that shaped the project, including the ones that turned out
 wrong, are in the change log in [SYSTEM.md](../SYSTEM.md); the live sessions are in [EXECUTION.md](../EXECUTION.md).
