@@ -218,7 +218,16 @@ public class AppCompositionRoot {
                 java.time.Clock.systemUTC(), legQuoteSource);
         // every decision is also appended to data/decisions.csv: the console log does not survive a rebuild
         com.sbk.optionspricer.execution.DecisionJournal decisionJournal = new com.sbk.optionspricer.execution.DecisionJournal(dataDir.resolve("decisions.csv"));
-        volSpreadStrategy.setDecisionListener(decisionJournal::record);
+        // phone messages, through the same ntfy topic or webhook as the halt alert; only when one is configured
+        com.sbk.optionspricer.alert.TradeNotifier tradeNotifier = pushNotifier.hasRemoteChannel()
+                ? new com.sbk.optionspricer.alert.TradeNotifier(pushNotifier::sendNotification) : null;
+        this.tradeNotifier = tradeNotifier;
+        volSpreadStrategy.setDecisionListener(decision -> {
+            decisionJournal.record(decision);
+            if (tradeNotifier != null) {
+                tradeNotifier.accept(decision);
+            }
+        });
         System.out.println("[JOURNAL] strategy decisions are appended to " + decisionJournal.path());
         harness.setStrategyMode(strategyMode);
         harness.setOptionStrategy(volSpreadStrategy::step, java.time.Duration.ofSeconds((long) config.getDouble("strategy.option_interval_seconds", 30.0)));
@@ -233,6 +242,42 @@ public class AppCompositionRoot {
             System.out.println("[RECONCILE] " + first.status() + ": " + first.message());
             bookReconciler.start();
         }
+
+        if (pushNotifier.hasRemoteChannel()) {
+            java.util.function.Supplier<String> status = () -> phoneStatus(tradingHalt, pnlHistory);
+            this.statusDigest = new com.sbk.optionspricer.alert.StatusDigest(pushNotifier::sendNotification, status, () -> {
+                try {
+                    return com.sbk.optionspricer.execution.SessionReport.forDay(dataDir, java.time.LocalDate.now(java.time.ZoneOffset.UTC));
+                } catch (java.io.IOException e) {
+                    return status.get();
+                }
+            }, java.time.Clock.systemUTC());
+            statusDigest.sendStartup(status.get());
+            statusDigest.start();
+            System.out.println("[ALERT] Status messages to the phone: on start, after the US open and after the close on weekdays, and on every trade");
+        }
+    }
+
+    /** One short block for the phone: whether trading is on, whether the books agree with Alpaca, the positions, the last decision and the P&L. */
+    private String phoneStatus(com.sbk.optionspricer.execution.TradingHalt halt, com.sbk.optionspricer.execution.PnlHistory pnl) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(halt.isHalted()
+                ? "TRADING HALTED: " + halt.reason().map(com.sbk.optionspricer.execution.TradingHalt.Reason::message).orElse("no reason given")
+                : "Trading active");
+        if (bookReconciler != null && bookReconciler.lastResult() != null) {
+            sb.append(" | books vs Alpaca: ").append(bookReconciler.lastResult().status());
+        }
+        java.util.List<String> held = new java.util.ArrayList<>();
+        positionTracker.getPositions().forEach((symbol, position) -> {
+            if (position.getQuantity() != 0) {
+                held.add(symbol + " " + position.getQuantity());
+            }
+        });
+        sb.append("\nPositions: ").append(held.isEmpty() ? "none" : String.join(", ", held));
+        volSpreadStrategy.lastDecision().ifPresent(d -> sb.append("\nLast decision: ").append(d.summary()));
+        pnl.summary(java.time.Instant.now()).ifPresent(s -> sb.append(String.format(java.util.Locale.ROOT,
+                "%nP&L: total %+.2f (realised %+.2f, unrealised %+.2f), today %+.2f", s.total(), s.realized(), s.unrealized(), s.dayPnl())));
+        return sb.toString();
     }
 
     /**
@@ -300,6 +345,12 @@ public class AppCompositionRoot {
         if (chainRecorder != null) {
             step("chain recorder", chainRecorder::close);
         }
+        if (statusDigest != null) {
+            step("status messages", statusDigest::close);
+        }
+        if (tradeNotifier != null) {
+            step("trade notices", tradeNotifier::close);
+        }
         if (pushNotifier != null) {
             step("push notifications", pushNotifier::close);
         }
@@ -309,6 +360,8 @@ public class AppCompositionRoot {
 
     private boolean closed;
     private com.sbk.optionspricer.volatility.DailyCloseFeed dailyCloseFeed;
+    private com.sbk.optionspricer.alert.StatusDigest statusDigest;
+    private com.sbk.optionspricer.alert.TradeNotifier tradeNotifier;
 
     private static void step(String name, Runnable action) {
         try {

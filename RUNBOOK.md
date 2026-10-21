@@ -329,7 +329,16 @@ Set in `.env` (not in git; see `.env.example`): `NTFY_TOPIC` (a long random name
 `ALERT_WEBHOOK_URL` (it usually contains a secret token). Neither value is printed in the log. Alerts go out on:
 
 1. a **trading halt**, within about a second (a limit breach, a reconciliation mismatch, or the operator's HALT), at urgent priority;
-2. a **graceful shutdown** of the engine (`docker compose stop` or Ctrl+C).
+2. a **graceful shutdown** of the engine (`docker compose stop` or Ctrl+C);
+3. **the engine starting**: "ENGINE STARTED" with whether trading is active, whether the books agree with Alpaca, the positions, the last decision and
+   the P&L. One you did not expect means the engine restarted: a reboot, a crash, or a laptop that went to sleep and woke;
+4. **a summary shortly after the US open** (09:35 New York) and **after the close** (16:10, the day's session report), on weekdays, once each. There is no
+   market calendar, so an exchange holiday still gets both, saying the market is stale; a summary that cannot be built says "status unavailable" instead of
+   being skipped, and one that was due while the laptop slept is sent only if the wake is within an hour of its time;
+5. **every trade**: when the strategy sends orders, "TRADE: <action>" with the decision and each order and how it ended (a refusal is tagged as a warning).
+
+Messages 3 to 5 are sent only when `NTFY_TOPIC` or `ALERT_WEBHOOK_URL` is set; they come from threads of their own, so a slow or failing phone service cannot
+delay a decision.
 
 **To receive them on a phone:** install the ntfy app (Android or iOS), tap +, and subscribe to the topic named after `NTFY_TOPIC=` in `.env` on
 the default server `ntfy.sh`. ntfy.sh keeps sent messages for about 12 hours, so a test sent just before you subscribe usually still shows up. The text sent is the one in the

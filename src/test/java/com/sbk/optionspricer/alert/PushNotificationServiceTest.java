@@ -186,4 +186,17 @@ class PushNotificationServiceTest {
             assertEquals(1, hook.bodies.size(), "and not again on every poll while it stays on");
         }
     }
+
+    @Test
+    void theServiceSaysWhetherAnythingBeyondTheLogWillBeReached() {
+        try (PushNotificationService none = new PushNotificationService(null, null, Duration.ofMinutes(5), null);
+             PushNotificationService blank = new PushNotificationService("  ", "", Duration.ofMinutes(5), null);
+             PushNotificationService ntfy = new PushNotificationService("a-topic", null, Duration.ofMinutes(5), null);
+             PushNotificationService hook = new PushNotificationService(null, "http://127.0.0.1:1/x", Duration.ofMinutes(5), null)) {
+            assertFalse(none.hasRemoteChannel());
+            assertFalse(blank.hasRemoteChannel());
+            assertTrue(ntfy.hasRemoteChannel());
+            assertTrue(hook.hasRemoteChannel());
+        }
+    }
 }

@@ -170,6 +170,11 @@ public final class SessionReport {
     }
 
     /** The P&L samples in {@code pnl_history.csv} (timestamp, spot, realizedPnl, unrealizedPnl); none if the file is absent. */
+    /** The report for one UTC day from the journal and the P&L file in {@code dataDir}; "no decisions recorded" when there are none. */
+    public static String forDay(Path dataDir, LocalDate day) throws IOException {
+        return build(DecisionJournal.read(dataDir.resolve("decisions.csv")), readPnl(dataDir.resolve("pnl_history.csv")), day);
+    }
+
     public static List<PnlSample> readPnl(Path file) throws IOException {
         if (file == null || !Files.exists(file)) {
             return List.of();

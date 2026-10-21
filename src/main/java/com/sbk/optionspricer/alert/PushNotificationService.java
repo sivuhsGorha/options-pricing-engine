@@ -68,6 +68,11 @@ public final class PushNotificationService implements AutoCloseable {
         registerShutdownHook();
     }
 
+    /** True when a topic or a webhook is configured, so a message reaches beyond the log. */
+    public boolean hasRemoteChannel() {
+        return ntfyTopic != null || webhookUrl != null;
+    }
+
     /**
      * Attaches to a {@link TradingHalt} to immediately fire a notification when trading halts.
      */
