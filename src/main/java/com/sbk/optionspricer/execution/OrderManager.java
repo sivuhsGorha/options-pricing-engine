@@ -72,6 +72,20 @@ public class OrderManager {
     };
     private final java.util.Deque<ExecutionAuditRecord> auditQueue = new java.util.ArrayDeque<>();
     private volatile Runnable fillListener = () -> { };
+    private volatile ExecutionQuality executionQuality = ExecutionQuality.shared();
+
+    /** Where the cost and fill rate of orders that reach the venue are recorded; the shared tracker unless a test brings its own. */
+    public void setExecutionQuality(ExecutionQuality quality) {
+        this.executionQuality = quality == null ? ExecutionQuality.shared() : quality;
+    }
+
+    private static double midOf(com.sbk.optionspricer.market.MarketSnapshot s) {
+        return s.hasBook() ? (s.bid() + s.ask()) / 2.0 : Double.NaN;
+    }
+
+    private static double touchOf(com.sbk.optionspricer.market.MarketSnapshot s, boolean buy) {
+        return s.hasBook() ? (buy ? s.ask() : s.bid()) : Double.NaN;
+    }
 
     /**
      * Runs after every booked fill, on the submitting thread: the application passes the valuation service's
@@ -195,6 +209,8 @@ public class OrderManager {
         }
 
         ExecutionResult result = transport.transmit(order, snapshot.symbol(), snapshot.bid(), snapshot.ask());
+        executionQuality.record("single", order.quantity(), result.executed() ? result.filledQuantity() : 0, order.isBuy(), midOf(snapshot),
+                touchOf(snapshot, order.isBuy()), result.executed() ? result.executionPrice() : Double.NaN, multiplier);
         if (!result.executed()) {
             String why = result.message() == null || result.message().isBlank() ? "" : ": " + result.message();
             return reject(orderId, mds, result.message(), "execution transport rejected the order" + why);
@@ -307,6 +323,7 @@ public class OrderManager {
         }
 
         ExecutionResult result = transport.transmitMultiLeg(legOrders, symbols, bids, asks, netLimitPrice, closing);
+        recordMultiLegQuality(legOrders, snapshots, result);
         if (!result.executed()) {
             return reject(orderId, snapshots.get(0).status(), result.message(), "execution transport rejected multi-leg order: " + result.message());
         }
@@ -361,6 +378,29 @@ public class OrderManager {
             System.err.println("[ORDER MANAGER] post-fill listener failed: " + e.getMessage());
         }
         return new OrderDecision(true, status, "multi-leg order filled", orderId);
+    }
+
+    /** One record for the whole complex order: the net of the legs' mids and touches against the net price the venue reported. */
+    private void recordMultiLegQuality(java.util.List<Order> legOrders, java.util.List<com.sbk.optionspricer.market.MarketSnapshot> snapshots,
+                                       ExecutionResult result) {
+        double netMid = 0.0;
+        double netTouch = 0.0;
+        boolean known = true;
+        for (int i = 0; i < legOrders.size(); i++) {
+            double sign = legOrders.get(i).isBuy() ? 1.0 : -1.0;
+            double mid = midOf(snapshots.get(i));
+            double touch = touchOf(snapshots.get(i), legOrders.get(i).isBuy());
+            if (!Double.isFinite(mid) || !Double.isFinite(touch)) {
+                known = false;
+                break;
+            }
+            netMid += sign * mid;
+            netTouch += sign * touch;
+        }
+        boolean debit = !known || netMid >= 0.0;
+        executionQuality.record("multileg", legOrders.get(0).quantity(), result.executed() ? result.filledQuantity() : 0, debit,
+                known ? Math.abs(netMid) : Double.NaN, known ? Math.abs(netTouch) : Double.NaN,
+                result.executed() ? result.executionPrice() : Double.NaN, snapshots.get(0).multiplierOr(contractMultiplier));
     }
 
     private OrderDecision reject(long orderId, com.sbk.optionspricer.market.MarketDataStatus mds, String auditReason, String message) {

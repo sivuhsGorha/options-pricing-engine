@@ -512,6 +512,7 @@ public class OptionsDashboardServer {
         }
         body.put("components", components);
         body.put("latencyMs", com.sbk.optionspricer.metrics.LatencyTracker.shared().toJson());
+        body.put("executionQuality", com.sbk.optionspricer.execution.ExecutionQuality.shared().toJson());
 
         boolean marketFresh = "LIVE".equals(sourceStatus) || "DELAYED".equals(sourceStatus);
         boolean surfaceFailed = "FAILED".equals(surface.get("status"));
