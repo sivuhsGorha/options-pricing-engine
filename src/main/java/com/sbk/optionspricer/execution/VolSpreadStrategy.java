@@ -727,6 +727,10 @@ public final class VolSpreadStrategy {
      * coming without letting it trade.
      */
     private String shadowReadout(LocalDate expiry, double strike, double t, double marketIv) {
+        return vrpReadout(expiry, strike, t, marketIv) + surfaceReadout(t);
+    }
+
+    private String vrpReadout(LocalDate expiry, double strike, double t, double marketIv) {
         if (fairVolProvider == null || params.usesFairVolReference()) {
             return "";
         }
@@ -735,6 +739,18 @@ public final class VolSpreadStrategy {
             return "";
         }
         return String.format(Locale.ROOT, " | RV forecast %.1f%%, VRP %+.1f pts", 100 * fair.getAsDouble(), 100 * (marketIv - fair.getAsDouble()));
+    }
+
+    /** " | skew +3.0 pts, term +1.2 pts over 60d" from the SSVI fit: evidence beside the decision, never an input to it. */
+    private String surfaceReadout(double t) {
+        try {
+            return surfaces.latest()
+                    .flatMap(s -> com.sbk.optionspricer.volatility.SurfaceReadouts.of(s.ssvi(), t, s.spot()))
+                    .map(r -> " | " + r.text())
+                    .orElse("");
+        } catch (RuntimeException e) {
+            return ""; // a readout that cannot be computed is left out; it must never cost a decision
+        }
     }
 
     private static OptionalDouble nearestStrike(OptionChain chain, double forward) {

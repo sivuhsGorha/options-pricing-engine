@@ -430,6 +430,18 @@ class VolSpreadStrategyTest {
     private static final Instant SATURDAY = Instant.parse("2026-10-10T15:00:00Z");
 
     @Test
+    void aHoldReportsTheSurfacesSkewAndTermStructureBesideTheEdgeWithoutActingOnThem() {
+        PositionTracker tracker = new PositionTracker(FillRecorder.NONE);
+        VolSpreadStrategy s = strategy(tracker, new FlatChains(0.20, TODAY), 0.20, null, Clock.fixed(NOW, ZoneOffset.UTC));
+
+        VolSpreadStrategy.Decision d = s.step();
+
+        assertEquals("HOLD", d.action(), d.summary());
+        assertTrue(d.reason().contains("skew") && d.reason().contains("pts"), "the readout rides along in the reason: " + d.reason());
+        assertTrue(d.orders().isEmpty() && tracker.getPositions().isEmpty(), "and changes nothing");
+    }
+
+    @Test
     void everyStrategyStepIsTimed() {
         VolSpreadStrategy s = strategy(new PositionTracker(FillRecorder.NONE), new FlatChains(0.20, TODAY), 0.20, null, Clock.fixed(NOW, ZoneOffset.UTC));
         var before = com.sbk.optionspricer.metrics.LatencyTracker.shared().snapshot().get("strategy.step");
