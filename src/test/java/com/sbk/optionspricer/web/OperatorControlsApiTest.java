@@ -107,6 +107,19 @@ class OperatorControlsApiTest {
     }
 
     @Test
+    void metricsAreServedInPrometheusTextToAnAuthenticatedClientOnly() throws Exception {
+        String origin = OptionsDashboardServerTest.ALLOWED_ORIGIN;
+
+        assertEquals(401, call("GET", "/metrics", null, null, origin).statusCode());
+        HttpResponse<String> ok = call("GET", "/metrics", null, cookie(), origin);
+
+        assertEquals(200, ok.statusCode());
+        assertTrue(ok.headers().firstValue("Content-Type").orElse("").startsWith("text/plain; version=0.0.4"), ok.headers().toString());
+        assertTrue(ok.body().contains("# TYPE engine_up gauge\nengine_up 1\n"), ok.body());
+        assertTrue(ok.body().contains("engine_trading_halted 0"), ok.body());
+    }
+
+    @Test
     void everyControlActionAndEveryRefusedAttemptIsWrittenToTheAuditLog() throws Exception {
         Path auditFile = Files.createTempDirectory("control-audit").resolve("control_audit.csv");
         server.setControlAudit(new ControlAuditLog(auditFile, java.time.Clock.systemUTC()));

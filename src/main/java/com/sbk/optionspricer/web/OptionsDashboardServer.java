@@ -836,6 +836,20 @@ public class OptionsDashboardServer {
             sendJson(exchange, 200, healthBody());
         }));
 
+        server.createContext("/metrics", guarded(exchange -> {
+            applySecurityHeaders(exchange, true, isSecureRequest(exchange));
+            if (!authorizeApi(exchange)) return;
+            if (!"GET".equals(exchange.getRequestMethod())) {
+                exchange.getResponseHeaders().set("Allow", "GET");
+                sendJsonError(exchange, 405, "method not allowed");
+                return;
+            }
+            var source = valuationSource;
+            com.sbk.optionspricer.execution.Valuation valuation = source == null ? null : source.latestValuation().orElse(null);
+            exchange.getResponseHeaders().set("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
+            send(exchange, 200, PrometheusMetrics.render(PrometheusMetrics.fromEngine(healthBody(), valuation)));
+        }));
+
         server.createContext("/api/execution", guarded(exchange -> {
             applySecurityHeaders(exchange, true, isSecureRequest(exchange));
             if (!authorizeApi(exchange)) return;
