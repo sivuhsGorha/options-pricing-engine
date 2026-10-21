@@ -325,16 +325,26 @@ indicative quotes swing from tight to wide within seconds. Each attempt is in EX
 
 ## Push alerts
 
-Optional, set in `.env` (see `.env.example`): `NTFY_TOPIC` (a long random name: anyone who knows a public ntfy.sh topic
-can read it) and `ALERT_WEBHOOK_URL` (it usually contains a secret token); `ALERT_STALE_MINUTES` is read but nothing uses it
-yet. Neither value is printed in the log. Alerts go out on:
+Set in `.env` (not in git; see `.env.example`): `NTFY_TOPIC` (a long random name: anyone who knows a public ntfy.sh topic can read it) and/or
+`ALERT_WEBHOOK_URL` (it usually contains a secret token). Neither value is printed in the log. Alerts go out on:
 
-1. a **trading halt** (a limit breach, a reconciliation mismatch, or the operator's HALT);
-2. a **graceful shutdown** of the engine (`docker compose stop` or Ctrl+C). A crash, a power loss or a sleeping laptop
-   sends nothing.
+1. a **trading halt**, within about a second (a limit breach, a reconciliation mismatch, or the operator's HALT), at urgent priority;
+2. a **graceful shutdown** of the engine (`docker compose stop` or Ctrl+C).
 
-There is no market-data-stale alert: the code for one exists, but nothing calls it, because with no market calendar it
-would fire every night, weekend and close.
+**To receive them on a phone:** install the ntfy app (Android or iOS), tap +, and subscribe to the topic named after `NTFY_TOPIC=` in `.env` on
+the default server `ntfy.sh`. ntfy.sh keeps sent messages for about 12 hours, so a test sent just before you subscribe usually still shows up. The text sent is the one in the
+log, for example "Options trading halted: book does not match the Alpaca account: ...": position names and quantities, no keys or passwords.
+
+**To test the whole path** (only with the market closed, since a halt stops trading until cleared): `POST /api/control/halt` with a reason and then
+`POST /api/control/resume` (the dashboard's HALT and RESUME buttons do the same). The phone should buzz within seconds; the engine log shows
+`[ALERT][URGENT] TRADING HALTED`. If a send fails, the log says `[ALERT] ... not delivered` with the HTTP status or the kind of error, never the
+topic or the URL.
+
+**What sends nothing:** a crash, a power loss, a sleeping laptop or a stopped Docker Desktop, because the engine that would send the alert is the thing
+that is down. Catching that needs a check from outside the machine (a heartbeat the engine pings and a service that alerts when the pings stop); none is
+set up. A halt tripped while the phone alert was off is found only by reading `/api/control` or the log, which is how the halt of 2026-10-20 15:22
+stayed on overnight. `ALERT_STALE_MINUTES` is read but nothing uses it yet, and there is no market-data-stale alert: with no market calendar it would
+fire every night, weekend and close.
 
 ## Downtime banner
 

@@ -142,8 +142,15 @@ public final class PushNotificationService implements AutoCloseable {
                 }
                 HttpResponse<String> resp = httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofString());
                 sent = resp.statusCode() >= 200 && resp.statusCode() < 300;
-            } catch (IOException | InterruptedException e) {
-                System.err.println("[ALERT] Failed to send ntfy alert: " + e.getMessage());
+                if (!sent) {
+                    System.err.println("[ALERT] ntfy.sh answered HTTP " + resp.statusCode() + ": the alert was not delivered");
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                System.err.println("[ALERT] ntfy alert not delivered: interrupted");
+            } catch (IOException | RuntimeException e) {
+                // the topic is not printed: a public topic is readable by anyone who knows its name
+                System.err.println("[ALERT] ntfy alert not delivered: " + e.getClass().getSimpleName());
             }
         }
 
@@ -160,8 +167,15 @@ public final class PushNotificationService implements AutoCloseable {
                         .build();
                 HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
                 sent = resp.statusCode() >= 200 && resp.statusCode() < 300;
-            } catch (IOException | InterruptedException e) {
-                System.err.println("[ALERT] Failed to send webhook alert: " + e.getMessage());
+                if (!sent) {
+                    System.err.println("[ALERT] webhook answered HTTP " + resp.statusCode() + ": the alert was not delivered");
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                System.err.println("[ALERT] webhook alert not delivered: interrupted");
+            } catch (IOException | RuntimeException e) {
+                // the URL is not printed (it usually carries a secret token), and neither is the exception text, which can quote it
+                System.err.println("[ALERT] webhook alert not delivered: " + e.getClass().getSimpleName());
             }
         }
 
