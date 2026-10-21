@@ -63,6 +63,10 @@ public class Main {
             System.exit(runOptionHistoryStudy(args.length > 1 ? Double.parseDouble(args[1]) : 0.04));
             return;
         }
+        if (args.length > 0 && "--chain-replay".equals(args[0])) {
+            System.exit(runChainReplay(args.length > 1 ? Double.parseDouble(args[1]) : 0.04));
+            return;
+        }
         if (args.length > 0 && "--vrp-study".equals(args[0])) {
             System.exit(runVrpStudy(java.nio.file.Path.of(args.length > 1 ? args[1] : "data/historical/VIX_History.csv")));
             return;
@@ -231,6 +235,116 @@ public class Main {
         System.out.println("[HISTORY] account cannot write uncovered options (Alpaca refuses them). Early 2024 to now is one market and about 2.7 years, with American-style exercise and");
         System.out.println("[HISTORY] dividends ignored. It says whether the premium survives costs on real option prices, and nothing about the future.");
         return 0;
+    }
+
+    /** Fewest decision days worth analysing. */
+    static final int CHAIN_REPLAY_MIN_OBSERVATIONS = 30;
+
+    public static int runChainReplay(double costPerLeg) {
+        com.sbk.optionspricer.execution.AlpacaPaperClient client;
+        try {
+            client = com.sbk.optionspricer.execution.AlpacaPaperClient.fromEnv();
+        } catch (RuntimeException e) {
+            System.err.println("[REPLAY] Cannot reach Alpaca: " + e.getMessage());
+            System.err.println("[REPLAY] It never invents prices. Put ALPACA_KEY_ID and ALPACA_SECRET in .env and run it from the project folder.");
+            return 2;
+        }
+        return runChainReplay(start -> client.dailyBarsFrom(REPLAY_SYMBOL, start).stream()
+                        .map(b -> new com.sbk.optionspricer.volatility.VrpStudy.Close(b.date(), b.close())).toList(),
+                (call, put, from, to) -> {
+                    try {
+                        Thread.sleep(150); // a polite pace for the data API
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                    var bars = client.optionDailyBars(java.util.List.of(call, put), from, to);
+                    java.util.TreeMap<java.time.LocalDate, com.sbk.optionspricer.volatility.OptionHistoryStudy.Quotes> days = new java.util.TreeMap<>();
+                    var calls = bars.getOrDefault(call, java.util.Map.of());
+                    var puts = bars.getOrDefault(put, java.util.Map.of());
+                    calls.forEach((day, c) -> {
+                        Double p = puts.get(day);
+                        if (p != null) {
+                            days.put(day, new com.sbk.optionspricer.volatility.OptionHistoryStudy.Quotes(c, p));
+                        }
+                    });
+                    return days;
+                }, costPerLeg);
+    }
+
+    /**
+     * Replays the engine's signal (implied volatility against an EWMA realized-volatility forecast) on real daily option prices, every Monday, on the
+     * straddle at the nearest strike about 28 days out, and prints whether the edge predicted what a buyer made. Stops without a table when the closes
+     * or the prices cannot be had.
+     */
+    public static int runChainReplay(java.util.function.Function<java.time.LocalDate, java.util.List<com.sbk.optionspricer.volatility.VrpStudy.Close>> closesSource,
+                                     com.sbk.optionspricer.volatility.ChainReplay.Pricer pricer, double costPerLeg) {
+        System.out.println("=========================================================================");
+        System.out.println("      BLACKTHORN STERLING  CHAIN REPLAY ON REAL OPTION PRICES            ");
+        System.out.println("=========================================================================");
+        java.util.List<com.sbk.optionspricer.volatility.ChainReplay.Observation> observations;
+        try {
+            java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneOffset.UTC);
+            var closes = closesSource.apply(java.time.LocalDate.of(2023, 10, 1)).stream()
+                    .filter(c -> c.date().isBefore(today) && Double.isFinite(c.close()) && c.close() > 0.0).toList();
+            java.time.LocalDate first = closes.stream().map(com.sbk.optionspricer.volatility.VrpStudy.Close::date).min(java.util.Comparator.naturalOrder()).orElseThrow();
+            java.time.LocalDate last = closes.stream().map(com.sbk.optionspricer.volatility.VrpStudy.Close::date).max(java.util.Comparator.naturalOrder()).orElseThrow();
+            // option history starts in early 2024; the forecast needs a few weeks of closes before the first decision
+            java.time.LocalDate begin = first.plusDays(40).isAfter(java.time.LocalDate.of(2024, 2, 1)) ? first.plusDays(40) : java.time.LocalDate.of(2024, 2, 1);
+            observations = com.sbk.optionspricer.volatility.ChainReplay.replay(closes,
+                    com.sbk.optionspricer.volatility.ChainReplay.mondays(begin, last.minusDays(32)), 28, 7,
+                    com.sbk.optionspricer.volatility.RealizedVolForecast.DEFAULT_EWMA_LAMBDA, REPLAY_RATE, REPLAY_DIVIDEND_YIELD, pricer);
+        } catch (RuntimeException e) {
+            System.err.println("[REPLAY] Cannot get the closes or the option prices: " + e.getMessage());
+            System.err.println("[REPLAY] It never invents them. Put ALPACA_KEY_ID and ALPACA_SECRET in .env and run it from the project folder.");
+            return 2;
+        }
+        if (observations.size() < CHAIN_REPLAY_MIN_OBSERVATIONS) {
+            System.err.println("[REPLAY] Only " + observations.size() + " decision days have prices; at least " + CHAIN_REPLAY_MIN_OBSERVATIONS + " are needed. It never invents the rest.");
+            return 2;
+        }
+        var f = java.util.Locale.ROOT;
+        var a = com.sbk.optionspricer.volatility.ChainReplay.analyse(observations, costPerLeg, 0.005, 28, 7);
+        System.out.printf(f, "[REPLAY] SPY, %s to %s: %d Mondays with a straddle at the nearest strike about 28 days out, bought at the closing prices.%n",
+                observations.get(0).entry(), observations.get(observations.size() - 1).entry(), a.n());
+        System.out.printf(f, "[REPLAY] Costs assumed: $%.2f a share on each of the two legs, once. Edge = the straddle's implied volatility minus an EWMA forecast of realized volatility.%n", costPerLeg);
+        System.out.printf(f, "%nMean edge %+.1f points; a buyer holding to expiry made %+.0f dollars per straddle on average, costs included.%n",
+                100 * a.meanEdge(), 100 * a.meanLongPnlAtExpiry());
+
+        System.out.println();
+        System.out.println("Edge and the buyer's result (dollars per straddle, held to expiry):");
+        System.out.printf(f, "  correlation %+.2f, slope %+.0f dollars per point of edge, t-statistic %+.1f on about %.0f independent observations%n",
+                a.correlation(), a.slopeOfPnlOnEdge(), a.slopeTStat(), a.effectiveN());
+        System.out.println("| Edge | Days | Mean edge (pts) | Buyer's mean | Standard error |");
+        System.out.println("| :--- | ---: | --------------: | -----------: | -------------: |");
+        String[] names = {"Lowest third", "Middle third", "Highest third"};
+        for (int i = 0; i < 3; i++) {
+            var tercile = a.terciles().get(i);
+            System.out.printf(f, "| %s | %d | %+.1f | %+.0f | %.0f |%n", names[i], tercile.n(), 100 * tercile.meanEdge(), 100 * tercile.meanLongPnl(), 100 * tercile.standardError());
+        }
+
+        System.out.println();
+        System.out.println("The engine's rule (buy below minus half a point of edge, sell above plus half a point):");
+        System.out.println("| Side | Days | Mean result | Standard error |");
+        System.out.println("| :--- | ---: | ----------: | -------------: |");
+        System.out.printf(f, "| Buy | %d | %s | %s |%n", a.longRule().n(), dollars(a.longRule().meanPnl()), spread(a.longRule().standardError()));
+        System.out.printf(f, "| Sell (hypothetical) | %d | %s | %s |%n", a.shortRule().n(), dollars(a.shortRule().meanPnl()), spread(a.shortRule().standardError()));
+        System.out.println();
+        System.out.println("[REPLAY] Mondays 28 days out overlap four at a time, so they are not independent: the standard errors and the t-statistic use about a quarter of the days.");
+        System.out.println("[REPLAY] This is not a test of the engine: it decides from closing prices once a week and holds to expiry, where the engine looks every few minutes, hedges and exits early.");
+        System.out.println("[REPLAY] A close has no bid or ask, so costs are assumed. The sell rows are what a seller would have made: this account cannot write uncovered options. About two");
+        System.out.println("[REPLAY] years of one market is a screen, not a result: a t-statistic below about 2 means the edge did not predict the result, whatever the signs say.");
+        return 0;
+    }
+
+    private static final double REPLAY_RATE = 0.045;
+    private static final double REPLAY_DIVIDEND_YIELD = 0.013;
+
+    private static String spread(double perShare) {
+        return Double.isFinite(perShare) ? String.format(java.util.Locale.ROOT, "%.0f", 100 * perShare) : "-";
+    }
+
+    private static String dollars(double perShare) {
+        return Double.isFinite(perShare) ? String.format(java.util.Locale.ROOT, "%+.0f", 100 * perShare) : "-";
     }
 
     private static void printSchedule(String name, String how, com.sbk.optionspricer.volatility.OptionHistoryStudy.Result r, double cost, boolean showDrawdown) {

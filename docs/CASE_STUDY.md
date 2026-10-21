@@ -33,7 +33,7 @@ feed, and a column labelled "worst month" that was the worst window from any sta
 
 ## What the evidence says about making money
 
-Three studies, each labelled for what it is:
+Four studies, each labelled for what it is:
 
 1. **Implied against realised volatility, ten years** (2,693 days, SPY and the VIX). The VIX averaged 18.5 and the volatility that followed 14.7, a
    premium of +3.8 vol points, positive on 84% of days. A short variance position sized at $1 a vol point averaged +2.1 a month with a standard deviation
@@ -42,6 +42,13 @@ Three studies, each labelled for what it is:
    expiry paid $1,866. The buyer averaged -$320 a straddle and the seller +$304, about 1.2 standard errors from zero, and the seller's sign changed by year.
 3. **Realised-volatility forecasts, walk-forward** on 343 closes. A simple EWMA beat both a textbook HAR and one fitted to the data (21-day RMSE 3.87
    against 5.26 and 4.40 vol points), so the live readout uses EWMA.
+
+4. **The engine's own signal on real option prices** (`--chain-replay`: 130 Mondays, February 2024 to September 2026). Each Monday it takes the straddle at
+   the nearest strike about 28 days out, backs the implied volatility out of the closing prices and subtracts the same EWMA forecast the live engine reports.
+   The edge did not predict what a buyer made: correlation +0.04, a slope of +$12 per point of edge, t-statistic +0.2 on about 33 independent observations.
+   Split in thirds by edge, the buyer averaged -$199, -$459 and -$73 (standard errors $320 to $470), no pattern. Buying when the edge was below minus half a point
+   averaged -$319 (standard error $495); selling when it was above, which this account cannot do, +$223 (standard error $312). Both are inside their noise.
+   This is the question that decides whether the strategy is worth running, and on this data the answer is that the edge it trades on did not predict anything.
 
 **What the engine itself did.** It placed one trade on its own signal (three straddles, +$12 over about nine minutes), which is a sample of one. The round trips
 made to test the order path cost $3 to $19 each in spread. No edge has been demonstrated.

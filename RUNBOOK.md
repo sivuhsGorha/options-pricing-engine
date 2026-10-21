@@ -248,6 +248,19 @@ To keep it running through a session:
 A laptop that sleeps is a poor host for an engine that is meant to watch a market all day. The VPS route in "Hosting
 on a server" is the real fix; this section only reduces the gaps until then.
 
+## Does the edge predict anything? (the chain replay)
+
+```powershell
+java --add-modules jdk.incubator.vector -cp "target/classes;target/lib/*" com.sbk.optionspricer.Main --chain-replay 0.04
+```
+
+Same keys and cost argument as the history study, about 130 calls and two minutes, read-only. Every Monday since February 2024 it takes the straddle at the nearest
+strike about 28 days out, solves its implied volatility from the closing prices, subtracts the EWMA realized-volatility forecast the engine reports, and prints
+whether that edge predicted what a buyer made held to expiry: the correlation, the slope, the t-statistic, the result by third of edge, and what the engine's rule
+(buy below minus half a point, sell above plus half a point) would have made. Mondays 28 days out overlap four at a time, so the standard errors use a quarter of
+the days. A t-statistic below about 2 means the edge did not predict the result. It is a screen on closing prices, not a test of the engine's minute-by-minute
+trading. The last run (2026-10-21) gave a t-statistic of +0.2: no relationship.
+
 ## A straddle on real option prices (the history study)
 
 ```powershell
