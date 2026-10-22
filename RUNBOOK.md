@@ -248,6 +248,17 @@ To keep it running through a session:
 A laptop that sleeps is a poor host for an engine that is meant to watch a market all day. The VPS route in "Hosting
 on a server" is the real fix; this section only reduces the gaps until then.
 
+## Would trend-following have beaten holding SPY? (the trend study)
+
+```powershell
+java --add-modules jdk.incubator.vector -cp "target/classes;target/lib/*" com.sbk.optionspricer.Main --trend-study 200 5
+```
+
+Arguments: the moving-average window in days and the cost of a change of position in basis points. Same keys as the other studies; about ten years of SPY daily closes, a few
+seconds. It compares being long when the close is above its average and in cash otherwise with holding, and applies a rule fixed in advance: the largest fall at most three
+quarters of the market's, a Sharpe ratio at least 0.4 better, a smaller fall in each half of the data and with the 100, 150 and 250-day windows. The 0.4 was chosen so the rule
+passes only about 5% of simulated markets with nothing to find. The run of 2026-10-22 gave FAIL: a third less fall from the peak, but a lower return and no better Sharpe ratio.
+
 ## Would selling defined-risk spreads have paid? (the spread study)
 
 ```powershell

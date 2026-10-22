@@ -72,6 +72,10 @@ public class Main {
                     args.length > 3 ? Double.parseDouble(args[3]) : 5.0));
             return;
         }
+        if (args.length > 0 && "--trend-study".equals(args[0])) {
+            System.exit(runTrendStudy(args.length > 1 ? Integer.parseInt(args[1]) : 200, args.length > 2 ? Double.parseDouble(args[2]) : 5.0));
+            return;
+        }
         if (args.length > 0 && "--vrp-study".equals(args[0])) {
             System.exit(runVrpStudy(java.nio.file.Path.of(args.length > 1 ? args[1] : "data/historical/VIX_History.csv")));
             return;
@@ -160,6 +164,74 @@ public class Main {
             return client.dailyBars(REPLAY_SYMBOL, start).stream()
                     .map(b -> new com.sbk.optionspricer.volatility.DailyCloseFeed.DailyClose(b.date(), b.close())).toList();
         });
+    }
+
+    public static int runTrendStudy(int window, double costBps) {
+        com.sbk.optionspricer.execution.AlpacaPaperClient client;
+        try {
+            client = com.sbk.optionspricer.execution.AlpacaPaperClient.fromEnv();
+        } catch (RuntimeException e) {
+            System.err.println("[TREND] Cannot reach Alpaca: " + e.getMessage());
+            System.err.println("[TREND] It never invents prices. Put ALPACA_KEY_ID and ALPACA_SECRET in .env and run it from the project folder.");
+            return 2;
+        }
+        return runTrendStudy(start -> client.dailyBarsFrom(REPLAY_SYMBOL, start).stream()
+                .map(b -> new com.sbk.optionspricer.volatility.VrpStudy.Close(b.date(), b.close())).toList(), window, costBps);
+    }
+
+    /**
+     * Compares trend-following on SPY (long above the moving average, cash below) with holding it, over about ten years of daily closes, and applies the pass
+     * rule written in {@code TrendStudy} before the first run. Stops without a table when the closes cannot be had.
+     */
+    public static int runTrendStudy(java.util.function.Function<java.time.LocalDate, java.util.List<com.sbk.optionspricer.volatility.VrpStudy.Close>> closesSource,
+                                    int window, double costBps) {
+        System.out.println("=========================================================================");
+        System.out.println("        BLACKTHORN STERLING  TREND-FOLLOWING VS HOLDING SPY              ");
+        System.out.println("=========================================================================");
+        java.util.List<com.sbk.optionspricer.volatility.VrpStudy.Close> closes;
+        com.sbk.optionspricer.volatility.TrendStudy.Result result;
+        com.sbk.optionspricer.volatility.TrendStudy.Verdict verdict;
+        try {
+            java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneOffset.UTC);
+            closes = closesSource.apply(java.time.LocalDate.of(2015, 1, 1)).stream()
+                    .filter(c -> c.date().isBefore(today) && Double.isFinite(c.close()) && c.close() > 0.0).toList();
+            result = com.sbk.optionspricer.volatility.TrendStudy.run(closes, window, costBps, 0.0);
+            verdict = com.sbk.optionspricer.volatility.TrendStudy.evaluate(closes, window, costBps, 0.0);
+        } catch (RuntimeException e) {
+            System.err.println("[TREND] Cannot get enough closes: " + e.getMessage());
+            System.err.println("[TREND] It never invents them. Put ALPACA_KEY_ID and ALPACA_SECRET in .env and run it from the project folder.");
+            return 2;
+        }
+        var f = java.util.Locale.ROOT;
+        System.out.printf(f, "[TREND] SPY daily closes, %s to %s (%d days after the %d-day warm-up). Long when the close is above its %d-day average, in cash when it is not;%n",
+                closes.get(window).date(), closes.get(closes.size() - 1).date(), result.days(), window, window);
+        System.out.printf(f, "[TREND] the signal at one close sets the next day's position. Each change of position costs %.0f basis points. Price returns, no dividends, cash earns nothing.%n", costBps);
+        System.out.println();
+        System.out.println("|  | Trend rule | Buy and hold |");
+        System.out.println("| :--- | ---: | ---: |");
+        var t = result.trend();
+        var h = result.hold();
+        System.out.printf(f, "| Total return | %+.0f%% | %+.0f%% |%n", 100 * t.totalReturn(), 100 * h.totalReturn());
+        System.out.printf(f, "| Per year | %+.1f%% | %+.1f%% |%n", 100 * t.cagr(), 100 * h.cagr());
+        System.out.printf(f, "| Volatility | %.1f%% | %.1f%% |%n", 100 * t.annualVol(), 100 * h.annualVol());
+        System.out.printf(f, "| Sharpe (no risk-free rate) | %.2f | %.2f |%n", t.sharpe(), h.sharpe());
+        System.out.printf(f, "| Largest fall from a peak | %.0f%% | %.0f%% |%n", 100 * t.maxDrawdown(), 100 * h.maxDrawdown());
+        System.out.printf(f, "| Time in the market | %.0f%% | 100%% |%n", 100 * t.timeInMarket());
+        System.out.printf(f, "| Changes of position | %d | 0 |%n", t.switches());
+
+        System.out.println();
+        System.out.printf(f, "Pass rule (written before the run): the largest fall at most three quarters of the market's, a Sharpe ratio at least %.1f above it, a smaller fall in each half of%n",
+                com.sbk.optionspricer.volatility.TrendStudy.SHARPE_MARGIN);
+        System.out.println("the data, and a smaller fall with the 100, 150 and 250-day windows too.");
+        System.out.printf(f, "  fall at most 75%% of the market's: %s (%.0f%% against %.0f%%) | Sharpe clearly better: %s (%.2f against %.2f) | both halves agree: %s | other windows agree: %s -> %s%n",
+                yesNo(verdict.drawdownMuchSmaller()), 100 * verdict.trendMaxDrawdown(), 100 * verdict.holdMaxDrawdown(), yesNo(verdict.sharpeClearlyBetter()),
+                verdict.trendSharpe(), verdict.holdSharpe(), yesNo(verdict.bothHalvesAgree()), yesNo(verdict.neighbourWindowsAgree()), verdict.overall());
+        System.out.println();
+        System.out.println("[TREND] PASS means the rule was met on this data, UNPROVEN that it did better on the first two tests but not on the other two, FAIL that it did not do better. This is a screen, not a trade signal:");
+        System.out.println("[TREND] it is one market over about ten years, which includes 2020 and 2022. The rule was calibrated on simulated markets with nothing to find, where it passes about 5% of the time:");
+        System.out.println("[TREND] that is its false-positive rate, so one pass would still be one result in 20 by luck alone. It says nothing about how a rule that sits out part of a rising market feels");
+        System.out.println("[TREND] to hold, nor about taxes. Trend rules usually earn less than holding in a rising market and fall less in a crash: this checks only whether the trade-off was worth it here.");
+        return 0;
     }
 
     /** Fewest monthly trades worth summarising. */

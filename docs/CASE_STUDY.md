@@ -33,7 +33,7 @@ feed, and a column labelled "worst month" that was the worst window from any sta
 
 ## What the evidence says about making money
 
-Five studies, each labelled for what it is:
+Six studies, each labelled for what it is:
 
 1. **Implied against realised volatility, ten years** (2,693 days, SPY and the VIX). The VIX averaged 18.5 and the volatility that followed 14.7, a
    premium of +3.8 vol points, positive on 84% of days. A short variance position sized at $1 a vol point averaged +2.1 a month with a standard deviation
@@ -55,6 +55,13 @@ Five studies, each labelled for what it is:
    worst trade -$462). An iron condor collected $188 against $312 and averaged +$33 (t-statistic +0.8, 73% winners, worst -$374). The weekly versions, which overlap, averaged
    +$15 and -$2. Both lost money in 2025. The rule needs a positive mean, a t-statistic above 2, a positive mean every year and an affordable worst trade: both met the first and
    last and missed the other two, so the verdict is UNPROVEN, not a pass. About thirty trades cannot tell a small premium from zero, and the losses of a premium seller arrive rarely and large.
+
+6. **Trend-following against holding SPY** (`--trend-study`, ten years of daily closes, October 2016 to October 2026, long above the 200-day average and in cash below it,
+   5 basis points a switch). The rule was written before the run and calibrated on simulated markets with nothing to find, where it passes about 5% of the time. Result: the
+   trend rule returned +8.8% a year against +13.8% for holding, with volatility of 11.8% against 17.7% and a largest fall of 22% against 34%. Its Sharpe ratio was 0.78 against
+   0.82, not the 0.4 better the rule asks for, so the verdict is FAIL. It did cut the fall from a peak by a third, and that held in both halves of the data and for the 100, 150
+   and 250-day windows, which is the usual trade of trend-following: less return and less pain, not more reward for the risk. Cash earned nothing in the test, which understates
+   it slightly: even at 2% a year on the 17% of the time it was out, that is about 0.3% a year, nowhere near enough to change the verdict.
 
 **What the engine itself did.** It placed one trade on its own signal (three straddles, +$12 over about nine minutes), which is a sample of one. The round trips
 made to test the order path cost $3 to $19 each in spread. No edge has been demonstrated.
