@@ -248,6 +248,17 @@ To keep it running through a session:
 A laptop that sleeps is a poor host for an engine that is meant to watch a market all day. The VPS route in "Hosting
 on a server" is the real fix; this section only reduces the gaps until then.
 
+## Would sizing by forecast volatility have helped? (the volatility-targeting study)
+
+```powershell
+java --add-modules jdk.incubator.vector -cp "target/classes;target/lib/*" com.sbk.optionspricer.Main --voltarget-study 0.10 5
+```
+
+Arguments: the target volatility as a fraction of a year (0.10 is 10%) and the cost of trading in basis points. It holds `min(1, target / EWMA forecast)` of SPY each day, the rest in cash,
+and compares ten years of daily closes with holding, under a rule fixed in advance: the largest fall at most 80% of the market's, a Sharpe ratio at least 0.15 better, at least the
+market's in each half, and at least the market's with targets of 8% and 12% and a slower decay. The 0.15 passes about 5% of simulated markets with nothing to find. The run of 2026-10-22
+gave FAIL: a much smaller fall and worst day, a lower return, and a Sharpe ratio no better than noise.
+
 ## Would trend-following have beaten holding SPY? (the trend study)
 
 ```powershell

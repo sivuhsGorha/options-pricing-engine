@@ -76,6 +76,10 @@ public class Main {
             System.exit(runTrendStudy(args.length > 1 ? Integer.parseInt(args[1]) : 200, args.length > 2 ? Double.parseDouble(args[2]) : 5.0));
             return;
         }
+        if (args.length > 0 && "--voltarget-study".equals(args[0])) {
+            System.exit(runVolTargetStudy(args.length > 1 ? Double.parseDouble(args[1]) : 0.10, args.length > 2 ? Double.parseDouble(args[2]) : 5.0));
+            return;
+        }
         if (args.length > 0 && "--vrp-study".equals(args[0])) {
             System.exit(runVrpStudy(java.nio.file.Path.of(args.length > 1 ? args[1] : "data/historical/VIX_History.csv")));
             return;
@@ -231,6 +235,76 @@ public class Main {
         System.out.println("[TREND] it is one market over about ten years, which includes 2020 and 2022. The rule was calibrated on simulated markets with nothing to find, where it passes about 5% of the time:");
         System.out.println("[TREND] that is its false-positive rate, so one pass would still be one result in 20 by luck alone. It says nothing about how a rule that sits out part of a rising market feels");
         System.out.println("[TREND] to hold, nor about taxes. Trend rules usually earn less than holding in a rising market and fall less in a crash: this checks only whether the trade-off was worth it here.");
+        return 0;
+    }
+
+    public static int runVolTargetStudy(double targetVol, double costBps) {
+        com.sbk.optionspricer.execution.AlpacaPaperClient client;
+        try {
+            client = com.sbk.optionspricer.execution.AlpacaPaperClient.fromEnv();
+        } catch (RuntimeException e) {
+            System.err.println("[VOLTARGET] Cannot reach Alpaca: " + e.getMessage());
+            System.err.println("[VOLTARGET] It never invents prices. Put ALPACA_KEY_ID and ALPACA_SECRET in .env and run it from the project folder.");
+            return 2;
+        }
+        return runVolTargetStudy(start -> client.dailyBarsFrom(REPLAY_SYMBOL, start).stream()
+                .map(b -> new com.sbk.optionspricer.volatility.VrpStudy.Close(b.date(), b.close())).toList(), targetVol, costBps);
+    }
+
+    /**
+     * Compares volatility targeting on SPY (exposure = target volatility over the EWMA forecast, at most fully invested, the rest in cash) with holding it, over
+     * about ten years of daily closes, and applies the pass rule written in {@code VolTargetStudy} before the first run.
+     */
+    public static int runVolTargetStudy(java.util.function.Function<java.time.LocalDate, java.util.List<com.sbk.optionspricer.volatility.VrpStudy.Close>> closesSource,
+                                        double targetVol, double costBps) {
+        System.out.println("=========================================================================");
+        System.out.println("        BLACKTHORN STERLING  VOLATILITY TARGETING VS HOLDING SPY         ");
+        System.out.println("=========================================================================");
+        java.util.List<com.sbk.optionspricer.volatility.VrpStudy.Close> closes;
+        com.sbk.optionspricer.volatility.VolTargetStudy.Result result;
+        com.sbk.optionspricer.volatility.VolTargetStudy.Verdict verdict;
+        try {
+            java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneOffset.UTC);
+            closes = closesSource.apply(java.time.LocalDate.of(2015, 1, 1)).stream()
+                    .filter(c -> c.date().isBefore(today) && Double.isFinite(c.close()) && c.close() > 0.0).toList();
+            double lambda = com.sbk.optionspricer.volatility.RealizedVolForecast.DEFAULT_EWMA_LAMBDA;
+            result = com.sbk.optionspricer.volatility.VolTargetStudy.run(closes, targetVol, lambda, costBps);
+            verdict = com.sbk.optionspricer.volatility.VolTargetStudy.evaluate(closes, targetVol, lambda, costBps);
+        } catch (RuntimeException e) {
+            System.err.println("[VOLTARGET] Cannot get enough closes: " + e.getMessage());
+            System.err.println("[VOLTARGET] It never invents them. Put ALPACA_KEY_ID and ALPACA_SECRET in .env and run it from the project folder.");
+            return 2;
+        }
+        var f = java.util.Locale.ROOT;
+        System.out.printf(f, "[VOLTARGET] SPY daily closes, %d days. Each day the exposure is %.0f%% a year over the EWMA volatility of the returns to the previous close, at most 100%%; the rest is cash.%n",
+                result.days(), 100 * targetVol);
+        System.out.printf(f, "[VOLTARGET] Nothing is borrowed. Changes of exposure cost %.0f basis points of the amount traded. Price returns, no dividends, cash earns nothing.%n", costBps);
+        System.out.println();
+        System.out.println("|  | Volatility targeting | Buy and hold |");
+        System.out.println("| :--- | ---: | ---: |");
+        var t = result.target();
+        var h = result.hold();
+        System.out.printf(f, "| Total return | %+.0f%% | %+.0f%% |%n", 100 * t.totalReturn(), 100 * h.totalReturn());
+        System.out.printf(f, "| Per year | %+.1f%% | %+.1f%% |%n", 100 * t.cagr(), 100 * h.cagr());
+        System.out.printf(f, "| Volatility | %.1f%% | %.1f%% |%n", 100 * t.annualVol(), 100 * h.annualVol());
+        System.out.printf(f, "| Sharpe (no risk-free rate) | %.2f | %.2f |%n", t.sharpe(), h.sharpe());
+        System.out.printf(f, "| Largest fall from a peak | %.0f%% | %.0f%% |%n", 100 * t.maxDrawdown(), 100 * h.maxDrawdown());
+        System.out.printf(f, "| Worst single day | %.1f%% | %.1f%% |%n", 100 * t.worstDay(), 100 * h.worstDay());
+        System.out.printf(f, "| Average exposure | %.0f%% | 100%% |%n", 100 * t.timeInMarket());
+        System.out.printf(f, "| Amount traded a year (times the account) | %.1f | 0 |%n", t.turnover() / t.years());
+
+        System.out.println();
+        System.out.printf(f, "Pass rule (written before the run): the largest fall at most 80%% of the market's, a Sharpe ratio at least %.2f above it, a Sharpe ratio at least the market's in each half%n",
+                com.sbk.optionspricer.volatility.VolTargetStudy.SHARPE_MARGIN);
+        System.out.println("of the data, and at least the market's with targets of 8% and 12% and a slower decay.");
+        System.out.printf(f, "  fall at most 80%% of the market's: %s (%.0f%% against %.0f%%) | Sharpe clearly better: %s (%.2f against %.2f) | both halves agree: %s | neighbouring settings agree: %s -> %s%n",
+                yesNo(verdict.drawdownSmaller()), 100 * verdict.targetMaxDrawdown(), 100 * verdict.holdMaxDrawdown(), yesNo(verdict.sharpeClearlyBetter()),
+                verdict.targetSharpe(), verdict.holdSharpe(), yesNo(verdict.bothHalvesAgree()), yesNo(verdict.neighboursAgree()), verdict.overall());
+        System.out.println();
+        System.out.println("[VOLTARGET] PASS means the rule was met on this data, UNPROVEN that it did better on the first two tests but not on the other two, FAIL that it did not do better. This is a screen, not a trade signal:");
+        System.out.println("[VOLTARGET] one market over about ten years. The margin was calibrated on simulated markets with clustering volatility and no reward for avoiding it, where the rule passes about 5% of the time:");
+        System.out.println("[VOLTARGET] that is its false-positive rate. It is a risk control, not a forecast of direction: it holds less when the recent past was rough, which cuts the falls and, if volatility does persist,");
+        System.out.println("[VOLTARGET] lifts return per unit of risk a little. It cannot tell you where the market is going, and the cash it holds earns nothing here, which understates it slightly.");
         return 0;
     }
 

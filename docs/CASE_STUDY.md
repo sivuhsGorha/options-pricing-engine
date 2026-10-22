@@ -33,7 +33,7 @@ feed, and a column labelled "worst month" that was the worst window from any sta
 
 ## What the evidence says about making money
 
-Six studies, each labelled for what it is:
+Seven studies, each labelled for what it is:
 
 1. **Implied against realised volatility, ten years** (2,693 days, SPY and the VIX). The VIX averaged 18.5 and the volatility that followed 14.7, a
    premium of +3.8 vol points, positive on 84% of days. A short variance position sized at $1 a vol point averaged +2.1 a month with a standard deviation
@@ -62,6 +62,13 @@ Six studies, each labelled for what it is:
    0.82, not the 0.4 better the rule asks for, so the verdict is FAIL. It did cut the fall from a peak by a third, and that held in both halves of the data and for the 100, 150
    and 250-day windows, which is the usual trade of trend-following: less return and less pain, not more reward for the risk. Cash earned nothing in the test, which understates
    it slightly: even at 2% a year on the 17% of the time it was out, that is about 0.3% a year, nowhere near enough to change the verdict.
+
+7. **Volatility targeting against holding SPY** (`--voltarget-study`, ten years of daily closes, exposure = a 10% volatility target over the EWMA forecast, never above fully
+   invested, the rest in cash). The rule was written first and its Sharpe margin (0.15) calibrated on simulated markets with clustering volatility and no drift, where it passes
+   about 5% of the time. Result: +8.2% a year against +13.4% for holding, volatility 9.9% against 17.5%, largest fall 13% against 34%, worst day -3.6% against -10.8%, average exposure
+   75%. Its Sharpe ratio was 0.84 against 0.81, a gain of 0.03 where the rule asks for 0.15, and one half of the data disagreed, so the verdict is FAIL. The reading: it is a
+   real and large risk control (a third of the fall, a third of the worst day), but most of that is the plain fact that it holds less, and it did not improve the return per unit of
+   risk by more than noise. It does not predict direction, and nothing here does.
 
 **What the engine itself did.** It placed one trade on its own signal (three straddles, +$12 over about nine minutes), which is a sample of one. The round trips
 made to test the order path cost $3 to $19 each in spread. No edge has been demonstrated.
