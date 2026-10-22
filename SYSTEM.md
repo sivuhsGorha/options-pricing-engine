@@ -4,7 +4,7 @@ A living description of the system as it runs today: what it does, what is real 
 state it is in, and what is known to be missing. It is updated with each change that alters behaviour; the
 change log at the end says when. Details live in the linked documents, not here.
 
-**Last updated:** 2026-10-14 · **Build:** 488 tests, JaCoCo gate green · **Orders go to:** an Alpaca *paper* account only
+**Last updated:** 2026-10-22 · **Build:** 883 tests, JaCoCo gate green · **Orders go to:** an Alpaca *paper* account only
 
 ---
 
