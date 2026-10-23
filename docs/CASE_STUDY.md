@@ -1,7 +1,7 @@
 # Case study: building a paper-trading engine, and finding out whether it makes money
 
 Blackthorn Sterling is a Java 25 options pricing and paper-trading engine with a React dashboard. This page says what was built, what running it
-live taught, and what the evidence does and does not show. It was built with AI assistance (Claude Code) over three weeks (208 commits,
+live taught, and what the evidence does and does not show. It was built with AI assistance (Claude Code) over three weeks (more than 200 commits,
 30 September to 22 October 2026); every claim below points at a test, a log or a data file in this repository, and the numbers come from there.
 
 ## What it does
@@ -77,18 +77,21 @@ made to test the order path cost $3 to $19 each in spread. No edge has been demo
 years. The account cannot write uncovered options, so the one pattern in the data, selling premium, is not something this system can do. The honest
 conclusion is that the engine is a tested, instrumented piece of software and that the evidence so far does not support trading real money with it.
 
-## Where that leaves the original goal: the conclusion
+## Conclusion
 
-The original goal was to build a system that tells you where the market or volatility is going, and to work alone. Four studies on real historical market data evaluated candidate strategies against pre-committed pass rules calibrated on simulated markets with nothing to find:
+The project began as an attempt at a system that would call the direction of the market or of volatility and trade on it unattended. The seven studies above are the test of
+that, and none of them found a rule that beats simply holding SPY on return per unit of risk. How each was held to account differs, and matters:
 
-1. **The engine's volatility signal** (`--chain-replay`, straddles on implied vs forecast volatility): correlation +0.04, t-statistic +0.2 on about 33 independent observations; no predictive power.
-2. **Selling defined-risk spreads** (`--spread-study`, put credit spreads and iron condors): t-statistics 0.1 to 0.8, net loss in 2025; unproven.
-3. **Trend-following** (`--trend-study`, 200-day average): cut the largest fall from 34% to 22%, but Sharpe was 0.78 against 0.82; failed the pass rule.
-4. **Volatility targeting** (`--voltarget-study`, 10% target over recent EWMA forecast): cut the fall from 34% to 13% and the worst day from -10.8% to -3.6%, but Sharpe was 0.84 against 0.81 (+0.03, inside noise); failed the pass rule.
+- **The VIX premium, the straddle history and the forecast evaluation** (studies 1 to 3) are descriptive: they measure a premium, a cost and a forecast error, and carry no pass rule.
+- **The chain replay** (study 4) asks whether the engine's own signal predicted what a buyer made. It reports the correlation and its t-statistic (+0.04 and +0.2 on about 33
+  independent observations) and has no pass rule.
+- **The spread study** (study 5) had its pass rule fixed in code before the first run, but not calibrated on simulated data. Both spreads came out UNPROVEN (t-statistics +0.1 and +0.8).
+- **The trend study and the volatility-targeting study** (studies 6 and 7) had their rule fixed first and its Sharpe margin calibrated on simulated markets with nothing to find, where it
+  passes about 5% of the time. Both failed it: trend-following cut the largest fall from 34% to 22% and volatility targeting from 34% to 13% (and the worst day from -10.8% to -3.6%), but
+  neither improved the Sharpe ratio beyond noise (0.78 and 0.84 against 0.82 and 0.81).
 
-All four failed to beat holding on risk-adjusted return. The two risk-control approaches—trend-following and volatility targeting—cut drawdowns substantially, but predominantly because they held less exposure on average (75% for volatility targeting). They do not predict direction or generate alpha.
-
-Your real choice is how much pain you can stand against how much return you want. A simple version of that is holding SPY with a smaller share when it is stormy, in a real brokerage account. This engine does not need to be involved.
+The two risk-control rules cut drawdowns mainly because they hold less (volatility targeting averaged 75% invested): a real effect, and the usual trade of less return for less pain, not
+a source of return. None of this predicts direction. The engine is a tested, instrumented piece of software, and the evidence does not support trading real money with it.
 
 ## What is deliberately not here
 
