@@ -20,7 +20,11 @@ services:
       - engine-data:/app/data
       # config.yaml is not baked into the image; without this the container starts on defaults (simulator)
       - ./config.yaml:/app/config.yaml:ro
-    restart: unless-stopped
+    # always, not unless-stopped: with unless-stopped a container that was ever stopped by hand (docker compose stop) stays down after a reboot, and the engine
+    # then sat off for two days. With always it comes back whenever Docker starts, and goes down only when Docker does.
+    restart: always
+    # time for the engine to write its final heartbeat and send "ENGINE STOPPED" when Docker or the laptop shuts down (the default is 10 s)
+    stop_grace_period: 30s
 
 volumes:
   engine-data:

@@ -158,8 +158,14 @@ Start it with `docker compose up -d`, never with the Run button in Docker Deskto
 the bare image, without `.env`, `config.yaml` or the `engine-data` volume, so it crashes on `API_SECRET is missing`
 (and, had it started, would have run the simulator against an empty ledger). Remove any such stray container.
 
-`restart: unless-stopped` brings the engine back after a crash or a reboot; the ledger replay and
-reconciliation run again on every start.
+`restart: always` brings the engine back after a crash, after Docker restarts and after a reboot, including after a `docker compose stop`, and `stop_grace_period: 30s` gives it
+time to finish a clean shutdown; the ledger replay and reconciliation run again on every start. It was `unless-stopped` until 2026-10-23: that keeps a container down after any
+manual stop, and the engine then stayed off for two days.
+
+**Running it without a daily command.** For the engine to start by itself when the laptop does, Docker Desktop has to start at sign-in: Docker Desktop, Settings, General, tick
+"Start Docker Desktop when you sign in to your computer". After that nothing needs typing: the engine starts with Docker, and stops when Docker does (closing or shutting down the
+laptop). `docker compose stop` is then only for stopping it on purpose, and the engine will come back at the next Docker start. This runs the engine only while the laptop is on and awake:
+a sleeping or shut-down laptop is a stopped engine, and the heartbeat line at the next start says how long it was away.
 
 Verified on 2026-10-13 with Docker Desktop on Windows (the market was closed, so no order was placed): the image
 builds, the container reports healthy, the log shows `3 fills replayed, 1 open positions`, the Alpaca transport
