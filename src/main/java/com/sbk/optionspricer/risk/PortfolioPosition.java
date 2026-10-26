@@ -12,6 +12,10 @@ public class PortfolioPosition {
     private double delta;
     private double gamma;
     private double vega;
+    /** Per year, as the pricer reports it (divide by 365 for a day's decay). */
+    private double theta;
+    /** Per unit of rate (1.00 = 100 percentage points). */
+    private double rho;
     private double vanna;
     private double volga;
     private double charm;
@@ -32,13 +36,21 @@ public class PortfolioPosition {
     /** True once something has supplied this position's Greeks: the tracker for a share, the valuation service for an option. */
     private volatile boolean valued;
 
+    /** Delta, gamma and vega only: theta and rho are set to zero (a share has none). */
     public void updateGreeks(double newDelta, double newGamma, double newVega) {
-        if (!Double.isFinite(newDelta) || !Double.isFinite(newGamma) || !Double.isFinite(newVega)) {
+        updateGreeks(newDelta, newGamma, newVega, 0.0, 0.0);
+    }
+
+    public void updateGreeks(double newDelta, double newGamma, double newVega, double newTheta, double newRho) {
+        if (!Double.isFinite(newDelta) || !Double.isFinite(newGamma) || !Double.isFinite(newVega)
+                || !Double.isFinite(newTheta) || !Double.isFinite(newRho)) {
             throw new IllegalArgumentException("Greeks must be finite");
         }
         this.delta = newDelta;
         this.gamma = newGamma;
         this.vega = newVega;
+        this.theta = newTheta;
+        this.rho = newRho;
         this.valued = true;
     }
 
@@ -79,6 +91,22 @@ public class PortfolioPosition {
 
     public double getPositionVega() {
         return (double) Math.multiplyExact(quantity, multiplier) * vega;
+    }
+
+    public double getPositionTheta() {
+        return (double) Math.multiplyExact(quantity, multiplier) * theta;
+    }
+
+    public double getPositionRho() {
+        return (double) Math.multiplyExact(quantity, multiplier) * rho;
+    }
+
+    public double getTheta() {
+        return theta;
+    }
+
+    public double getRho() {
+        return rho;
     }
 
     public double getDelta() {

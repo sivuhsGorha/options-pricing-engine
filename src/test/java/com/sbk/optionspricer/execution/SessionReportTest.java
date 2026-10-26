@@ -131,4 +131,19 @@ class SessionReportTest {
         // no spread recorded at all (older journals): the line is simply absent
         assertFalse(SessionReport.build(List.of(rows.get(3)), List.of(), DAY).contains("option spread"));
     }
+
+    @Test
+    void countsTheClosedMarketWaitsOnTheirOwnRatherThanAsStaleSpots() {
+        List<DecisionJournal.Row> rows = new ArrayList<>();
+        rows.add(row(0, "WAIT", "market closed: 2026-10-15 09:00 New York, next open 2026-10-15 09:30", Double.NaN, ""));
+        rows.add(row(30, "WAIT", "market closed: 2026-10-15 09:00 New York, next open 2026-10-15 09:30", Double.NaN, ""));
+        rows.add(waitSpot(60));
+        rows.add(hold(90, 0.10));
+
+        String report = SessionReport.build(rows, List.of(), DAY);
+
+        assertTrue(report.contains("market closed 2"), report);
+        assertTrue(report.contains("spot STALE 1"), report);
+        assertTrue(report.contains("other waits 0"), report);
+    }
 }

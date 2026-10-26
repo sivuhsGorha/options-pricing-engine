@@ -52,4 +52,15 @@ class RiskJsonTest {
         assertTrue(body.get("optimizedMargin").isNull());
         assertTrue(body.get("marginReductionPct").isNull());
     }
+
+    @Test
+    void theBooksThetaAndRhoAreReportedBesideTheOtherTrackedGreeks() throws Exception {
+        MmapStateReader.RiskState state = new MmapStateReader.RiskState(0, 0, 0, 0);
+        PositionTracker.PortfolioExposure exposure = new PositionTracker.PortfolioExposure(0, 0, 0, 0, -1234.567, 89.0);
+
+        JsonNode body = MAPPER.readTree(OptionsDashboardServer.riskJson(state, exposure, 100.0));
+
+        assertEquals(-1234.57, body.get("trackedNetTheta").asDouble(), 1e-9);
+        assertEquals(89.0, body.get("trackedNetRho").asDouble(), 1e-9);
+    }
 }

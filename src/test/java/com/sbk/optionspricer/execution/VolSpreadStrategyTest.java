@@ -223,8 +223,8 @@ class VolSpreadStrategyTest {
         VolSpreadStrategy s = strategy(tracker, new FlatChains(0.23, TODAY), 0.20, null, Clock.fixed(NOW, ZoneOffset.UTC));
         assertEquals("SELL_STRADDLE", s.step().action());
 
-        // five days before the front expiry the chain and clock have moved on
-        LocalDate later = front().minusDays(5);
+        // four days before the front expiry (a Monday; five would be a Sunday, when the calendar stands the strategy down)
+        LocalDate later = front().minusDays(4);
         VolSpreadStrategy.Decision close = s.stepWith(new FlatChains(0.23, later), Clock.fixed(later.atTime(15, 0).toInstant(ZoneOffset.UTC), ZoneOffset.UTC));
 
         assertEquals("CLOSE", close.action(), close.summary());
@@ -782,5 +782,48 @@ class VolSpreadStrategyTest {
         }
         assertTrue(bids < mids, "the generated quotes have a spread");
         assertEquals(bids, transport.multiLegNets.get(1), 1e-9, "the close is offered at the sum of the bids: " + transport.multiLegNets);
+    }
+
+    // Until 2026-10-26 the strategy stood down only on a stale spot. The decision journal for 10-16 to 10-21 held
+    // about 4,200 "spot quote STALE" waits, all but 71 of them before 09:30 or after 16:00 New York: the delayed feed's
+    // last print read as stale all evening. The calendar names the cause and keeps the hedge from being tried after hours.
+    @Test
+    void standsDownByTheClockAfterTheCloseAndSaysWhenTheMarketNextOpens() {
+        PositionTracker tracker = new PositionTracker(FillRecorder.NONE);
+        Instant evening = Instant.parse("2026-10-08T21:00:00Z"); // a Thursday, 17:00 in New York
+        VolSpreadStrategy s = strategy(tracker, new FlatChains(0.23, TODAY), 0.20, null, Clock.fixed(evening, ZoneOffset.UTC));
+
+        VolSpreadStrategy.Decision d = s.step();
+
+        assertEquals("WAIT", d.action(), d.summary());
+        assertEquals("market closed: 2026-10-08 17:00 New York, next open 2026-10-09 09:30", d.reason());
+        assertTrue(tracker.getPositions().isEmpty(), "the same chain sells a straddle in session; after hours nothing is sent: " + tracker.getPositions());
+    }
+
+    @Test
+    void standsDownOnAWeekendAndOnAHolidayAndAfterAnEarlyClose() {
+        PositionTracker tracker = new PositionTracker(FillRecorder.NONE);
+        VolSpreadStrategy s = strategy(tracker, new FlatChains(0.23, TODAY), 0.20, null, Clock.fixed(NOW, ZoneOffset.UTC));
+
+        VolSpreadStrategy.Decision saturday = s.stepWith(new FlatChains(0.23, TODAY), Clock.fixed(Instant.parse("2026-10-10T15:00:00Z"), ZoneOffset.UTC));
+        assertEquals("WAIT", saturday.action(), saturday.summary());
+        assertEquals("market closed: 2026-10-10 11:00 New York, next open 2026-10-12 09:30", saturday.reason());
+
+        // the day after Thanksgiving 2026 (26 November) closes at 13:00
+        VolSpreadStrategy.Decision earlyClose = s.stepWith(new FlatChains(0.23, LocalDate.of(2026, 11, 27)),
+                Clock.fixed(Instant.parse("2026-11-27T18:30:00Z"), ZoneOffset.UTC));
+        assertEquals("WAIT", earlyClose.action(), earlyClose.summary());
+        assertEquals("market closed: 2026-11-27 13:30 New York, next open 2026-11-30 09:30", earlyClose.reason());
+
+        // a calendar that calls today a holiday stands the strategy down at the same instant the default one trades
+        s.useMarketCalendar(new com.sbk.optionspricer.market.MarketCalendar(java.util.Set.of(TODAY)));
+        VolSpreadStrategy.Decision holiday = s.stepWith(new FlatChains(0.23, TODAY), Clock.fixed(NOW, ZoneOffset.UTC));
+        assertEquals("WAIT", holiday.action(), holiday.summary());
+        assertTrue(holiday.reason().startsWith("market closed: 2026-10-08 11:00 New York, next open 2026-10-09 09:30"), holiday.reason());
+        assertTrue(tracker.getPositions().isEmpty());
+
+        s.useMarketCalendar(new com.sbk.optionspricer.market.MarketCalendar(java.util.Set.of()));
+        assertEquals("SELL_STRADDLE", s.stepWith(new FlatChains(0.23, TODAY), Clock.fixed(NOW, ZoneOffset.UTC)).action(),
+                "with no holiday the same instant trades: the calendar was the only gate");
     }
 }

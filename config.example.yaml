@@ -16,6 +16,8 @@ risk:
   max_delta: 5000.0
   max_gamma: 1000.0
   max_vega: 10000.0
+  # max_theta: 2000.0               # optional: halt when |net theta| (per year, as the pricer reports it; 2000 is about $5.50 a day) exceeds this. Unset: shown, not limited
+  # max_rho: 50000.0                # optional: halt when |net rho| (per 1.00 of rate) exceeds this. Unset: shown, not limited
   max_position: 10000.0
   max_spread_bps: 200.0              # refuse an order into a market wider than this (basis points of the mid); a field the feed does not publish is not judged
   min_volume: 1                      # refuse an order into a contract or share that has traded less than this today

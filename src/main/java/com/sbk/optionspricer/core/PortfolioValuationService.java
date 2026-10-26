@@ -217,7 +217,7 @@ public final class PortfolioValuationService implements ValuationSource, AutoClo
             vega = g[2];
             theta = g[3];
             rho = g[4];
-            position.updateGreeks(delta, gamma, vega);
+            position.updateGreeks(delta, gamma, vega, theta, rho);
         } else {
             warnings.add(symbol + ": Greeks unavailable (no volatility source)");
         }

@@ -196,6 +196,22 @@ running, and it never deletes or overwrites anything. It does **not** copy `.env
 keep the backups somewhere that survives the laptop: a USB drive or a private cloud folder, not the same disk.
 The default destination is `%USERPROFILE%\blackthorn-sterling-backups`, which is the same disk, so choose another one.
 
+### Schedule it
+
+```powershell
+.\scripts\schedule_backup.ps1 -Destination D:\blackthorn-backups
+```
+
+Registers a Windows scheduled task, `Blackthorn Sterling backup`, that runs `backup.ps1` every day at 16:30 New York
+on this machine's clock (or at `-At 22:45`, a local time), whether or not you are logged on, and as soon as the
+laptop next wakes if it was asleep at the time. Each run appends to `<Destination>\scheduled-backup.log`; a run
+with Docker Desktop stopped fails there with the message `backup.ps1` prints, so read the log now and then.
+`-Unregister` removes the task. After registering it, run it once by hand and check the log:
+
+```powershell
+Start-ScheduledTask -TaskName 'Blackthorn Sterling backup'
+```
+
 ### Restore on a new machine
 
 1. Install Docker Desktop and Git. `git clone https://github.com/sivuhsGorha/options-pricing-engine` and `cd` into it.

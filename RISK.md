@@ -30,7 +30,9 @@ bounded audit trail (`/api/execution`).
 Per position (`risk/PortfolioPosition`) and aggregated over the book (`risk/GreekAggregator`,
 `execution/PositionTracker.snapshotExposure`):
 
-- First order: delta, vega; theta and rho are computed by `Greeks` for pricing but not aggregated.
+- First order: delta, vega, theta (per year, as the pricer reports it) and rho (per unit of rate). The valuation
+  service writes all of them into each option position and `snapshotExposure` sums them; `/api/risk` reports
+  `trackedNetTheta` and `trackedNetRho`.
 - Second order: gamma, vanna, volga, charm.
 - Third order: speed, color.
 
@@ -59,7 +61,10 @@ and the risk panel shows them.
 
 `risk/GreekAlertManager` compares aggregate delta, gamma and vega with a WARNING threshold (80% of the
 configured `risk.max_delta`, `risk.max_gamma`, `risk.max_vega`) and a CRITICAL one (the limit itself), the
-same limits the portfolio admission gate enforces. The aggregates are the pricer-derived Greeks the valuation
+same limits the portfolio admission gate enforces. Net theta and net rho are checked the same way when `risk.max_theta`
+or `risk.max_rho` is set (on the magnitude: a long book's theta is negative); unset, which is the default, they are
+aggregated and shown but never alert, because a limit chosen without data could halt a book that is fine. The
+admission gate does not project them. The aggregates are the pricer-derived Greeks the valuation
 service writes into each position, so an options book that breaches a limit halts trading. State changes fire listeners; a metric de-escalates only after falling below a fraction of its threshold
 (hysteresis), so a value oscillating around a limit does not spam alerts. `execution/TradingHalt` is wired to
 the manager at startup: any CRITICAL alert trips the halt, after which every order is rejected until an
@@ -103,4 +108,5 @@ order-rate limit is 100 orders per second.
 - Exchange-level kill switches, cancel-on-disconnect, mass cancel. There is no exchange session to cancel.
 - Clearing-house margin models (Eurex Prisma, SPAN). The margin shown is the approximation in section 4.
 - A standing stress-scenario matrix. The 3 x 3 grid in the margin approximation is the only scenario set.
-- Theta and rho aggregation across the book.
+- Default theta and rho limits, and their projection in the admission gate. They alert only when `risk.max_theta`
+  or `risk.max_rho` is set.

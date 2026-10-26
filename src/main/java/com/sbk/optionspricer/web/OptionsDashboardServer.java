@@ -1246,6 +1246,8 @@ public class OptionsDashboardServer {
         body.put("trackedNetGamma", Json.round(sanitizeRiskValue(trackedExposure.netGamma(), 0.0), 2));
         body.put("trackedNetVega", Json.round(sanitizeRiskValue(trackedExposure.netVega(), 0.0), 2));
         body.put("trackedNotional", Json.round(sanitizeRiskValue(trackedExposure.netNotional(), 0.0), 2));
+        body.put("trackedNetTheta", Json.round(sanitizeRiskValue(trackedExposure.netTheta(), 0.0), 2));
+        body.put("trackedNetRho", Json.round(sanitizeRiskValue(trackedExposure.netRho(), 0.0), 2));
         return Json.write(body);
     }
 

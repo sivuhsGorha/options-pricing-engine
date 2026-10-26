@@ -20,9 +20,12 @@ them for features. `strategy.mode` selects which one runs; the operator switch s
   `2 x (half-spread of both legs + 2 x fee_per_contract / 100) / straddle vega`. The straddle's exit is the edge
   reverting, so it always pays the spread twice. A wide-spread option therefore holds at any edge the spread would
   eat; the decision says `does not exceed break-even hurdle`.
-- **Stand-down**: the strategy waits, sending nothing, while the spot is `STALE` (the chain is reloaded every minute
-  and reads as fresh even with the market shut), and says how old a stale option quote was
-  (`quote STALE (feed 150 s old, limit 120 s)`).
+- **Stand-down**: the strategy waits, sending nothing, outside regular hours by the market calendar (09:30 to the
+  close in New York on a trading day, exchange holidays and 13:00 early closes included: `market closed: 2026-10-20
+  17:00 New York, next open 2026-10-21 09:30`), while the spot is `STALE` (the chain is reloaded every minute and
+  reads as fresh even with the market shut), and says how old a stale option quote was
+  (`quote STALE (feed 150 s old, limit 120 s)`). The calendar is built in, not fetched: an unscheduled closure is
+  not known to it, and on such a day the stale spot is still the guard.
 - **Entry**: edge above the larger of `vol_edge` (default 1 vol point) and the cost hurdle sells `contracts`
   straddles; below minus that, it buys. One straddle at a time. The second leg is never sent if the first is refused by the order gates. If the first
   leg fills and the second is refused, the first is closed in the same step; if that close is refused too, the

@@ -18,8 +18,16 @@ public class GreekRiskMonitor {
             double volga,
             double charm,
             double speed,
-            double color
-    ) {}
+            double color,
+            double netTheta,
+            double netRho
+    ) {
+        /** Without theta and rho (zero): for callers that monitor the first three orders only. */
+        public PortfolioRisk(double netDelta, double netGamma, double netVega, double vanna, double volga,
+                             double charm, double speed, double color) {
+            this(netDelta, netGamma, netVega, vanna, volga, charm, speed, color, 0.0, 0.0);
+        }
+    }
 
     private final List<PortfolioPosition> positions = new CopyOnWriteArrayList<>();
     private final double deltaLimit;

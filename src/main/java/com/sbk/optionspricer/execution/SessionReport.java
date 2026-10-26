@@ -53,7 +53,7 @@ public final class SessionReport {
         sb.append(String.format(Locale.ROOT, "  %d decisions from %s to %s UTC (coverage %d%% of the %d steps expected at %d s)%n",
                 rows.size(), CLOCK.format(first), CLOCK.format(last), coverage, expected, STEP_SECONDS));
 
-        int hold = 0, optionStale = 0, spotStale = 0, otherWaits = 0, otherDecisions = 0, ordersAttempted = 0, rvOnHolds = 0;
+        int hold = 0, optionStale = 0, spotStale = 0, closed = 0, otherWaits = 0, otherDecisions = 0, ordersAttempted = 0, rvOnHolds = 0;
         List<Double> ages = new ArrayList<>();
         List<Double> edges = new ArrayList<>();
         List<Double> vrps = new ArrayList<>();
@@ -89,7 +89,9 @@ public final class SessionReport {
                     vrps.add(Double.parseDouble(v.group(1)));
                 }
             } else if ("WAIT".equals(r.action())) {
-                if (reason.startsWith("spot quote STALE")) {
+                if (reason.startsWith("market closed")) {
+                    closed++;
+                } else if (reason.startsWith("spot quote STALE")) {
                     spotStale++;
                 } else if (reason.contains("quote STALE")) {
                     optionStale++;
@@ -104,8 +106,8 @@ public final class SessionReport {
                 otherDecisions++;
             }
         }
-        sb.append(String.format(Locale.ROOT, "  HOLD %d | option quote STALE %d | spot STALE %d | other waits %d | other decisions %d | orders attempted %d%n",
-                hold, optionStale, spotStale, otherWaits, otherDecisions, ordersAttempted));
+        sb.append(String.format(Locale.ROOT, "  HOLD %d | option quote STALE %d | spot STALE %d | market closed %d | other waits %d | other decisions %d | orders attempted %d%n",
+                hold, optionStale, spotStale, closed, otherWaits, otherDecisions, ordersAttempted));
         if (!ages.isEmpty()) {
             DoubleSummaryStatistics s = ages.stream().mapToDouble(Double::doubleValue).summaryStatistics();
             sb.append(String.format(Locale.ROOT, "  feed age of stale option quotes: %d waits, %.0f to %.0f s, mean %.0f s%n",

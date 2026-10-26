@@ -151,7 +151,15 @@ public final class VolSpreadStrategy {
     private final double dividendYield;
     private final Params params;
     private volatile Clock clock;
-    private final com.sbk.optionspricer.market.MarketCalendar marketCalendar = new com.sbk.optionspricer.market.MarketCalendar();
+    private volatile com.sbk.optionspricer.market.MarketCalendar marketCalendar = new com.sbk.optionspricer.market.MarketCalendar();
+
+    /** Replaces the NYSE calendar the strategy stands down by: for tests and replays with their own holidays. */
+    void useMarketCalendar(com.sbk.optionspricer.market.MarketCalendar calendar) {
+        if (calendar == null) {
+            throw new IllegalArgumentException("calendar must not be null");
+        }
+        this.marketCalendar = calendar;
+    }
 
     /** The chain's own underlying price may differ from the live spot by at most this fraction before the chain is distrusted. */
     static final double MAX_SPOT_DISAGREEMENT = 0.10;
@@ -308,6 +316,15 @@ public final class VolSpreadStrategy {
         List<String> orders = new ArrayList<>();
 
         MarketSnapshot spot = spotSupplier.get();
+        if (!marketCalendar.isMarketOpen(now)) {
+            // By the clock, not only by staleness: outside 09:30 to the close on a trading day nothing here can be
+            // filled, and a delayed feed's last print would otherwise read as a stale spot all evening.
+            java.time.ZonedDateTime ny = java.time.ZonedDateTime.ofInstant(now, NEW_YORK);
+            java.time.ZonedDateTime nextOpen = java.time.ZonedDateTime.ofInstant(marketCalendar.nextMarketOpen(now), NEW_YORK);
+            return record(new Decision(now, "WAIT", "market closed: " + ny.toLocalDate() + " " + ny.toLocalTime().withNano(0)
+                    + " New York, next open " + nextOpen.toLocalDate() + " " + nextOpen.toLocalTime().withNano(0),
+                    null, Double.NaN, Double.NaN, Double.NaN, Double.NaN, 0, orders, quoteAge(spot), Double.NaN, Double.NaN));
+        }
         if (spot == null || spot.status() == MarketDataStatus.UNAVAILABLE || !(spot.last() > 0.0)) {
             return record(new Decision(now, "WAIT", "no spot price", null, Double.NaN, Double.NaN, Double.NaN, Double.NaN, 0, orders,
                     Double.NaN, Double.NaN, Double.NaN));

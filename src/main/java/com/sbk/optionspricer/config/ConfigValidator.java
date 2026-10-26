@@ -19,8 +19,8 @@ public final class ConfigValidator {
      * not checked: they hold keys of older versions that are now ignored.
      */
     private static final Map<String, java.util.Set<String>> KNOWN_KEYS = Map.of(
-            "risk", java.util.Set.of("max_notional", "max_delta", "max_gamma", "max_vega", "max_position", "max_concentration",
-                    "max_spread_bps", "min_volume"),
+            "risk", java.util.Set.of("max_notional", "max_delta", "max_gamma", "max_vega", "max_theta", "max_rho", "max_position",
+                    "max_concentration", "max_spread_bps", "min_volume"),
             "strategy", java.util.Set.of("mode", "trigger_pct", "base_quantity", "vol_edge", "reference_model", "hedge_band",
                     "min_days_to_expiry", "max_days_to_expiry", "contracts", "option_interval_seconds",
                     "fee_per_contract", "use_multi_leg", "fair_vol_model", "side"),
@@ -106,7 +106,8 @@ public final class ConfigValidator {
                         + " (the value is not converted, so review it)");
             }
         }
-        for (String key : new String[]{"max_notional", "max_delta", "max_gamma", "max_vega", "max_position", "max_concentration", "max_spread_bps"}) {
+        for (String key : new String[]{"max_notional", "max_delta", "max_gamma", "max_vega", "max_theta", "max_rho", "max_position",
+                "max_concentration", "max_spread_bps"}) {
             if (risk.containsKey(key)) {
                 number(config, errors, "risk." + key, Double.NaN, v -> Double.isFinite(v) && v > 0.0, "must be a finite positive number");
             }

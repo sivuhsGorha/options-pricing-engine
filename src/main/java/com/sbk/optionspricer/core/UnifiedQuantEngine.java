@@ -34,6 +34,8 @@ public final class UnifiedQuantEngine {
     private double netDelta = 0.0;
     private double netGamma = 0.0;
     private double netVega = 0.0;
+    private double netTheta = 0.0;
+    private double netRho = 0.0;
     private double scenarioMargin = 0.0;
     private volatile java.util.function.Supplier<com.sbk.optionspricer.execution.PositionTracker.PortfolioExposure> exposureSource =
             () -> new com.sbk.optionspricer.execution.PositionTracker.PortfolioExposure(0.0, 0.0, 0.0, 0.0);
@@ -45,8 +47,14 @@ public final class UnifiedQuantEngine {
                     com.sbk.optionspricer.config.ConfigManager.DEFAULT_MAX_VEGA);
 
     private static com.sbk.optionspricer.risk.GreekAlertManager alertsFor(double maxDelta, double maxGamma, double maxVega) {
+        return alertsFor(maxDelta, maxGamma, maxVega, Double.NaN, Double.NaN);
+    }
+
+    private static com.sbk.optionspricer.risk.GreekAlertManager alertsFor(double maxDelta, double maxGamma, double maxVega,
+                                                                           double maxTheta, double maxRho) {
         return new com.sbk.optionspricer.risk.GreekAlertManager(WARNING_FRACTION * maxDelta, maxDelta,
-                WARNING_FRACTION * maxGamma, maxGamma, WARNING_FRACTION * maxVega, maxVega);
+                WARNING_FRACTION * maxGamma, maxGamma, WARNING_FRACTION * maxVega, maxVega,
+                WARNING_FRACTION * maxTheta, maxTheta, WARNING_FRACTION * maxRho, maxRho);
     }
 
     /**
@@ -55,10 +63,23 @@ public final class UnifiedQuantEngine {
      * listeners; it replaces the manager.
      */
     public void configureGreekAlerts(double maxDelta, double maxGamma, double maxVega) {
+        configureGreekAlerts(maxDelta, maxGamma, maxVega, Double.NaN, Double.NaN);
+    }
+
+    /**
+     * As {@link #configureGreekAlerts(double, double, double)}, with limits on the book's net theta (per year, in the
+     * pricer's units) and net rho (per unit of rate). A NaN theta or rho limit means that Greek is aggregated and
+     * published but never alerts; a finite one must be positive.
+     */
+    public void configureGreekAlerts(double maxDelta, double maxGamma, double maxVega, double maxTheta, double maxRho) {
         if (!(maxDelta > 0.0) || !(maxGamma > 0.0) || !(maxVega > 0.0)) {
             throw new IllegalArgumentException("alert limits must be positive");
         }
-        this.greekAlertManager = alertsFor(maxDelta, maxGamma, maxVega);
+        if ((!Double.isNaN(maxTheta) && !(maxTheta > 0.0 && Double.isFinite(maxTheta)))
+                || (!Double.isNaN(maxRho) && !(maxRho > 0.0 && Double.isFinite(maxRho)))) {
+            throw new IllegalArgumentException("theta and rho limits must be positive when set");
+        }
+        this.greekAlertManager = alertsFor(maxDelta, maxGamma, maxVega, maxTheta, maxRho);
     }
 
     /** Supplies the portfolio exposure the engine publishes and monitors (normally {@code PositionTracker::snapshotExposure}). */
@@ -74,6 +95,8 @@ public final class UnifiedQuantEngine {
         netDelta = exposure.netDelta();
         netGamma = exposure.netGamma();
         netVega = exposure.netVega();
+        netTheta = exposure.netTheta();
+        netRho = exposure.netRho();
         // The stress test shocks the spot, so without a market price the margin is unknown (NaN), not 0.
         scenarioMargin = Double.isFinite(spot) && spot > 0.0
                 ? com.sbk.optionspricer.risk.MarginApproximation.calculateInitialMargin(netDelta, netGamma, netVega, spot)
@@ -146,10 +169,13 @@ public final class UnifiedQuantEngine {
                 exitHandler
         );
         // The alerts that halt trading use the same limits the admission gate enforces, not separate constants.
+        // Theta and rho have no default limit: unset, they are aggregated and shown but do not alert.
         engine.configureGreekAlerts(
                 config.getDouble("risk.max_delta", ConfigManager.DEFAULT_MAX_DELTA),
                 config.getDouble("risk.max_gamma", ConfigManager.DEFAULT_MAX_GAMMA),
-                config.getDouble("risk.max_vega", ConfigManager.DEFAULT_MAX_VEGA));
+                config.getDouble("risk.max_vega", ConfigManager.DEFAULT_MAX_VEGA),
+                config.getDouble("risk.max_theta", Double.NaN),
+                config.getDouble("risk.max_rho", Double.NaN));
         return engine;
     }
 
@@ -211,7 +237,8 @@ public final class UnifiedQuantEngine {
             currentSpot = spot;
             refreshRisk(spot);
 
-            com.sbk.optionspricer.risk.GreekRiskMonitor.PortfolioRisk currentRisk = new com.sbk.optionspricer.risk.GreekRiskMonitor.PortfolioRisk(netDelta, netGamma, netVega, 0.0, 0.0, 0.0, 0.0, 0.0);
+            com.sbk.optionspricer.risk.GreekRiskMonitor.PortfolioRisk currentRisk = new com.sbk.optionspricer.risk.GreekRiskMonitor.PortfolioRisk(
+                    netDelta, netGamma, netVega, 0.0, 0.0, 0.0, 0.0, 0.0, netTheta, netRho);
             greekAlertManager.checkLimits(currentRisk);
 
             publisher.publishRiskState(netDelta, netGamma, netVega, scenarioMargin);

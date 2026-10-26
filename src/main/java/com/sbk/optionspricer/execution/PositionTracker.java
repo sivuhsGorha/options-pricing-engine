@@ -15,7 +15,14 @@ import java.util.Map;
  */
 public class PositionTracker {
 
-    public record PortfolioExposure(double netDelta, double netGamma, double netVega, double netNotional) {}
+    /** The book's aggregate Greeks; theta is per year and rho per unit of rate, as the pricer reports them. */
+    public record PortfolioExposure(double netDelta, double netGamma, double netVega, double netNotional,
+                                    double netTheta, double netRho) {
+        /** Delta, gamma, vega and notional only; theta and rho are zero. */
+        public PortfolioExposure(double netDelta, double netGamma, double netVega, double netNotional) {
+            this(netDelta, netGamma, netVega, netNotional, 0.0, 0.0);
+        }
+    }
 
     public record ExecutionFill(String symbol, int quantity, int multiplier, double executionPrice) {
         public ExecutionFill {
@@ -227,7 +234,23 @@ public class PositionTracker {
         return total;
     }
 
+    public synchronized double getNetTheta() {
+        double total = 0.0;
+        for (PortfolioPosition position : positions.values()) {
+            total += position.getPositionTheta();
+        }
+        return total;
+    }
+
+    public synchronized double getNetRho() {
+        double total = 0.0;
+        for (PortfolioPosition position : positions.values()) {
+            total += position.getPositionRho();
+        }
+        return total;
+    }
+
     public synchronized PortfolioExposure snapshotExposure() {
-        return new PortfolioExposure(getNetDelta(), getNetGamma(), getNetVega(), getNetNotional());
+        return new PortfolioExposure(getNetDelta(), getNetGamma(), getNetVega(), getNetNotional(), getNetTheta(), getNetRho());
     }
 }
