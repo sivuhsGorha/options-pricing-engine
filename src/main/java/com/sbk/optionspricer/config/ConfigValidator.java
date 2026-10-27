@@ -20,7 +20,7 @@ public final class ConfigValidator {
      */
     private static final Map<String, java.util.Set<String>> KNOWN_KEYS = Map.of(
             "risk", java.util.Set.of("max_notional", "max_delta", "max_gamma", "max_vega", "max_theta", "max_rho", "max_position",
-                    "max_concentration", "max_spread_bps", "min_volume"),
+                    "max_concentration", "max_spread_bps", "min_volume", "auto_hedge", "dynamic_limits"),
             "strategy", java.util.Set.of("mode", "trigger_pct", "base_quantity", "vol_edge", "reference_model", "hedge_band",
                     "min_days_to_expiry", "max_days_to_expiry", "contracts", "option_interval_seconds",
                     "fee_per_contract", "use_multi_leg", "fair_vol_model", "side"),
@@ -115,6 +115,31 @@ public final class ConfigValidator {
         if (risk.containsKey("min_volume")) {
             number(config, errors, "risk.min_volume", Double.NaN, v -> Double.isFinite(v) && v >= 1.0 && v == Math.rint(v),
                     "must be a whole number of at least 1");
+        }
+
+        // Validate auto_hedge section
+        Map<String, Object> autoHedge = config.getSection("risk.auto_hedge");
+        if (!autoHedge.isEmpty()) {
+            bool(config, errors, "risk.auto_hedge.enabled");
+            number(config, errors, "risk.auto_hedge.hedge_band", 50.0, v -> v >= 0.0, "must be zero or positive");
+            String hedgeMode = config.getString("risk.auto_hedge.mode", "immediate");
+            if (!"immediate".equalsIgnoreCase(hedgeMode) && !"threshold".equalsIgnoreCase(hedgeMode) && !"adaptive".equalsIgnoreCase(hedgeMode)) {
+                errors.add("risk.auto_hedge.mode must be immediate, threshold, or adaptive (found " + hedgeMode + ")");
+            }
+            number(config, errors, "risk.auto_hedge.min_hedge_size", 10.0, v -> v >= 1.0 && v == Math.rint(v),
+                    "must be a whole number of at least 1");
+            number(config, errors, "risk.auto_hedge.hedge_duration_seconds", 60.0, v -> v >= 0.0, "must be zero or positive");
+        }
+
+        // Validate dynamic_limits section
+        Map<String, Object> dynamicLimits = config.getSection("risk.dynamic_limits");
+        if (!dynamicLimits.isEmpty()) {
+            bool(config, errors, "risk.dynamic_limits.enabled");
+            number(config, errors, "risk.dynamic_limits.window_size", 60.0, v -> v >= 10 && v == Math.rint(v),
+                    "must be a whole number of at least 10");
+            number(config, errors, "risk.dynamic_limits.low_threshold", 0.5, v -> v > 0.0, "must be positive");
+            number(config, errors, "risk.dynamic_limits.high_threshold", 1.5, v -> v > 0.0, "must be positive");
+            number(config, errors, "risk.dynamic_limits.extreme_threshold", 2.5, v -> v > 0.0, "must be positive");
         }
 
         number(config, errors, "strategy.trigger_pct", 0.001, v -> v > 0.0 && v < 1.0,

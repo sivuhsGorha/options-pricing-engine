@@ -21,6 +21,20 @@ risk:
   max_position: 10000.0
   max_spread_bps: 200.0              # refuse an order into a market wider than this (basis points of the mid); a field the feed does not publish is not judged
   min_volume: 1                      # refuse an order into a contract or share that has traded less than this today
+  # Auto-hedging configuration (experimental - not yet wired into the application)
+  # auto_hedge:
+  #   enabled: false                   # enable automatic delta hedging
+  #   hedge_band: 50                   # hedge when |net delta| exceeds this many shares
+  #   mode: immediate                  # immediate | threshold | adaptive
+  #   min_hedge_size: 10               # minimum hedge size in shares
+  #   hedge_duration_seconds: 60      # minimum duration delta must be exceeded before hedging (threshold mode only)
+  # Dynamic Greek limits (experimental - not yet wired into the application)
+  # dynamic_limits:
+  #   enabled: false                   # enable dynamic Greek limits based on volatility regime
+  #   window_size: 60                 # number of volatility points to consider
+  #   low_threshold: 0.5               # volatility below this (relative to average) is LOW regime
+  #   high_threshold: 1.5             # volatility above this is HIGH regime
+  #   extreme_threshold: 2.5           # volatility above this is EXTREME regime
 execution:
   symbol: SPY
   transport: paper                   # paper: in-process simulated fills; alpaca: an Alpaca PAPER account (keys in .env)

@@ -1,0 +1,35 @@
+[Unit]
+Description=Blackthorn Sterling Options Pricing Engine
+Documentation=https://github.com/sivuhsGorha/options-pricing-engine
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=forking
+WorkingDirectory=/opt/blackthorn-sterling
+ExecStart=/usr/bin/docker compose up -d
+ExecStop=/usr/bin/docker compose down
+ExecReload=/usr/bin/docker compose restart
+Restart=on-failure
+RestartSec=30s
+TimeoutStartSec=300
+TimeoutStopSec=120
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/opt/blackthorn-sterling/data
+ReadWritePaths=/opt/blackthorn-sterling/logs
+
+# Resource limits
+MemoryMax=4G
+CPUQuota=200%
+
+# Environment
+Environment="DATA_DIR=/opt/blackthorn-sterling/data"
+Environment="LOG_DIR=/opt/blackthorn-sterling/logs"
+
+[Install]
+WantedBy=multi-user.target

@@ -135,6 +135,9 @@ wider than that noise and the docs must say so.
   settlement, fees, partial fills and impact; Sharpe, Sortino, drawdown duration.
 - Benchmarks (JMH) committed with results before any performance claim is written down.
 - Structured one-line logging if operations need it.
+- **Statistical validation framework**: walk-forward analysis, out-of-sample testing, strategy performance dashboard
+- **Full IBKR integration**: real-time option chains via TWS API with market data subscriptions
+- **WebSocket streaming**: real-time spot price streaming with low-latency delivery
 
 ---
 

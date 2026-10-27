@@ -1,0 +1,110 @@
+groups:
+  - name: blackthorn_sterling_alerts
+    interval: 30s
+    rules:
+      # Engine health
+      - alert: EngineDown
+        expr: up{job="blackthorn-sterling"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Blackthorn Sterling engine is down"
+          description: "Engine has been down for more than 1 minute"
+
+      # Trading halt
+      - alert: TradingHalted
+        expr: blackthorn_trading_halted == 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Trading is halted"
+          description: "Trading has been halted for {{ $value }} minutes"
+
+      # Greek limit breaches
+      - alert: GreekLimitCritical
+        expr: |
+          (
+            abs(blackthorn_net_delta) > blackthorn_max_delta or
+            abs(blackthorn_net_gamma) > blackthorn_max_gamma or
+            abs(blackthorn_net_vega) > blackthorn_max_vega or
+            abs(blackthorn_net_theta) > blackthorn_max_theta or
+            abs(blackthorn_net_rho) > blackthorn_max_rho
+          ) == 1
+        for: 0s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Greek limit breached - trading halted"
+          description: "One or more Greek limits exceeded: delta={{ $value.net_delta }}, gamma={{ $value.net_gamma }}, vega={{ $value.net_vega }}"
+
+      # Market data staleness
+      - alert: MarketDataStale
+        expr: blackthorn_market_data_age_seconds > 300
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Market data is stale"
+          description: "Market data age is {{ $value }} seconds (threshold: 300s)"
+
+      # High latency
+      - alert: HighLatency
+        expr: blackthorn_latency_seconds_p95 > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High latency detected"
+          description: "95th percentile latency is {{ $value }}s (threshold: 5s)"
+
+      # Execution issues
+      - alert: LowFillRate
+        expr: |
+          rate(blackthorn_orders_filled_total[5m]) / rate(blackthorn_orders_attempted_total[5m]) < 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low fill rate"
+          description: "Fill rate is {{ $value | humanizePercentage }} over the last 5 minutes"
+
+      # Reconciliation mismatch
+      - alert: ReconciliationMismatch
+        expr: blackthorn_reconciliation_status == 2
+        for: 0s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Book reconciliation mismatch"
+          description: "Local book does not match venue positions - trading halted"
+
+      # P&L drawdown
+      - alert: LargeDrawdown
+        expr: blackthorn_pnl_drawdown < -0.05
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Large P&L drawdown"
+          description: "Daily P&L drawdown is {{ $value | humanizePercentage }}"
+
+      # System resources
+      - alert: HighMemoryUsage
+        expr: (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) < 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage"
+          description: "Available memory is {{ $value | humanizePercentage }}"
+
+      - alert: HighCPUUsage
+        expr: rate(node_cpu_seconds_total{mode!="idle"}[5m]) > 0.8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage"
+          description: "CPU usage is {{ $value | humanizePercentage }}"

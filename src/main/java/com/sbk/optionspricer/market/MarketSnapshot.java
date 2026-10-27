@@ -99,4 +99,12 @@ public record MarketSnapshot(
     public int multiplierOr(int fallback) {
         return instrument != null ? (int) Math.round(instrument.multiplier()) : fallback;
     }
+
+    /** Returns a new snapshot with the derived quote age set to the given latency in milliseconds. */
+    public MarketSnapshot withLatency(double latencyMs) {
+        return new MarketSnapshot(
+            symbol, bid, ask, last, volume, timestamp, sourceTimestamp,
+            (long) Math.round(latencyMs), source, status, instrument
+        );
+    }
 }

@@ -12,6 +12,7 @@ import com.sbk.optionspricer.config.ConfigValidator;
 import com.sbk.optionspricer.data.HistoricalDataManager;
 import com.sbk.optionspricer.data.OptionSnapshot;
 import com.sbk.optionspricer.risk.PortfolioBacktestOrchestrator;
+import com.sbk.optionspricer.risk.VolatilityRegimeDetector;
 
 import java.nio.file.Path;
 import java.time.Instant;
@@ -28,6 +29,7 @@ public final class UnifiedQuantEngine {
     private final MmapStatePublisher publisher;
     private final OptionChainProvider optionChainProvider;
     private final HistoricalDataManager historicalDataManager;
+    private final VolatilityRegimeDetector regimeDetector;
 
     private double currentSpot = 100.0;
     // Risk comes from the exposure source (the real position tracker); an empty book is flat.
@@ -112,21 +114,26 @@ public final class UnifiedQuantEngine {
     private final java.util.function.IntConsumer exitHandler;
 
     public UnifiedQuantEngine(MmapStatePublisher publisher) {
-        this(publisher, new SyntheticOptionChainProvider(), new HistoricalDataManager(Path.of("data", "historical")), System::exit);
+        this(publisher, new SyntheticOptionChainProvider(), new HistoricalDataManager(Path.of("data", "historical")), new VolatilityRegimeDetector(), System::exit);
     }
 
     public UnifiedQuantEngine(MmapStatePublisher publisher, OptionChainProvider optionChainProvider) {
-        this(publisher, optionChainProvider, new HistoricalDataManager(Path.of("data", "historical")), System::exit);
+        this(publisher, optionChainProvider, new HistoricalDataManager(Path.of("data", "historical")), new VolatilityRegimeDetector(), System::exit);
     }
 
     public UnifiedQuantEngine(MmapStatePublisher publisher, java.util.function.IntConsumer exitHandler) {
-        this(publisher, new SyntheticOptionChainProvider(), new HistoricalDataManager(Path.of("data", "historical")), exitHandler);
+        this(publisher, new SyntheticOptionChainProvider(), new HistoricalDataManager(Path.of("data", "historical")), new VolatilityRegimeDetector(), exitHandler);
     }
 
     public UnifiedQuantEngine(MmapStatePublisher publisher, OptionChainProvider optionChainProvider, HistoricalDataManager historicalDataManager, java.util.function.IntConsumer exitHandler) {
+        this(publisher, optionChainProvider, historicalDataManager, new VolatilityRegimeDetector(), exitHandler);
+    }
+
+    public UnifiedQuantEngine(MmapStatePublisher publisher, OptionChainProvider optionChainProvider, HistoricalDataManager historicalDataManager, VolatilityRegimeDetector regimeDetector, java.util.function.IntConsumer exitHandler) {
         this.publisher = publisher;
         this.optionChainProvider = optionChainProvider;
         this.historicalDataManager = historicalDataManager;
+        this.regimeDetector = regimeDetector;
         this.exitHandler = exitHandler;
     }
 
