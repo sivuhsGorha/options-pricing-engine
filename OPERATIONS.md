@@ -1,8 +1,26 @@
 # Operations Guide
 
-This guide covers operational aspects of Blackthorn Sterling, including Linux deployment, monitoring, auto-hedging, and dynamic risk limits.
+This guide covers operational aspects of Blackthorn Sterling, including Linux deployment, AWS deployment, monitoring, auto-hedging, and dynamic risk limits.
 
-## Linux Deployment
+## Platform Selection
+
+### Linux VPS (DigitalOcean, Hetzner, Linode)
+- **Cost**: $20-50/month
+- **Pros**: Simple, predictable pricing, easy to manage
+- **Cons**: Manual disaster recovery, less sophisticated monitoring
+- **Best for**: Development, paper trading, cost-conscious deployment
+
+### AWS
+- **Cost**: $50-75/month (plus optional CloudWatch costs)
+- **Pros**: Enterprise-grade reliability, managed services, 99.99% SLA
+- **Cons**: Higher cost, more complex, steeper learning curve
+- **Best for**: Production, enterprise requirements, multi-region deployment
+
+**Recommendation**: Start with a VPS. Migrate to AWS only if you need enterprise features.
+
+---
+
+## Linux VPS Deployment
 
 ### Quick Start
 
@@ -45,6 +63,125 @@ sudo systemctl enable blackthorn-sterling
 ```
 
 See `infra/linux/README.md` for detailed deployment instructions, monitoring setup, and SSL/TLS configuration.
+
+---
+
+## AWS Deployment
+
+### Quick Start with CloudFormation
+
+```bash
+# Set your AWS region
+export AWS_REGION=us-east-1
+
+# Deploy the stack
+aws cloudformation create-stack \
+  --stack-name blackthorn-sterling \
+  --template-body file://infra/aws/cloudformation.yaml \
+  --parameters \
+    ParameterKey=InstanceType,ParameterValue=t3.large \
+    ParameterKey=KeyName,ParameterValue=your-key-name \
+    ParameterKey=VpcId,ParameterValue=vpc-xxxxxxxx \
+    ParameterKey=SubnetId,ParameterValue=subnet-xxxxxxxx \
+    ParameterKey=BackupBucketName,ParameterValue=blackthorn-sterling-backups \
+  --capabilities CAPABILITY_IAM \
+  --region $AWS_REGION
+```
+
+### Manual EC2 Deployment
+
+See `infra/aws/DEPLOYMENT.md` for:
+- Manual EC2 deployment steps
+- IAM role configuration
+- S3 backup bucket setup
+- CloudWatch metrics integration
+- Cost optimization tips
+
+### AWS-Specific Features
+
+**CloudWatch Metrics**:
+- Automatically enabled when deployed via CloudFormation
+- CPU, memory, and custom metrics
+- Built-in alerts (CPU > 80% alarm)
+- Dashboard: `https://<region>.console.aws.amazon.com/cloudwatch/home#dashboards:name=Blackthorn%20Sterling`
+
+**S3 Backups**:
+- Automatic daily backups to S3
+- Lifecycle policy for retention (default 30 days)
+- Server-side encryption enabled
+
+**Instance Metadata**:
+- Auto-detects AWS region
+- Auto-detects instance ID
+- Configures IAM role for S3 access
+
+---
+
+## Monitoring
+
+### Prometheus (VPS)
+
+```bash
+# Install Prometheus
+wget https://github.com/prometheus/prometheus/releases/download/v2.45.0/prometheus-2.45.0.linux-amd64.tar.gz
+tar xvfz prometheus-2.45.0.linux-amd64.tar.gz
+sudo mv prometheus-2.45.0.linux-amd64 /opt/prometheus
+sudo useradd --no-create-home --shell /bin/false prometheus
+sudo chown -R prometheus:prometheus /opt/prometheus
+
+# Copy configuration
+sudo cp /opt/blackthorn-sterling/infra/linux/monitoring/prometheus.yml /etc/prometheus/
+sudo cp /opt/blackthorn-sterling/infra/linux/monitoring/alert-rules.yml /etc/prometheus/rules/
+sudo chown prometheus:prometheus /etc/prometheus/prometheus.yml
+sudo chown prometheus:prometheus /etc/prometheus/rules/alert-rules.yml
+
+# Create systemd service
+sudo tee /etc/systemd/system/prometheus.service > /dev/null <<EOF
+[Unit]
+Description=Prometheus
+After=network.target
+
+[Service]
+User=prometheus
+Group=prometheus
+Type=simple
+ExecStart=/opt/prometheus/prometheus \
+    --config.file /etc/prometheus/prometheus.yml \
+    --storage.tsdb.path /opt/prometheus/data
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable prometheus
+sudo systemctl start prometheus
+```
+
+### Grafana
+
+```bash
+# Install Grafana
+sudo apt-get install -y apt-transport-https
+sudo wget -q -O /usr/share/keyrings/grafana.key https://packages.grafana.com/gpg.key
+echo "deb [signed-by=/usr/share/keyrings/grafana.key] https://packages.grafana.com/debian stable main" | sudo tee -a /etc/apt/sources.list.d/grafana.list
+sudo apt-get update
+sudo apt-get install -y grafana
+
+sudo systemctl enable grafana-server
+sudo systemctl start grafana-server
+```
+
+Access Grafana at `http://your-server:3000` (default: admin/admin)
+
+### CloudWatch (AWS)
+
+Automatically configured when deployed via CloudFormation. Metrics include:
+- CPU utilization
+- Memory utilization
+- Custom application metrics (when `METRICS_CLOUDWATCH_ENABLED=true`)
+
+---
 
 ## Auto-Hedging
 

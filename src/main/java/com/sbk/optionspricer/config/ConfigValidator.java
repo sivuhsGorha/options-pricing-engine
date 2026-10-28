@@ -27,6 +27,18 @@ public final class ConfigValidator {
             "execution", java.util.Set.of("symbol", "transport", "fill_wait_seconds", "slippage_bps", "contract_multiplier", "limit_cushion_bps"));
     /** Renamed risk keys: they have their own, more helpful message below. */
     private static final java.util.Set<String> LEGACY_RISK_KEYS = java.util.Set.of("delta_limit", "gamma_limit", "vega_limit");
+    /** Environment variables that are recognized (for validation, not for key checking in fileKeys). */
+    private static final java.util.Set<String> KNOWN_ENV_VARS = java.util.Set.of(
+            "FINNHUB_KEY", "POLYGON_API_KEY", "ALPHA_VANTAGE_KEY", "MARKETSTACK_KEY",
+            "API_SECRET", "OPERATOR_PASSWORD", "ALPACA_KEY_ID", "ALPACA_SECRET",
+            "ALLOW_SIMULATED_DATA", "PORT", "BIND_ADDRESS", "TRUSTED_PROXIES",
+            "COOKIE_SECURE", "HTTP_REQUEST_TIMEOUT_SECONDS", "ALLOWED_ORIGIN",
+            "MMAP_STATE_FILE", "DATA_DIR", "NTFY_TOPIC", "ALERT_WEBHOOK_URL",
+            "LOG_FORMAT", "HEARTBEAT_URL", "HEARTBEAT_INTERVAL_SECONDS",
+            "HEARTBEAT_STALE_MULTIPLIER", "HEARTBEAT_PING_SECONDS",
+            "TLS_KEYSTORE", "TLS_KEYSTORE_PASSWORD", "STALE_LIMITS_SECONDS",
+            "AWS_REGION", "S3_BUCKET", "METRICS_CLOUDWATCH_ENABLED", "METRICS_CLOUDWATCH_NAMESPACE"
+    );
 
     private static void unknownKeys(ConfigManager config, List<String> errors) {
         Map<String, java.util.Set<String>> fileKeys = config.fileKeys();

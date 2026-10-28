@@ -3,6 +3,7 @@ set -euo pipefail
 
 # Blackthorn Sterling Linux Deployment Script
 # Deploys the engine to a Linux server with systemd, monitoring, and cloud backups
+# AWS-aware: automatically detects EC2 and configures CloudWatch metrics
 
 REPO_URL="https://github.com/sivuhsGorha/options-pricing-engine.git"
 INSTALL_DIR="/opt/blackthorn-sterling"
@@ -12,9 +13,26 @@ BACKUP_DIR="/opt/blackthorn-sterling/backups"
 SERVICE_NAME="blackthorn-sterling"
 USERNAME="blackthorn"
 
+# Detect if running on AWS
+detect_aws() {
+    if curl -s --connect-timeout 1 http://169.254.169.254/latest/meta-data/instance-id > /dev/null 2>&1; then
+        echo "true"
+    else
+        echo "false"
+    fi
+}
+
+IS_AWS=$(detect_aws)
+
 echo "========================================================================="
 echo "     BLACKTHORN STERLING LINUX DEPLOYMENT"
 echo "========================================================================="
+if [ "$IS_AWS" = "true" ]; then
+    echo "AWS environment detected - will configure CloudWatch metrics"
+else
+    echo "Non-AWS environment detected - using Prometheus monitoring"
+fi
+echo ""
 
 # Check if running as root
 if [ "$EUID" -ne 0 ]; then
@@ -70,6 +88,25 @@ if [ ! -f "$INSTALL_DIR/.env" ]; then
     echo "Created .env from template - EDIT THIS FILE WITH YOUR SECRETS"
 fi
 
+# AWS-specific configuration
+if [ "$IS_AWS" = "true" ]; then
+    echo "[5/7] Configuring AWS-specific settings..."
+    
+    # Get AWS region from instance metadata
+    AWS_REGION=$(curl -s http://169.254.169.254/latest/meta-data/placement/region 2>/dev/null || echo "us-east-1")
+    
+    # Add AWS settings to .env
+    {
+        echo ""
+        echo "# AWS-specific settings"
+        echo "AWS_REGION=$AWS_REGION"
+        echo "METRICS_CLOUDWATCH_ENABLED=true"
+        echo "METRICS_CLOUDWATCH_NAMESPACE=BlackthornSterling"
+    } >> "$INSTALL_DIR/.env"
+    
+    echo "Added AWS configuration to .env (region: $AWS_REGION)"
+fi
+
 # Install systemd service
 echo "[6/7] Installing systemd service..."
 cp "$INSTALL_DIR/infra/linux/blackthorn-sterling.service" "/etc/systemd/system/$SERVICE_NAME.service"
@@ -92,6 +129,13 @@ echo "3. Start the service: sudo systemctl start $SERVICE_NAME"
 echo "4. Check status: sudo systemctl status $SERVICE_NAME"
 echo "5. View logs: sudo journalctl -u $SERVICE_NAME -f"
 echo ""
+if [ "$IS_AWS" = "true" ]; then
+    echo "AWS deployment detected:"
+    echo "- CloudWatch metrics enabled (see AWS CloudWatch console)"
+    echo "- AWS region: $AWS_REGION"
+    echo "- Instance ID: $(curl -s http://169.254.169.254/latest/meta-data/instance-id)"
+    echo ""
+fi
 echo "Data directory: $DATA_DIR"
 echo "Log directory: $LOG_DIR"
 echo "Backup directory: $BACKUP_DIR"

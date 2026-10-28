@@ -1,0 +1,271 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Blackthorn Sterling Options Pricing Engine - AWS Infrastructure'
+
+Parameters:
+  InstanceType:
+    Type: String
+    Default: t3.large
+    Description: EC2 instance type
+    AllowedValues:
+      - t3.medium
+      - t3.large
+      - t3.xlarge
+      - m5.large
+      - m5.xlarge
+
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: SSH key pair name for EC2 access
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID for the instance
+
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Subnet ID for the instance
+
+  AllowSSHFrom:
+    Type: String
+    Default: 0.0.0.0/0
+    Description: CIDR block allowed to SSH into the instance
+
+  AllowHTTPFrom:
+    Type: String
+    Default: 0.0.0.0/0
+    Description: CIDR block allowed to access HTTP dashboard
+
+  BackupBucketName:
+    Type: String
+    Default: blackthorn-sterling-backups
+    Description: S3 bucket name for backups
+
+  RetentionDays:
+    Type: Number
+    Default: 30
+    Description: Number of days to retain backups
+
+Resources:
+  # Security Group for EC2 instance
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Blackthorn Sterling engine
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref AllowSSHFrom
+          Description: SSH access
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: !Ref AllowHTTPFrom
+          Description: Dashboard HTTP
+        - IpProtocol: tcp
+          FromPort: 8081
+          ToPort: 8081
+          CidrIp: !Ref AllowHTTPFrom
+          Description: WebSocket
+      Tags:
+        - Key: Name
+          Value: Blackthorn Sterling SG
+
+  # IAM Role for EC2 instance
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: S3BackupAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:ListBucket
+                  - s3:DeleteObject
+                Resource:
+                  - !Sub 'arn:aws:s3:::${BackupBucketName}/*'
+                  - !Sub 'arn:aws:s3:::${BackupBucketName}'
+      Tags:
+        - Key: Name
+          Value: Blackthorn Sterling Role
+
+  # Instance Profile
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref InstanceRole
+
+  # S3 Bucket for backups
+  BackupBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref BackupBucketName
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldBackups
+            Status: Enabled
+            ExpirationInDays: !Ref RetentionDays
+            NoncurrentVersionExpirationInDays: !Ref RetentionDays
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Name
+          Value: Blackthorn Sterling Backups
+
+  # EC2 Instance
+  EngineInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !FindInMap [RegionMap, !Ref 'AWS::Region', AMI]
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      SubnetId: !Ref SubnetId
+      SecurityGroupIds:
+        - !Ref SecurityGroup
+      IamInstanceProfile: !Ref InstanceProfile
+      UserData: !Base64
+        Fn::Sub: |
+          #!/bin/bash
+          set -e
+          
+          # Install Docker
+          apt-get update
+          apt-get install -y docker.io docker-compose git curl
+          systemctl enable docker
+          systemctl start docker
+          
+          # Clone repository
+          cd /opt
+          git clone https://github.com/sivuhsGorha/options-pricing-engine.git
+          cd options-pricing-engine
+          
+          # Run deployment script
+          ./infra/linux/deploy.sh
+          
+          # Configure AWS-specific settings
+          echo "AWS_REGION=${AWS::Region}" >> /opt/blackthorn-sterling/.env
+          echo "S3_BUCKET=${BackupBucketName}" >> /opt/blackthorn-sterling/.env
+          
+          # Start service
+          systemctl start blackthorn-sterling
+      Tags:
+        - Key: Name
+          Value: Blackthorn Sterling Engine
+        - Key: Environment
+          Value: Production
+
+  # CloudWatch Dashboard
+  Dashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: Blackthorn Sterling
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  ["AWS/EC2", "CPUUtilization", "InstanceId", "${EngineInstance}"]
+                ],
+                "period": 300,
+                "stat": "Average",
+                "region": "${AWS::Region}",
+                "title": "CPU Utilization"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  ["AWS/EC2", "MemoryUtilization", "InstanceId", "${EngineInstance}"]
+                ],
+                "period": 300,
+                "stat": "Average",
+                "region": "${AWS::Region}",
+                "title": "Memory Utilization"
+              }
+            }
+          ]
+        }
+
+  # CloudWatch Alarm for CPU
+  CPUAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Alert if CPU > 80% for 5 minutes
+      AlarmName: Blackthorn Sterling High CPU
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 3
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: InstanceId
+          Value: !Ref EngineInstance
+
+Mappings:
+  RegionMap:
+    us-east-1:
+      AMI: ami-0c7217cdde317cfec
+    us-east-2:
+      AMI: ami-058d70b2c1a908ae9
+    us-west-1:
+      AMI: ami-0b8deaee7da54d4ab
+    us-west-2:
+      AMI: ami-08a4248e7b6280472
+    eu-west-1:
+      AMI: ami-01478a983501b5b38
+    eu-central-1:
+      AMI: ami-085e541d3b4f717a6
+
+Outputs:
+  InstanceId:
+    Description: EC2 Instance ID
+    Value: !Ref EngineInstance
+    Export:
+      Name: !Sub '${AWS::StackName}-InstanceId'
+
+  PublicIP:
+    Description: Public IP address
+    Value: !GetAtt EngineInstance.PublicIp
+
+  DashboardURL:
+    Description: CloudWatch Dashboard URL
+    Value: !Sub 'https://${AWS::Region}.console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=Blackthorn%20Sterling'
+
+  BackupBucket:
+    Description: S3 bucket for backups
+    Value: !Ref BackupBucket

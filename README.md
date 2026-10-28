@@ -151,7 +151,7 @@ the Java build with 883 tests and the coverage gate, the Python tests, and the f
 ## Documentation
 
 - [SYSTEM.md](SYSTEM.md): what the system does today, what is real, current state, known limits, change log
-- [OPERATIONS.md](OPERATIONS.md): Linux deployment, monitoring, auto-hedging, dynamic risk limits, cloud backups
+- [OPERATIONS.md](OPERATIONS.md): Linux deployment, AWS deployment, monitoring, auto-hedging, dynamic risk limits, cloud backups
 - [EXECUTION.md](EXECUTION.md): the order path, paper fills, the API, and what the gateway simulations are
 - [RISK.md](RISK.md): every gate an order passes, Greeks, alerts and halt, VaR/ES, the margin approximation
 - [DATA.md](DATA.md): spot providers and statuses, option chains, rates, dividends, known placeholders
